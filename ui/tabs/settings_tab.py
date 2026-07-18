@@ -1,0 +1,208 @@
+"""Settings tab — Accounts, Lookups, Security, Preferences. Shared table style."""
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                              QPushButton, QTableWidget, QTableWidgetItem,
+                              QTabWidget, QLineEdit, QComboBox, QDoubleSpinBox,
+                              QFormLayout, QDialog, QDialogButtonBox, QMessageBox,
+                              QSpinBox, QCheckBox)
+from PyQt5.QtCore import Qt
+from ui.theme import C
+from ui.sidebar import fmt_money
+from ui.widgets.searchable_combo import SearchableCombo
+from ui.widgets.metric_card import mk_table
+
+
+class SettingsTab(QWidget):
+    def __init__(self, db, repos, services, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.acct = repos["accounts"]
+        self.lu = repos["lookups"]
+        self.sec = services["security"]
+        self._build()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(40, 24, 40, 24)
+        lay.setSpacing(16)
+        h = QLabel("Settings")
+        h.setStyleSheet(f"font-size:24px;font-weight:800;")
+        lay.addWidget(h)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._accounts_tab(), "Accounts")
+        self.tabs.addTab(self._lookups_tab(), "Categories & Lookups")
+        self.tabs.addTab(self._security_tab(), "Security")
+        self.tabs.addTab(self._prefs_tab(), "Preferences")
+        lay.addWidget(self.tabs)
+
+    def _accounts_tab(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        ab = QPushButton("+ Add Account"); ab.setObjectName("primary"); ab.clicked.connect(self._add_account)
+        l.addWidget(ab)
+        self.acct_table = mk_table(["Name", "Label", "Type", "Opening Balance", "Active"])
+        l.addWidget(self.acct_table)
+        return w
+
+    def _lookups_tab(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        t = QTabWidget()
+        t.addTab(self._categories_tab(), "Categories")
+        t.addTab(self._methods_tab(), "Payment Methods")
+        t.addTab(self._tags_tab(), "Note Tags")
+        l.addWidget(t)
+        return w
+
+    def _categories_tab(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        ab = QPushButton("+ Add Category"); ab.clicked.connect(self._add_category); l.addWidget(ab)
+        self.cat_table = mk_table(["Name", "PF Category", "Tax Deductible", "Color"])
+        l.addWidget(self.cat_table)
+        return w
+
+    def _methods_tab(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        self.method_table = mk_table(["Name", "Active"])
+        l.addWidget(self.method_table)
+        return w
+
+    def _tags_tab(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        ab = QPushButton("+ Add Tag"); ab.clicked.connect(self._add_tag); l.addWidget(ab)
+        self.tag_table = mk_table(["Name", "Active"])
+        l.addWidget(self.tag_table)
+        return w
+
+    def _security_tab(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
+        grp = QPushButton("Main Login")
+        grp.setStyleSheet(f"font-size:16px;font-weight:700;color:{C['accent']};background:transparent;border:none;text-align:left;")
+        l.addWidget(grp)
+        row1 = QHBoxLayout()
+        cpw = QPushButton("Change Password"); cpw.clicked.connect(self._change_pw); row1.addWidget(cpw)
+        row1.addStretch()
+        self.totp_lbl = QLabel(); row1.addWidget(self.totp_lbl)
+        t2fa = QPushButton("Toggle 2FA"); t2fa.clicked.connect(self._toggle_2fa); row1.addWidget(t2fa)
+        l.addLayout(row1)
+        l.addStretch()
+        return w
+
+    def _prefs_tab(self):
+        w = QWidget(); l = QFormLayout(w)
+        l.addRow("Theme:", QLabel("Light (locked)"))
+        l.addRow("Currency:", QLabel("₹ Indian"))
+        bb = QPushButton("Backup Now")
+        bb.clicked.connect(lambda: (self.db.backup(), QMessageBox.information(self, "Done", "Backup created.")))
+        l.addRow("Backup:", bb)
+        return w
+
+    def _add_account(self):
+        d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
+        n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
+        lb = QLineEdit(); lb.setPlaceholderText("4-char label"); lb.setMaxLength(4); f.addRow("Label:", lb)
+        t = QComboBox(); t.addItems(["CURRENT", "CASH"]); f.addRow("Type:", t)
+        ob = QDoubleSpinBox(); ob.setPrefix("₹ "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
+        if d.exec_() == QDialog.Accepted and n.text().strip():
+            try:
+                self.acct.create(display_name=n.text().strip(), short_label=(lb.text() or n.text()[:4]).upper(),
+                                 account_type=t.currentText(), opening_balance=ob.value(), color_hex="#4F46E5")
+                self.refresh()
+            except ValueError as e:
+                QMessageBox.warning(self, "Duplicate", str(e))
+
+    def _add_category(self):
+        name, ok = QInputDialog_getText(self, "New Category", "Name:")
+        if ok and name:
+            pf, ok2 = QInputDialog_getItem(self, "PF Category", "Type:",
+                                            ["commitment", "consumption", "growth", "safety", "nc"])
+            if ok2:
+                try:
+                    self.lu.add_category(name.lower().replace(" ", "_"), name, "#4F46E5", pf)
+                    self.refresh()
+                except ValueError as e:
+                    QMessageBox.warning(self, "Duplicate", str(e))
+
+    def _add_tag(self):
+        name, ok = QInputDialog_getText(self, "New Tag", "Tag name:")
+        if ok and name:
+            try:
+                self.lu.add_tag(name.lower(), name)
+                self.refresh()
+            except ValueError as e:
+                QMessageBox.warning(self, "Duplicate", str(e))
+
+    def _change_pw(self):
+        pw, ok = QInputDialog_getText(self, "Change Password", "New password:", echo=QLineEdit.Password)
+        if ok and pw:
+            pw2, ok2 = QInputDialog_getText(self, "Confirm", "Confirm:", echo=QLineEdit.Password)
+            if ok2 and pw == pw2:
+                self.sec.set_pw(pw); QMessageBox.information(self, "Done", "Password changed.")
+            else:
+                QMessageBox.warning(self, "Error", "Passwords don't match.")
+
+    def _toggle_2fa(self):
+        if self.sec.is_2fa():
+            self.sec.repo.set_totp(None, False)
+            QMessageBox.information(self, "2FA", "2FA disabled.")
+        else:
+            if not HAS_TOTP:
+                QMessageBox.warning(self, "Missing", "pip install pyotp qrcode"); return
+            secret = self.sec.setup_2fa()
+            if secret:
+                QMessageBox.information(self, "2FA Enabled", f"Secret: {secret}\nAdd to your authenticator app.")
+        self.refresh()
+
+    def refresh(self):
+        accts = self.acct.list_all()
+        self.acct_table.setRowCount(len(accts))
+        for i, a in enumerate(accts):
+            self.acct_table.setItem(i, 0, QTableWidgetItem(a["display_name"]))
+            self.acct_table.setItem(i, 1, QTableWidgetItem(a["short_label"]))
+            self.acct_table.setItem(i, 2, QTableWidgetItem(a["account_type"]))
+            self.acct_table.setItem(i, 3, QTableWidgetItem(fmt_money(a["opening_balance"])))
+            self.acct_table.setItem(i, 4, QTableWidgetItem("✓" if a["is_active"] else "✗"))
+
+        cats = self.lu.list_categories()
+        self.cat_table.setRowCount(len(cats))
+        for i, c in enumerate(cats):
+            self.cat_table.setItem(i, 0, QTableWidgetItem(c["display_name"]))
+            self.cat_table.setItem(i, 1, QTableWidgetItem(c.get("default_pf_category") or "—"))
+            self.cat_table.setItem(i, 2, QTableWidgetItem("Yes" if c.get("tax_deductible") else "No"))
+            cl = QLabel("●"); cl.setStyleSheet(f"color:{c.get('color_hex') or '#000'};font-size:18px;")
+            self.cat_table.setCellWidget(i, 3, cl)
+
+        methods = self.lu.list_methods()
+        self.method_table.setRowCount(len(methods))
+        for i, m in enumerate(methods):
+            self.method_table.setItem(i, 0, QTableWidgetItem(m["display_name"]))
+            self.method_table.setItem(i, 1, QTableWidgetItem("✓" if m["is_active"] else "✗"))
+
+        tags = self.lu.list_tags()
+        self.tag_table.setRowCount(len(tags))
+        for i, t in enumerate(tags):
+            self.tag_table.setItem(i, 0, QTableWidgetItem(t["display_name"]))
+            self.tag_table.setItem(i, 1, QTableWidgetItem("✓" if t["is_active"] else "✗"))
+
+        self.totp_lbl.setText("✓ 2FA Enabled" if self.sec.is_2fa() else "✗ 2FA Disabled")
+        self.totp_lbl.setStyleSheet(f"color:{C['green'] if self.sec.is_2fa() else C['text3']};font-weight:600;")
+
+
+def QInputDialog_getText(parent, title, label, echo=QLineEdit.Normal):
+    from PyQt5.QtWidgets import QInputDialog
+    return QInputDialog.getText(parent, title, label, echo)
+
+def QInputDialog_getItem(parent, title, label, items, current=0):
+    from PyQt5.QtWidgets import QInputDialog
+    return QInputDialog.getItem(parent, title, label, items, current, False)
+
+try:
+    from PyQt5.QtWidgets import QInputDialog
+except ImportError:
+    pass
+
+try:
+    import pyotp
+    HAS_TOTP = True
+except ImportError:
+    HAS_TOTP = False
