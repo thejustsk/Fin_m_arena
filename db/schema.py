@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS cards (
     expiry_month    INTEGER DEFAULT 12,
     expiry_year     INTEGER DEFAULT 2028,
     statement_date  TEXT DEFAULT '',
-    billing_day     INTEGER DEFAULT 1,
+    due_date        TEXT DEFAULT '',
     grace_days      INTEGER DEFAULT 20,
     annual_fee      REAL DEFAULT 0,
     card_color_1    TEXT DEFAULT '#1a1a2e',
@@ -195,6 +195,10 @@ CREATE TABLE IF NOT EXISTS recurring_rules (
     tx_type TEXT NOT NULL, amount REAL NOT NULL, category TEXT, pf_category TEXT,
     neednwant INTEGER DEFAULT 0, description TEXT, frequency TEXT NOT NULL,
     next_run_date TEXT NOT NULL, is_active INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS preferences (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(tx_date);
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
@@ -255,7 +259,9 @@ def run_migrations(db):
         c.execute("INSERT OR IGNORE INTO note_tags VALUES(?,?,1)", (t.lower(), t))
 
     # 7. Safe ALTER TABLE — add columns if missing (existing DBs)
-    _safe_cols = [
+        c.execute("INSERT OR IGNORE INTO preferences VALUES('min_txn_alert', '499')")
+
+        _safe_cols = [
         ("cards", "credit_limit", "REAL DEFAULT 0"),
         ("cards", "statement_day", "INTEGER DEFAULT 1"),
         ("cards", "joining_fee", "REAL DEFAULT 0"),
@@ -266,6 +272,7 @@ def run_migrations(db):
         ("cards", "card_brand", "TEXT DEFAULT ''"),
         ("cards", "card_number", "TEXT"),
         ("cards", "statement_date", "TEXT DEFAULT ''"),
+        ("cards", "due_date", "TEXT DEFAULT ''"),
     ]
     for table, col, typedef in _safe_cols:
         try:

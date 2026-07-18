@@ -4,16 +4,16 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QFormLayout, QLineEdit, QComboBox, QSpinBox,
                               QDoubleSpinBox, QMessageBox, QSizePolicy,
                               QGraphicsView, QGraphicsScene, QGraphicsObject,
-                              QScrollArea, QInputDialog, QGridLayout, QSplitter)
+                              QScrollArea, QGridLayout, QSplitter, QDateEdit)
 from PyQt5.QtCore import (Qt, QRectF, QPointF, QTimer, QPropertyAnimation,
-                           QEasingCurve, pyqtProperty, pyqtSignal, QSize)
+                           QEasingCurve, pyqtProperty, pyqtSignal, QSize, QDate)
 from PyQt5.QtGui import (QPainter, QColor, QLinearGradient, QFont,
                           QPainterPath, QPen, QTransform)
 from datetime import date, datetime, timedelta
 from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.tabs.database_tab import _tx_card, _day_header, _month_header
+from ui.tabs.database_tab import _tx_card
 import uuid
 
 CARD_W = 320; CARD_H = 200; CARD_RADIUS = 16; GAP = 40
@@ -35,6 +35,7 @@ PAYMENT_METHODS = [
     "CANARA AI", "SIB MIRROR", "OTHER",
 ]
 
+
 def smoothstep(t):
     t = max(0.0, min(1.0, t)); return t * t * (3 - 2 * t)
 
@@ -45,8 +46,56 @@ def _tab_btn_inactive():
     return f"QPushButton{{background:{C['surface']};color:{C['text2']};border:1px solid {C['border']};border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;}}QPushButton:hover{{border-color:{C['accent']};color:{C['accent']};}}"
 
 
+def _parse_stmt_day(stmt_str):
+    try:
+        day_str = "".join(c for c in stmt_str if c.isdigit())
+        if day_str: return int(day_str)
+    except: pass
+    return None
+
+
+def _calc_due(stmt_str, grace_days):
+    day = _parse_stmt_day(stmt_str)
+    if not day: return ""
+    today = date.today()
+    stmt = today.replace(day=min(day, 28))
+    if stmt <= today:
+        if today.month == 12: stmt = stmt.replace(year=today.year + 1, month=1)
+        else: stmt = stmt.replace(month=today.month + 1)
+    return (stmt + timedelta(days=grace_days)).isoformat()
+
+
+def _get_stmt_dates(stmt_str, num=8):
+    """Get last N statement dates going backwards from today."""
+    day = _parse_stmt_day(stmt_str)
+    if not day: return []
+    today = date.today()
+    dates = []
+    cur = today.replace(day=min(day, 28))
+    if cur > today:
+        cur = (cur.replace(day=1) - timedelta(days=1)).replace(day=min(day, 28))
+    for _ in range(num):
+        dates.append(cur)
+        prev = (cur.replace(day=1) - timedelta(days=1))
+        cur = prev.replace(day=min(day, 28))
+    dates.reverse()
+    return dates
+
+
+def _cycle_from_stmt_dates(stmt_dates):
+    """Build cycles: (cycle_start, cycle_end, stmt_date) from statement dates.
+    Cycle = day_after_stmt(N-1) → stmt(N)
+    Only returns cycles that have stmt_dates."""
+    cycles = []
+    for i in range(1, len(stmt_dates)):
+        cycle_start = stmt_dates[i - 1] + timedelta(days=1)
+        cycle_end = stmt_dates[i]
+        cycles.append((cycle_start, cycle_end, stmt_dates[i]))
+    return cycles
+
+
 # ═══════════════════════════════════════════════
-# CARD ITEM
+# CARD ITEM (carousel)
 # ═══════════════════════════════════════════════
 
 class CardItem(QGraphicsObject):
@@ -202,7 +251,7 @@ class CarouselView(QGraphicsView):
 
 
 # ═══════════════════════════════════════════════
-# PREVIEW WIDGETS (Add Card dialog)
+# PREVIEW WIDGETS
 # ═══════════════════════════════════════════════
 
 class CardPreviewWidget(QWidget):
@@ -271,8 +320,7 @@ class AddCardDialog(QDialog):
         er=QHBoxLayout(); self.expiry_month=QSpinBox(); self.expiry_month.setRange(1,12); self.expiry_month.setValue(12); self.expiry_year=QSpinBox(); self.expiry_year.setRange(2024,2040); self.expiry_year.setValue(2028)
         self.expiry_month.valueChanged.connect(self._upd); self.expiry_year.valueChanged.connect(self._upd)
         er.addWidget(self.expiry_month); er.addWidget(QLabel("/")); er.addWidget(self.expiry_year); er.addStretch(); form.addRow("Expiry",er)
-        self.statement_date=QLineEdit(); self.statement_date.setPlaceholderText("e.g. 20th"); form.addRow("Statement Date",self.statement_date)
-        self.billing_day=QSpinBox(); self.billing_day.setRange(1,28); self.billing_day.setValue(1); form.addRow("Billing Day",self.billing_day)
+        self.statement_date=QLineEdit(); self.statement_date.setPlaceholderText("e.g. 6th"); form.addRow("Statement Date",self.statement_date)
         self.grace_days=QSpinBox(); self.grace_days.setRange(0,55); self.grace_days.setValue(20); form.addRow("Grace Period (days)",self.grace_days)
         self.annual_fee=QDoubleSpinBox(); self.annual_fee.setRange(0,99999); self.annual_fee.setPrefix("₹ "); self.annual_fee.setDecimals(0); form.addRow("Annual Fee",self.annual_fee)
         self.color_idx=QComboBox()
@@ -301,110 +349,142 @@ class AddCardDialog(QDialog):
             aid=str(uuid.uuid4())
             self.acct.create(account_id=aid,display_name=name,short_label=name[:8].upper(),account_type="CREDIT_CARD",credit_limit=limit,opening_balance=0,color_hex="#7C3AED")
         c1,c2=DEFAULT_GRADIENTS[self.color_idx.currentIndex()]
-        self.cr.create(account_id=aid,card_name=name,issuer_bank=bank,card_brand=self.brand.text().strip(),card_network=self.network.currentText(),card_class=self.card_class.text().strip(),last_four=self.last_four.text().strip() or "0000",cardholder_name=self.cardholder.text().strip() or name.upper(),expiry_month=self.expiry_month.value(),expiry_year=self.expiry_year.value(),statement_date=self.statement_date.text().strip(),billing_day=self.billing_day.value(),grace_days=self.grace_days.value(),annual_fee=self.annual_fee.value(),card_color_1=c1,card_color_2=c2)
+        due = _calc_due(self.statement_date.text().strip(), self.grace_days.value())
+        self.cr.create(account_id=aid,card_name=name,issuer_bank=bank,card_brand=self.brand.text().strip(),card_network=self.network.currentText(),card_class=self.card_class.text().strip(),last_four=self.last_four.text().strip() or "0000",cardholder_name=self.cardholder.text().strip() or name.upper(),expiry_month=self.expiry_month.value(),expiry_year=self.expiry_year.value(),statement_date=self.statement_date.text().strip(),due_date=due,grace_days=self.grace_days.value(),annual_fee=self.annual_fee.value(),card_color_1=c1,card_color_2=c2)
         self.card_added.emit(); self.accept()
 
 
 # ═══════════════════════════════════════════════
-# SETTLEMENT POPUP DIALOG (fix 6: custom value)
-# ═══════════════════════════════════════════════
-
-class SettlementDialog(QDialog):
-    settled = pyqtSignal()
-    def __init__(self, card, cards_repo, tx_repo, accounts_repo, bal_svc, parent=None):
-        super().__init__(parent)
-        self.card=card; self.cr=cards_repo; self.tx_repo=tx_repo; self.acct=accounts_repo; self.bal=bal_svc
-        self.setWindowTitle("Settle Card Bill"); self.setMinimumWidth(480)
-        self.setStyleSheet(f"QDialog{{background:{C['bg']};}}"); self._build()
-    def _build(self):
-        lay=QVBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(14)
-        lay.addWidget(QLabel(f"💰  Settle — {self.card.get('card_name','Card')}"))
-        limit=self.card.get("credit_limit",0) or self.card.get("acct_limit",0)
-        balance=abs(self.bal.get_balance(self.card["account_id"]))
-        cycle=self.cr.latest_cycle(self.card["account_id"])
-        stmt_due=cycle.get("total_due",0) if cycle else 0
-        min_due=cycle.get("minimum_due",0) if cycle else 0
-        self.settle_opt=QComboBox()
-        self.settle_opt.addItem(f"Current Outstanding — {fmt_money(balance)}",balance)
-        self.settle_opt.addItem(f"Statement Outstanding — {fmt_money(stmt_due)}",stmt_due)
-        self.settle_opt.addItem(f"Minimum Outstanding — {fmt_money(min_due)}",min_due)
-        self.settle_opt.addItem("Custom Amount...", -1)
-        self.settle_opt.setMinimumHeight(36); self.settle_opt.currentIndexChanged.connect(self._on_opt_changed)
-        lay.addWidget(QLabel("Repay Option:")); lay.addWidget(self.settle_opt)
-        # Custom amount (hidden unless "Custom Amount..." selected)
-        self.custom_row = QWidget(); custom_lay = QHBoxLayout(self.custom_row); custom_lay.setContentsMargins(0,0,0,0)
-        custom_lay.addWidget(QLabel("Amount:"))
-        self.custom_amt = QDoubleSpinBox(); self.custom_amt.setRange(0,99999999); self.custom_amt.setPrefix("₹ "); self.custom_amt.setDecimals(0); self.custom_amt.setMinimumHeight(36)
-        custom_lay.addWidget(self.custom_amt, 1)
-        self.custom_row.hide(); lay.addWidget(self.custom_row)
-        lay.addWidget(QLabel("Pay From:"))
-        self.settle_src=QComboBox()
-        for a in self.acct.list_active():
-            if a["account_type"]!="CREDIT_CARD": self.settle_src.addItem(a["display_name"],a["account_id"])
-        self.settle_src.setMinimumHeight(36); lay.addWidget(self.settle_src)
-        lay.addWidget(QLabel("Payment Method:"))
-        self.settle_method=QComboBox(); self.settle_method.addItems(PAYMENT_METHODS); self.settle_method.setMinimumHeight(36); lay.addWidget(self.settle_method)
-        br=QHBoxLayout(); br.addStretch()
-        c=QPushButton("Cancel"); c.clicked.connect(self.reject); br.addWidget(c)
-        rb=QPushButton("  Settle  "); rb.setStyleSheet(f"QPushButton{{background:{C['accent']};color:white;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:700;}}QPushButton:hover{{background:#4338CA;}}")
-        rb.setMinimumHeight(40); rb.setCursor(Qt.PointingHandCursor); rb.clicked.connect(self._repay); br.addWidget(rb)
-        lay.addLayout(br)
-    def _on_opt_changed(self, idx):
-        is_custom = self.settle_opt.currentData() == -1
-        self.custom_row.setVisible(is_custom)
-    def _repay(self):
-        if self.settle_opt.currentData() == -1:
-            amt = self.custom_amt.value()
-        else:
-            amt = self.settle_opt.currentData()
-        src_id=self.settle_src.currentData(); method=self.settle_method.currentText()
-        if not amt or amt<=0: QMessageBox.warning(self,"Invalid","Enter a valid amount."); return
-        if not src_id: QMessageBox.warning(self,"No Source","Select a source account."); return
-        today=date.today().isoformat(); desc=f"Card settlement — {self.card.get('card_name','')}"; gid=str(uuid.uuid4())
-        self.tx_repo.create(tx_date=today,account_id=src_id,pay_method=method,tx_type="DEBIT",amount=amt,description=desc,transaction_kind="TRANSFER",transfer_group_id=gid,category="transfer",pf_category="internal_transfer")
-        self.tx_repo.create(tx_date=today,account_id=self.card["account_id"],pay_method=method,tx_type="CREDIT",amount=amt,description=desc,transaction_kind="TRANSFER",transfer_group_id=gid,category="transfer",pf_category="internal_transfer")
-        self.settled.emit(); QMessageBox.information(self,"Done",f"Settlement of {fmt_money(amt)} recorded."); self.accept()
-
-
-# ═══════════════════════════════════════════════
-# REMINDERS WIDGET (right pan)
+# REMINDERS WIDGET (reads from cards + transactions ONLY)
 # ═══════════════════════════════════════════════
 
 class RemindersWidget(QWidget):
-    def __init__(self, cards_repo, parent=None):
-        super().__init__(parent); self.cr=cards_repo; self.setStyleSheet("background:transparent;")
-        self.lay=QVBoxLayout(self); self.lay.setContentsMargins(0,0,0,0); self.lay.setSpacing(8)
+    def __init__(self, cards_repo, tx_repo=None, bal_svc=None, parent=None):
+        super().__init__(parent); self.cr=cards_repo; self.tx_repo=tx_repo; self.bal=bal_svc
+        self.setStyleSheet("background:transparent;")
+        self.lay=QVBoxLayout(self); self.lay.setContentsMargins(0,0,0,0); self.lay.setSpacing(6)
+
+    def _get_txns(self, aid, d_from, d_to):
+        if not self.tx_repo: return []
+        try: return self.tx_repo.list_filters(account_id=aid, date_from=d_from, date_to=d_to, limit=500)
+        except: return []
+
     def load_reminders(self, cards):
         while self.lay.count():
             itm=self.lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
-        title=QLabel("⏰  Reminders & Due Dates"); title.setStyleSheet(f"color:{C['text']};font-size:14px;font-weight:700;"); self.lay.addWidget(title)
-        today=date.today(); reminders=[]
+
+        title=QLabel("⏰  Reminders"); title.setStyleSheet(f"color:{C['text']};font-size:14px;font-weight:700;")
+        self.lay.addWidget(title)
+        today = date.today(); reminders = []
+
         for card in cards:
-            name=card.get("card_name",card.get("issuer_bank","Card")); bd=card.get("billing_day",1)
-            try:
-                nb=today.replace(day=min(bd,28))
-                if nb<=today:
-                    if today.month==12: nb=nb.replace(year=today.year+1,month=1)
-                    else: nb=nb.replace(month=today.month+1)
-                du=(nb-today).days; col="#4F46E5" if du>5 else "#F59E0B"
-                reminders.append((du,f"📅 {name} — Statement {nb.strftime('%d %b')}",col))
-            except: pass
-            cycle=self.cr.latest_cycle(card["account_id"])
-            if cycle and cycle.get("due_date"):
-                try:
-                    due=date.fromisoformat(cycle["due_date"]); dd=(due-today).days; total=cycle.get("total_due",0)
-                    if dd>=0: col="#EF4444" if dd<=3 else("#F59E0B" if dd<=7 else "#10B981"); reminders.append((dd,f"💰 {name} — Due {due.strftime('%d %b')} ({fmt_money(total)})",col))
-                    else: reminders.append((-1,f"🚨 {name} — OVERDUE {abs(dd)}d ({fmt_money(total)})","#EF4444"))
+            name = card.get("card_name", card.get("issuer_bank", "Card"))
+            aid = card["account_id"]
+            stmt_str = card.get("statement_date", "")
+            grace = card.get("grace_days", 20)
+            due_str = card.get("due_date", "") or ""
+            if not due_str:
+                due_str = _calc_due(stmt_str, grace)
+
+            # Get balance
+            balance = 0
+            if self.bal:
+                try: balance = abs(self.bal.get_balance(aid))
                 except: pass
-        reminders.sort(key=lambda r:r[0])
-        if not reminders: lbl=QLabel("No upcoming reminders."); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.lay.addWidget(lbl)
+
+            # Calculate cycles
+            stmt_dates = _get_stmt_dates(stmt_str, 4)
+            if not stmt_dates:
+                continue
+            cycles = _cycle_from_stmt_dates(stmt_dates)
+            if not cycles:
+                continue
+
+            # Current cycle = last cycle in list
+            curr_start, curr_end, curr_stmt = cycles[-1]
+            curr_cycle_txn_count = 0
+            if curr_start <= today:
+                curr_txns = self._get_txns(aid, curr_start.isoformat(), curr_end.isoformat())
+                curr_cycle_txn_count = len(curr_txns)
+
+            # ── Statement generating reminder ──
+            # Shows 5 days before statement date, only if current cycle has transactions
+            if today <= curr_end:
+                days_to_stmt = (curr_end - today).days
+                if 0 <= days_to_stmt <= 5 and curr_cycle_txn_count > 0:
+                    # Calculate current cycle spending
+                    cycle_debits = sum(t["amount"] for t in self._get_txns(aid, curr_start.isoformat(), curr_end.isoformat()) if t["tx_type"] == "DEBIT")
+                    if cycle_debits > 0:
+                        col = "#F59E0B" if days_to_stmt <= 2 else "#4F46E5"
+                        reminders.append((days_to_stmt, f"📅 {name} — Statement generating in {days_to_stmt} days (₹{cycle_debits:,.0f})", col))
+
+            # ── Due reminder ──
+            # Only for completed cycles (statement date has passed)
+            # Due = cycle debits - payments made after statement date
+            if len(cycles) >= 2:
+                prev_start, prev_end, prev_stmt = cycles[-2]
+                if today > prev_end:
+                    # Statement has been generated for this cycle
+                    cycle_debits = sum(t["amount"] for t in self._get_txns(aid, prev_start.isoformat(), prev_end.isoformat()) if t["tx_type"] == "DEBIT")
+                    # Payments made after statement date (credits that reduce the due)
+                    payments_after = sum(t["amount"] for t in self._get_txns(aid, prev_end.isoformat(), today.isoformat()) if t["tx_type"] == "CREDIT")
+                    remaining_due = cycle_debits - payments_after
+                    if remaining_due > 0:
+                        # Calculate due date for this cycle
+                        try:
+                            due_calc = (prev_stmt + timedelta(days=grace)).isoformat()
+                        except:
+                            due_calc = due_str
+                        # Use edited due date if available and close enough
+                        if due_str:
+                            try:
+                                dd_calc = date.fromisoformat(due_calc)
+                                dd_card = date.fromisoformat(due_str)
+                                if abs((dd_calc - dd_card).days) <= 5:
+                                    due_calc = due_str
+                            except: pass
+                        try:
+                            due_date = date.fromisoformat(due_calc)
+                            dd = (due_date - today).days
+                            if dd >= -5:
+                                col = "#EF4444" if dd <= 0 else ("#F59E0B" if dd <= 3 else "#10B981")
+                                if dd < 0:
+                                    reminders.append((-100, f"🚨 OVERDUE {abs(dd)} days — {name} ({fmt_money(remaining_due)})", col))
+                                else:
+                                    reminders.append((dd, f"💰 Due in {dd} days — {name} ({fmt_money(remaining_due)})", col))
+                        except: pass
+
+        # ── High-value transactions ──
+        min_limit = 499
+        try:
+            for pref in self.cr.db.execute("SELECT value FROM preferences WHERE key='min_txn_alert'").fetchall():
+                min_limit = int(pref[0])
+        except: pass
+        if self.tx_repo:
+            five_days_ago = (today - timedelta(days=5)).isoformat()
+            for card in cards:
+                name = card.get("card_name", card.get("issuer_bank", "Card"))
+                try:
+                    txns = self.tx_repo.list_filters(account_id=card["account_id"], date_from=five_days_ago, date_to=today.isoformat(), limit=50)
+                    for tx in txns:
+                        if tx["amount"] >= min_limit and tx["tx_type"] == "DEBIT":
+                            reminders.append((3, f"⚡ {name} — {fmt_money(tx['amount'])} on {tx['tx_date'][:5]}", "#8B5CF6"))
+                except: pass
+
+        reminders.sort(key=lambda r: r[0])
+        if not reminders:
+            lbl = QLabel("No upcoming reminders."); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            self.lay.addWidget(lbl)
         else:
-            for _,text,color in reminders[:15]:
-                row=QFrame(); row.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;padding:8px 12px;")
-                rl=QHBoxLayout(row); rl.setContentsMargins(8,6,8,6)
-                dot=QLabel("●"); dot.setStyleSheet(f"color:{color};font-size:8px;"); dot.setFixedWidth(12); rl.addWidget(dot)
-                lbl=QLabel(text); lbl.setStyleSheet(f"color:{C['text']};font-size:12px;"); rl.addWidget(lbl,1); self.lay.addWidget(row)
+            for _, text, color in reminders[:15]:
+                row = QFrame(); row.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;padding:6px 10px;")
+                rl = QHBoxLayout(row); rl.setContentsMargins(8, 4, 8, 4)
+                dot = QLabel("■"); dot.setFixedWidth(16); dot.setFixedHeight(16)
+                dot.setStyleSheet(f"background:{color};border-radius:3px;")
+                rl.addWidget(dot)
+                lbl = QLabel(text); lbl.setStyleSheet(f"color:{C['text']};font-size:11px;"); lbl.setWordWrap(True); rl.addWidget(lbl, 1)
+                self.lay.addWidget(row)
         self.lay.addStretch()
 
 
@@ -415,172 +495,304 @@ class RemindersWidget(QWidget):
 class CardsTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
         super().__init__(parent)
-        self.db=db; self.cr=repos["cards"]; self.acct=repos["accounts"]
-        self.tx_repo=repos["transactions"]; self.bal=services["balance"]
-        self._selected_card=None; self._build()
+        self.db = db; self.cr = repos["cards"]; self.acct = repos["accounts"]
+        self.tx_repo = repos["transactions"]; self.bal = services["balance"]
+        self._selected_card = None; self._build()
 
     def _build(self):
-        root=QVBoxLayout(self); root.setContentsMargins(28,16,28,16); root.setSpacing(10)
-        hr=QHBoxLayout(); hr.setSpacing(12)
-        h=QLabel("💳  Credit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
-        ab=QPushButton("＋  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38); ab.setCursor(Qt.PointingHandCursor); ab.clicked.connect(self._add_card); hr.addWidget(ab)
+        root = QVBoxLayout(self); root.setContentsMargins(28, 16, 28, 16); root.setSpacing(10)
+        hr = QHBoxLayout(); hr.setSpacing(12)
+        h = QLabel("💳  Credit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
+        ab = QPushButton("＋  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38)
+        ab.setCursor(Qt.PointingHandCursor); ab.clicked.connect(self._add_card); hr.addWidget(ab)
         root.addLayout(hr)
 
-        splitter=QSplitter(Qt.Horizontal); splitter.setStyleSheet("QSplitter{background:transparent;border:none;}")
+        splitter = QSplitter(Qt.Horizontal); splitter.setStyleSheet("QSplitter{background:transparent;border:none;}")
 
-        # LEFT PAN — tabs + carousel FIXED on top, details SCROLLABLE below
-        left=QWidget(); left_lay=QVBoxLayout(left); left_lay.setContentsMargins(0,0,0,0); left_lay.setSpacing(0)
-        fixed_top=QWidget(); ft_lay=QVBoxLayout(fixed_top); ft_lay.setContentsMargins(0,0,0,8); ft_lay.setSpacing(8)
-        tabs_row=QHBoxLayout(); tabs_row.setSpacing(8)
-        self.tab_active=QPushButton("✅  Active Cards"); self.tab_inactive=QPushButton("⏸  Closed Cards")
-        self._sub_btns=[self.tab_active,self.tab_inactive]
+        # LEFT PANEL
+        left = QWidget(); left_lay = QVBoxLayout(left); left_lay.setContentsMargins(0, 0, 0, 0); left_lay.setSpacing(0)
+        fixed_top = QWidget(); ft_lay = QVBoxLayout(fixed_top); ft_lay.setContentsMargins(4, 4, 4, 12); ft_lay.setSpacing(10)
+
+        tabs_row = QHBoxLayout(); tabs_row.setSpacing(8)
+        self.tab_active = QPushButton("✅  Active Cards"); self.tab_inactive = QPushButton("⏸  Closed Cards")
+        self._sub_btns = [self.tab_active, self.tab_inactive]
         for b in self._sub_btns: b.setMinimumHeight(32); b.setCursor(Qt.PointingHandCursor)
-        self.tab_active.clicked.connect(lambda:self._switch_sub(0)); self.tab_inactive.clicked.connect(lambda:self._switch_sub(1))
+        self.tab_active.clicked.connect(lambda: self._switch_sub(0)); self.tab_inactive.clicked.connect(lambda: self._switch_sub(1))
         for b in self._sub_btns: tabs_row.addWidget(b)
         tabs_row.addStretch(); ft_lay.addLayout(tabs_row)
-        self.carousel=CarouselView([]); self.carousel.setMinimumHeight(200); self.carousel.setMaximumHeight(240)
-        self.carousel.card_clicked.connect(self._on_card_clicked); ft_lay.addWidget(self.carousel)
-        left_lay.addWidget(fixed_top)  # FIXED — does not scroll
 
-        # Scrollable details area
-        self.details_scroll=QScrollArea(); self.details_scroll.setWidgetResizable(True)
+        self.carousel = CarouselView([]); self.carousel.setMinimumHeight(260); self.carousel.setMaximumHeight(320)
+        self.carousel.card_clicked.connect(self._on_card_clicked); ft_lay.addWidget(self.carousel)
+
+        self.header_container = QWidget(); self.header_container.setStyleSheet("background:transparent;")
+        self.header_lay = QVBoxLayout(self.header_container)
+        self.header_lay.setContentsMargins(0, 0, 0, 0); self.header_lay.setSpacing(0)
+        self.header_container.hide()
+        ft_lay.addWidget(self.header_container)
+        left_lay.addWidget(fixed_top)
+
+        self.details_scroll = QScrollArea(); self.details_scroll.setWidgetResizable(True)
         self.details_scroll.setFrameShape(QFrame.NoFrame); self.details_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        self.details_container=QWidget(); self.details_container.setStyleSheet("background:transparent;"); self.details_container.hide()
-        self.details_lay=QVBoxLayout(self.details_container); self.details_lay.setContentsMargins(0,0,0,0); self.details_lay.setSpacing(12)
+        self.details_container = QWidget(); self.details_container.setStyleSheet("background:transparent;"); self.details_container.hide()
+        self.details_lay = QVBoxLayout(self.details_container); self.details_lay.setContentsMargins(0, 4, 0, 0); self.details_lay.setSpacing(12)
         self.details_scroll.setWidget(self.details_container)
-        left_lay.addWidget(self.details_scroll, 1)  # STRETCH — scrollable
+        left_lay.addWidget(self.details_scroll, 1)
+
+        # Settlement footer
+        self.settle_footer = QFrame()
+        self.settle_footer.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;padding:10px 14px;}}")
+        self.settle_footer.hide()
+        sf_lay = QHBoxLayout(self.settle_footer); sf_lay.setContentsMargins(10, 6, 10, 6); sf_lay.setSpacing(12)
+        sf_lay.addWidget(QLabel("<b>Repay:</b>"))
+        self.sf_opt = QComboBox(); self.sf_opt.setMinimumHeight(32); self.sf_opt.setMaximumWidth(250)
+        self.sf_opt.currentIndexChanged.connect(self._on_sf_opt_changed); sf_lay.addWidget(self.sf_opt)
+        self.sf_custom_row = QWidget()
+        custom_lay = QHBoxLayout(self.sf_custom_row); custom_lay.setContentsMargins(0, 0, 0, 0); custom_lay.setSpacing(6)
+        custom_lay.addWidget(QLabel("₹"))
+        self.sf_custom_amt = QDoubleSpinBox(); self.sf_custom_amt.setRange(0, 99999999); self.sf_custom_amt.setDecimals(0)
+        self.sf_custom_amt.setMinimumHeight(32); self.sf_custom_amt.setMaximumWidth(120); custom_lay.addWidget(self.sf_custom_amt)
+        self.sf_custom_row.hide(); sf_lay.addWidget(self.sf_custom_row)
+        sf_lay.addWidget(QLabel("From:"))
+        self.sf_src = QComboBox(); self.sf_src.setMinimumHeight(32); self.sf_src.setMaximumWidth(180); sf_lay.addWidget(self.sf_src)
+        sf_lay.addWidget(QLabel("Method:"))
+        self.sf_method = QComboBox(); self.sf_method.addItems(PAYMENT_METHODS); self.sf_method.setMinimumHeight(32); self.sf_method.setMaximumWidth(140); sf_lay.addWidget(self.sf_method)
+        sf_lay.addStretch()
+        self.sf_btn = QPushButton("💰  Settle")
+        self.sf_btn.setStyleSheet(f"QPushButton{{background:transparent;color:{C['accent']};border:2px solid {C['accent']};border-radius:8px;padding:6px 20px;font-size:13px;font-weight:700;}}QPushButton:hover{{background:{C['accent']};color:white;}}")
+        self.sf_btn.setMinimumHeight(34); self.sf_btn.setCursor(Qt.PointingHandCursor)
+        self.sf_btn.clicked.connect(self._settle_from_footer); sf_lay.addWidget(self.sf_btn)
+        left_lay.addWidget(self.settle_footer)
         splitter.addWidget(left)
 
-        # RIGHT PAN — Reminders (minimum width 280)
-        right=QWidget(); right.setMinimumWidth(280)
-        right_lay=QVBoxLayout(right); right_lay.setContentsMargins(8,0,0,0); right_lay.setSpacing(0)
-        self.reminders=RemindersWidget(self.cr)
-        rem_scroll=QScrollArea(); rem_scroll.setWidgetResizable(True); rem_scroll.setFrameShape(QFrame.NoFrame)
+        # RIGHT PANEL — Reminders (no sidebar reminder)
+        right = QWidget(); right.setMinimumWidth(280)
+        right_lay = QVBoxLayout(right); right_lay.setContentsMargins(8, 0, 0, 0); right_lay.setSpacing(0)
+        self.reminders = RemindersWidget(self.cr, self.tx_repo, self.bal)
+        rem_scroll = QScrollArea(); rem_scroll.setWidgetResizable(True); rem_scroll.setFrameShape(QFrame.NoFrame)
         rem_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}"); rem_scroll.setWidget(self.reminders)
         right_lay.addWidget(rem_scroll)
         splitter.addWidget(right)
-        splitter.setStretchFactor(0,3); splitter.setStretchFactor(1,1)
-        root.addWidget(splitter,1)
+        splitter.setStretchFactor(0, 3); splitter.setStretchFactor(1, 1)
+        root.addWidget(splitter, 1)
         self._switch_sub(0)
 
     def _switch_sub(self, idx):
-        for i,b in enumerate(self._sub_btns): b.setStyleSheet(_tab_btn_active() if i==idx else _tab_btn_inactive())
-        self._selected_card=None; self.details_container.hide(); self._load_cards()
+        for i, b in enumerate(self._sub_btns): b.setStyleSheet(_tab_btn_active() if i == idx else _tab_btn_inactive())
+        self._selected_card = None; self.details_container.hide(); self.header_container.hide(); self.settle_footer.hide()
+        self._load_cards()
 
     def _utils(self, cards):
-        u={}
+        u = {}
         for card in cards:
-            aid=card["account_id"]; lim=card.get("credit_limit",0) or card.get("acct_limit",0)
-            u[aid]=min(abs(self.bal.get_balance(aid))/lim,1.0) if lim>0 else 0.0
+            aid = card["account_id"]; lim = card.get("credit_limit", 0) or card.get("acct_limit", 0)
+            u[aid] = min(abs(self.bal.get_balance(aid)) / lim, 1.0) if lim > 0 else 0.0
         return u
 
     def _load_cards(self):
-        ac=self.cr.list_active()
-        ic=[dict(r) for r in self.db.execute("SELECT c.*,a.display_name AS acct_name,a.credit_limit AS acct_limit FROM cards c JOIN accounts a ON a.account_id=c.account_id WHERE c.is_active=0 ORDER BY c.sort_order").fetchall()]
-        active_idx=0 if self._sub_btns[0].styleSheet()==_tab_btn_active() else 1
-        cards=ac if active_idx==0 else ic
-        self.carousel.load_cards(cards,self._utils(cards))
+        ac = self.cr.list_active()
+        ic = [dict(r) for r in self.db.execute(
+            "SELECT c.*,a.display_name AS acct_name,a.credit_limit AS acct_limit "
+            "FROM cards c JOIN accounts a ON a.account_id=c.account_id "
+            "WHERE c.is_active=0 ORDER BY c.sort_order").fetchall()]
+        active_idx = 0 if self._sub_btns[0].styleSheet() == _tab_btn_active() else 1
+        cards = ac if active_idx == 0 else ic
+        self.carousel.load_cards(cards, self._utils(cards))
         self.reminders.load_reminders(ac)
 
     def _on_card_clicked(self, card_id):
-        card=self.cr.get(card_id)
+        card = self.cr.get(card_id)
         if not card: return
-        self._selected_card=card; self._show_details(card)
+        self._selected_card = card; self._show_details(card)
 
     def _show_details(self, card):
-        while self.details_lay.count():
-            itm=self.details_lay.takeAt(0)
+        while self.header_lay.count():
+            itm = self.header_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
-        aid=card["account_id"]
-        limit=card.get("credit_limit",0) or card.get("acct_limit",0)
-        balance=abs(self.bal.get_balance(aid))
-        util=(balance/limit*100) if limit>0 else 0
-        cycle=self.cr.latest_cycle(aid)
-        c1=card.get("card_color_1","#3a3a3a"); c2=card.get("card_color_2","#0f0f0f")
+        while self.details_lay.count():
+            itm = self.details_lay.takeAt(0)
+            if itm.widget(): itm.widget().deleteLater()
 
-        # ── Header: card name with card gradient style ──
-        hdr=QFrame()
+        aid = card["account_id"]
+        limit = card.get("credit_limit", 0) or card.get("acct_limit", 0)
+        balance = abs(self.bal.get_balance(aid))
+        util = (balance / limit * 100) if limit > 0 else 0
+        c1 = card.get("card_color_1", "#3a3a3a"); c2 = card.get("card_color_2", "#0f0f0f")
+        stmt_date = card.get("statement_date", "—") or "—"
+        util_color = "#EF4444" if util > 70 else ("#F59E0B" if util > 30 else "#10B981")
+
+        due_str = card.get("due_date", "") or ""
+        if not due_str:
+            due_str = _calc_due(card.get("statement_date", ""), card.get("grace_days", 20))
+
+        # ── Header with editable due date ──
+        hdr = QFrame(); hdr.setFixedHeight(100)
         hdr.setStyleSheet(f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {c1},stop:1 {c2});border-radius:12px;}}QLabel{{background:transparent;}}")
-        hdr_lay=QHBoxLayout(hdr); hdr_lay.setContentsMargins(20,12,20,12)
-        name_lbl=QLabel(f"<b style='font-size:16px;color:white;'>{card.get('card_name','Card')}</b>")
-        hdr_lay.addWidget(name_lbl); hdr_lay.addStretch()
-        net_lbl=QLabel(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{card.get('card_network','')} {card.get('card_class','')}</span>")
-        hdr_lay.addWidget(net_lbl)
-        self.details_lay.addWidget(hdr)
+        hdr_lay = QVBoxLayout(hdr); hdr_lay.setContentsMargins(20, 12, 20, 12); hdr_lay.setSpacing(6)
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel(f"<b style='font-size:16px;color:white;'>{card.get('card_name', 'Card')}</b>"))
+        r1.addStretch()
+        r1.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{card.get('card_network', '')} {card.get('card_class', '')}</span>"))
+        hdr_lay.addLayout(r1)
+        r2 = QHBoxLayout(); r2.setSpacing(24)
+        for label, value, color in [("Limit", fmt_money(limit), "rgba(255,255,255,0.7)"),
+                                     ("Utilized", f"{fmt_money(balance)} ({util:.0f}%)", util_color),
+                                     ("Statement", stmt_date, "rgba(255,255,255,0.9)")]:
+            c = QVBoxLayout(); c.setSpacing(0)
+            c.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>{label}</span>"))
+            c.addWidget(QLabel(f"<b style='color:{color};font-size:13px;'>{value}</b>"))
+            r2.addLayout(c)
+        # Editable due date
+        due_col = QVBoxLayout(); due_col.setSpacing(0)
+        due_col.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>Due Date</span>"))
+        self._due_edit = QDateEdit(); self._due_edit.setCalendarPopup(True); self._due_edit.setDisplayFormat("dd MMM yyyy")
+        self._due_edit.setFixedHeight(28); self._due_edit.setMinimumWidth(110)
+        self._due_edit.setStyleSheet("QDateEdit{background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;}")
+        try:
+            self._due_edit.setDate(QDate.fromString(due_str, "yyyy-MM-dd") if due_str and "-" in due_str else QDate.currentDate())
+        except:
+            self._due_edit.setDate(QDate.currentDate())
+        self._due_edit.dateChanged.connect(lambda d: self._save_due_date(card, d))
+        due_col.addWidget(self._due_edit)
+        r2.addLayout(due_col)
+        r2.addStretch(); hdr_lay.addLayout(r2)
+        self.header_lay.addWidget(hdr)
+        self.header_container.show()
 
-        # ── KPI Box ──
-        kpi=QFrame(); kpi.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;padding:12px;")
-        kpi_lay=QHBoxLayout(kpi); kpi_lay.setSpacing(20); kpi_lay.setContentsMargins(12,8,12,8)
-        stmt_date=card.get("statement_date","—") or "—"
-        due_date=cycle.get("due_date","—") if cycle else "—"
-        util_color="#EF4444" if util>70 else("#F59E0B" if util>30 else "#10B981")
-        for label,value,color in [("Limit",fmt_money(limit),"#4F46E5"),("Statement",stmt_date,C['text']),("Due Date",due_date,"#EF4444"),("Utilized",f"{fmt_money(balance)} ({util:.0f}%)",util_color)]:
-            col=QVBoxLayout(); col.setSpacing(2)
-            ll=QLabel(label); ll.setStyleSheet(f"color:{C['text3']};font-size:10px;font-weight:600;")
-            vl=QLabel(str(value)); vl.setStyleSheet(f"color:{color};font-size:15px;font-weight:800;")
-            col.addWidget(ll); col.addWidget(vl); kpi_lay.addLayout(col)
-        kpi_lay.addStretch(); self.details_lay.addWidget(kpi)
-
-        # ── Transactions grouped by statement cycle ──
-        txn_scroll=QScrollArea(); txn_scroll.setWidgetResizable(True); txn_scroll.setFrameShape(QFrame.NoFrame); txn_scroll.setMaximumHeight(350)
+        # ── ALL transactions grouped by cycles, then by date ──
+        txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True); txn_scroll.setFrameShape(QFrame.NoFrame)
         txn_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        txn_inner=QWidget(); txn_inner.setStyleSheet("background:transparent;")
-        txn_lay=QVBoxLayout(txn_inner); txn_lay.setSpacing(4); txn_lay.setContentsMargins(0,0,0,0)
+        txn_inner = QWidget(); txn_inner.setStyleSheet("background:transparent;")
+        txn_lay = QVBoxLayout(txn_inner); txn_lay.setSpacing(4); txn_lay.setContentsMargins(0, 0, 0, 0)
 
-        cycles=self.cr.get_cycles(aid)
-        if cycles:
-            for cyc in cycles:
-                sd=cyc.get("cycle_start_date") or cyc.get("statement_date",""); ed=cyc.get("statement_date") or ""
-                total=cyc.get("total_due",0)
-                # Cycle utilization for this cycle
-                cycle_txns=self.tx_repo.list_filters(account_id=aid,date_from=sd,date_to=ed,limit=500) if sd and ed else []
-                cycle_spend=sum(t["amount"] for t in cycle_txns if t["tx_type"]=="DEBIT" and t.get("transaction_kind","REGULAR")=="REGULAR")
-                cycle_util=(cycle_spend/limit*100) if limit>0 else 0
-                cu_color="#EF4444" if cycle_util>70 else("#F59E0B" if cycle_util>30 else "#10B981")
-                ch=QFrame(); ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:6px 10px;")
-                cl=QHBoxLayout(ch); cl.setContentsMargins(8,4,8,4)
-                cl.addWidget(QLabel(f"<b>📅 {sd} → {ed}</b>"))
-                cl.addStretch()
-                cl.addWidget(QLabel(f"<span style='color:{cu_color};font-weight:700;'>{cycle_util:.0f}% utilized</span>"))
-                cl.addWidget(QLabel(f"  Due: <b style='color:#EF4444'>{fmt_money(total)}</b>"))
-                txn_lay.addWidget(ch)
-                if cycle_txns:
-                    for tx in cycle_txns: txn_lay.addWidget(_tx_card(tx))
-                else:
-                    nt=QLabel("No transactions."); nt.setStyleSheet(f"color:{C['text3']};font-size:11px;padding:6px;"); txn_lay.addWidget(nt)
+        all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
+
+        if not all_txns:
+            nt = QLabel("No transactions found."); nt.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            txn_lay.addWidget(nt)
         else:
-            all_txns=self.tx_repo.list_filters(account_id=aid,limit=300)
-            if all_txns:
-                grouped=OrderedDict()
-                for tx in sorted(all_txns,key=lambda t:t["tx_date"],reverse=True):
-                    mk=tx["tx_date"][:7]
-                    if mk not in grouped: grouped[mk]=[]
-                    grouped[mk].append(tx)
-                for mk,mtxns in grouped.items():
-                    try: y,m=map(int,mk.split("-")); txn_lay.addWidget(_month_header(date(y,m,1).strftime("%B %Y")))
-                    except: txn_lay.addWidget(_month_header(mk))
-                    for tx in mtxns: txn_lay.addWidget(_tx_card(tx))
+            stmt_str = card.get("statement_date", "")
+            stmt_day = _parse_stmt_day(stmt_str)
+
+            if stmt_day:
+                all_txns.sort(key=lambda t: t["tx_date"], reverse=True)
+                min_date = date.fromisoformat(all_txns[-1]["tx_date"])
+                max_date = date.fromisoformat(all_txns[0]["tx_date"])
+
+                # Generate statement dates covering the range
+                stmt_dates = []
+                cur = max_date.replace(day=min(stmt_day, 28))
+                if cur > max_date:
+                    cur = (cur.replace(day=1) - timedelta(days=1)).replace(day=min(stmt_day, 28))
+                while cur >= min_date - timedelta(days=31):
+                    stmt_dates.append(cur)
+                    prev = (cur.replace(day=1) - timedelta(days=1))
+                    cur = prev.replace(day=min(stmt_day, 28))
+                stmt_dates.reverse()
+
+                # Build cycles: (cycle_start, cycle_end)
+                cycles = []
+                for i in range(1, len(stmt_dates)):
+                    cycle_start = stmt_dates[i - 1] + timedelta(days=1)
+                    cycle_end = stmt_dates[i]
+                    cycles.append((cycle_start, cycle_end))
+                cycles.reverse()
+
+                # Group transactions into cycles, skip empty
+                for cycle_start, cycle_end in cycles:
+                    cs = cycle_start.isoformat()
+                    ce = cycle_end.isoformat()
+                    cycle_txns = [t for t in all_txns if cs <= t["tx_date"] <= ce]
+                    if not cycle_txns:
+                        continue  # Skip empty cycles
+
+                    # Cycle stats
+                    cycle_debits = sum(t["amount"] for t in cycle_txns if t["tx_type"] == "DEBIT")
+                    cycle_credits = sum(t["amount"] for t in cycle_txns if t["tx_type"] == "CREDIT")
+
+                    # Cycle header — simple, no editable due
+                    ch = QFrame(); ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:8px 12px;")
+                    cl = QHBoxLayout(ch); cl.setContentsMargins(8, 6, 8, 6); cl.setSpacing(12)
+                    cl.addWidget(QLabel(f"<b>📅 {cs} → {ce}</b>"))
+                    cl.addStretch()
+                    cl.addWidget(QLabel(f"<span style='color:#EF4444;font-weight:700;'>Spent: {fmt_money(cycle_debits)}</span>"))
+                    if cycle_credits > 0:
+                        cl.addWidget(QLabel(f"<span style='color:#10B981;font-weight:700;'>Paid: {fmt_money(cycle_credits)}</span>"))
+                    txn_lay.addWidget(ch)
+
+                    # Group transactions by date within this cycle
+                    by_date = OrderedDict()
+                    for tx in cycle_txns:
+                        d = tx["tx_date"]
+                        if d not in by_date: by_date[d] = []
+                        by_date[d].append(tx)
+
+                    for d, day_txns in by_date.items():
+                        try:
+                            txn_lay.addWidget(_day_header(date.fromisoformat(d).strftime("%A, %d %b")))
+                        except:
+                            txn_lay.addWidget(_day_header(d))
+                        for tx in day_txns:
+                            txn_lay.addWidget(_tx_card(tx))
             else:
-                nt=QLabel("No transactions found."); nt.setStyleSheet(f"color:{C['text3']};font-size:12px;"); txn_lay.addWidget(nt)
+                for tx in sorted(all_txns, key=lambda t: t["tx_date"], reverse=True):
+                    txn_lay.addWidget(_tx_card(tx))
+
         txn_lay.addStretch(); txn_scroll.setWidget(txn_inner)
-        self.details_lay.addWidget(txn_scroll,1)
-
-        # ── Single settle button (fix 5: indigo text, not primary bg) ──
-        settle_row=QHBoxLayout(); settle_row.addStretch()
-        settle_btn=QPushButton("💰  Settle Bill")
-        settle_btn.setStyleSheet(f"QPushButton{{background:transparent;color:{C['accent']};border:2px solid {C['accent']};border-radius:8px;padding:8px 24px;font-size:14px;font-weight:700;}}QPushButton:hover{{background:{C['accent']};color:white;}}")
-        settle_btn.setMinimumHeight(38); settle_btn.setCursor(Qt.PointingHandCursor)
-        settle_btn.clicked.connect(lambda:self._open_settle(card))
-        settle_row.addWidget(settle_btn); self.details_lay.addLayout(settle_row)
-
+        self.details_lay.addWidget(txn_scroll, 1)
         self.details_container.show()
 
-    def _open_settle(self, card):
-        dlg=SettlementDialog(card,self.cr,self.tx_repo,self.acct,self.bal,self)
-        dlg.settled.connect(lambda:self._show_details(card)); dlg.exec_()
+        self._populate_settle_footer(card)
+
+    def _save_due_date(self, card, qdate):
+        new_date = qdate.toString("yyyy-MM-dd")
+        self.cr.update(card["card_id"], due_date=new_date)
+        card["due_date"] = new_date
+
+    def _populate_settle_footer(self, card):
+        aid = card["account_id"]
+        limit = card.get("credit_limit", 0) or card.get("acct_limit", 0)
+        balance = abs(self.bal.get_balance(aid))
+
+        self.sf_opt.blockSignals(True); self.sf_opt.clear()
+        self.sf_opt.addItem(f"Current — {fmt_money(balance)}", balance)
+        self.sf_opt.addItem("Custom Amount...", -1)
+        self.sf_opt.blockSignals(False)
+
+        self.sf_src.clear()
+        for a in self.acct.list_active():
+            if a["account_type"] != "CREDIT_CARD":
+                self.sf_src.addItem(a["display_name"], a["account_id"])
+        self.sf_custom_row.hide()
+        self.settle_footer.show()
+
+    def _on_sf_opt_changed(self, idx):
+        self.sf_custom_row.setVisible(self.sf_opt.currentData() == -1)
+
+    def _settle_from_footer(self):
+        if not self._selected_card: return
+        amt = self.sf_custom_amt.value() if self.sf_opt.currentData() == -1 else self.sf_opt.currentData()
+        if not amt or amt <= 0:
+            QMessageBox.warning(self, "Invalid", "Enter a valid positive amount."); return
+        src_id = self.sf_src.currentData(); method = self.sf_method.currentText()
+        if not src_id:
+            QMessageBox.warning(self, "No Source", "Select a source account."); return
+        card_name = self._selected_card.get("card_name", "Card")
+        reply = QMessageBox.question(self, "Confirm Settlement",
+            f"Settle {fmt_money(amt)} for {card_name}?\n\nFrom: {self.sf_src.currentText()}\nMethod: {method}",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes: return
+        today = date.today().isoformat(); desc = f"Card settlement — {card_name}"; gid = str(uuid.uuid4())
+        try:
+            self.tx_repo.create(tx_date=today, account_id=src_id, pay_method=method, tx_type="DEBIT", amount=amt, description=desc, transaction_kind="TRANSFER", transfer_group_id=gid, category="transfer", pf_category="internal_transfer")
+            self.tx_repo.create(tx_date=today, account_id=self._selected_card["account_id"], pay_method=method, tx_type="CREDIT", amount=amt, description=desc, transaction_kind="TRANSFER", transfer_group_id=gid, category="transfer", pf_category="internal_transfer")
+            QMessageBox.information(self, "Done", f"Settlement of {fmt_money(amt)} recorded.")
+            self._show_details(self._selected_card)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Settlement failed: {e}")
 
     def _add_card(self):
-        dlg=AddCardDialog(self.cr,self.acct,self); dlg.card_added.connect(self.refresh); dlg.exec_()
+        dlg = AddCardDialog(self.cr, self.acct, self); dlg.card_added.connect(self.refresh); dlg.exec_()
 
     def refresh(self):
-        self._selected_card=None; self.details_container.hide(); self._load_cards()
+        self._selected_card = None; self.details_container.hide(); self.header_container.hide(); self.settle_footer.hide()
+        self._load_cards()

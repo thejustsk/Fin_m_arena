@@ -39,7 +39,7 @@ class SettingsTab(QWidget):
         w = QWidget(); l = QVBoxLayout(w)
         ab = QPushButton("+ Add Account"); ab.setObjectName("primary"); ab.clicked.connect(self._add_account)
         l.addWidget(ab)
-        self.acct_table = mk_table(["Name", "Label", "Type", "Opening Balance", "Active"])
+        self.acct_table = mk_table(["Name", "Label", "Type", "Opening Balance", "Active", "Action"])
         l.addWidget(self.acct_table)
         return w
 
@@ -153,6 +153,14 @@ class SettingsTab(QWidget):
                 QMessageBox.information(self, "2FA Enabled", f"Secret: {secret}\nAdd to your authenticator app.")
         self.refresh()
 
+    def _toggle_account(self, acct_id, current_active):
+        new_active = 0 if current_active else 1
+        self.acct.update(acct_id, is_active=new_active)
+        # Also update associated cards so they move to Closed/Active
+        self.db.execute("UPDATE cards SET is_active=? WHERE account_id=?", (new_active, acct_id))
+        self.db.commit()
+        self.refresh()
+
     def refresh(self):
         accts = self.acct.list_all()
         self.acct_table.setRowCount(len(accts))
@@ -162,6 +170,12 @@ class SettingsTab(QWidget):
             self.acct_table.setItem(i, 2, QTableWidgetItem(a["account_type"]))
             self.acct_table.setItem(i, 3, QTableWidgetItem(fmt_money(a["opening_balance"])))
             self.acct_table.setItem(i, 4, QTableWidgetItem("✓" if a["is_active"] else "✗"))
+            btn = QPushButton("Deactivate" if a["is_active"] else "Activate")
+            btn.setStyleSheet(f"color:{C['red'] if a['is_active'] else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 8px;")
+            btn.setCursor(Qt.PointingHandCursor)
+            aid = a["account_id"]; active = a["is_active"]
+            btn.clicked.connect(lambda _, aid=aid, act=active: self._toggle_account(aid, act))
+            self.acct_table.setCellWidget(i, 5, btn)
 
         cats = self.lu.list_categories()
         self.cat_table.setRowCount(len(cats))

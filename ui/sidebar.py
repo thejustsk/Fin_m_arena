@@ -52,13 +52,16 @@ ANIM_MS = 180
 class Sidebar(QWidget):
     nav = pyqtSignal(str)
 
-    def __init__(self, bal_svc, parent=None):
+    def __init__(self, bal_svc, repos=None, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setFixedWidth(EXPANDED_W)
         self.bal = bal_svc
+        self._cr = repos.get("cards") if repos else None
+        self._tx_repo = repos.get("transactions") if repos else None
         self._btns = {}
         self._labels = []
+        self._dues_widgets = []
         self._expanded = True
         self._animating = False
         self._build()
@@ -161,6 +164,21 @@ class Sidebar(QWidget):
 
         self.lay.addStretch()
 
+        # ── Payment Dues section ──
+        self._dues_header = QLabel("PAYMENT DUES")
+        self._dues_header.setStyleSheet(
+            "color: #6B7280; font-size: 9px; font-weight: 700; "
+            "letter-spacing: 1.5px; padding: 14px 12px 4px; background: transparent; border: none;")
+        self.lay.addWidget(self._dues_header)
+        self._dues_container = QWidget()
+        self._dues_container.setStyleSheet("background:transparent;")
+        self._dues_lay = QVBoxLayout(self._dues_container)
+        self._dues_lay.setContentsMargins(0, 0, 0, 0)
+        self._dues_lay.setSpacing(2)
+        self.lay.addWidget(self._dues_container)
+        self._dues_header.hide()
+        self._dues_container.hide()
+
         self.ver = QLabel("v3.1.0")
         self.ver.setStyleSheet("color: #374151; font-size: 9px; padding: 4px 8px; background: transparent; border: none;")
         self.lay.addWidget(self.ver)
@@ -192,7 +210,7 @@ class Sidebar(QWidget):
             }
             QPushButton:hover {
                 background: rgba(255, 255, 255, 0.06);
-                color: #125AEB;
+                color: #E5E7EB;
             }
         """
 
@@ -243,6 +261,13 @@ class Sidebar(QWidget):
 
     def select_home(self):
         self._sel("home")
+
+    def refresh_dues(self):
+        """Payment dues removed from sidebar — now in Cards tab."""
+        for w in self._dues_widgets:
+            w.deleteLater()
+        self._dues_widgets.clear()
+        self._dues_header.hide(); self._dues_container.hide()
 
     def update_nw(self):
         self.nw_val.setText(fmt_money(self.bal.net_worth()))

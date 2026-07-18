@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         # Sidebar
-        self.sidebar = Sidebar(self.services["balance"])
+        self.sidebar = Sidebar(self.services["balance"], self.repos)
         self.sidebar.nav.connect(self._nav)
         layout.addWidget(self.sidebar)
 
@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Refresh error on {key}: {e}")
         self.sidebar.update_nw()
+        self.sidebar.refresh_dues()
 
     def closeEvent(self, event):
         try:
