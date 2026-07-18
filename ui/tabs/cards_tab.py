@@ -175,8 +175,7 @@ class CarouselView(QGraphicsView):
             item.setTransform(tr); item.setZValue(z); item.setOpacity(op); item.update()
         self.viewport().update()
     def mousePressEvent(self, e):
-        self._press_pos=e.pos(); self._press_item=self.itemAt(e.pos())
-        self._dragging=False; self._drag_start_progress=self.target_progress; super().mousePressEvent(e)
+        self._press_pos=e.pos(); self._press_item=self.itemAt(e.pos()); self._dragging=False; self._drag_start_progress=self.target_progress; super().mousePressEvent(e)
     def mouseMoveEvent(self, e):
         if e.buttons()&Qt.LeftButton and self._press_pos:
             dx=e.pos().x()-self._press_pos.x()
@@ -203,13 +202,13 @@ class CarouselView(QGraphicsView):
 
 
 # ═══════════════════════════════════════════════
-# PREVIEW WIDGETS
+# PREVIEW WIDGETS (Add Card dialog)
 # ═══════════════════════════════════════════════
 
 class CardPreviewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent); self.setFixedSize(CARD_W, CARD_H)
-        self._data = {"issuer_bank":"BANK","card_brand":"","card_network":"VISA","card_class":"","last_four":"0000","expiry_month":12,"expiry_year":2028,"card_color_1":"#3a3a3a","card_color_2":"#0f0f0f"}
+        self._data = {"issuer_bank":"BANK","card_brand":"","card_network":"VISA","card_class":"","last_four":"0000","card_color_1":"#3a3a3a","card_color_2":"#0f0f0f"}
     def update_data(self, **kw): self._data.update(kw); self.update()
     def paintEvent(self, event):
         p=QPainter(self); p.setRenderHint(QPainter.Antialiasing); w,h=CARD_W,CARD_H; rect=QRectF(0,0,w,h)
@@ -294,7 +293,6 @@ class AddCardDialog(QDialog):
     def _save(self):
         name=self.card_name.text().strip(); bank=self.issuer.text().strip(); limit=self.credit_limit.value()
         if not name or not bank or limit<=0: QMessageBox.warning(self,"Missing","Card name, bank, and credit limit required."); return
-        # Account name = CARD NAME (not bank)
         existing=None
         for a in self.acct.list_active():
             if a["display_name"].upper()==name.upper(): existing=a; break
@@ -308,7 +306,7 @@ class AddCardDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════
-# SETTLEMENT POPUP DIALOG
+# SETTLEMENT POPUP DIALOG (fix 6: custom value)
 # ═══════════════════════════════════════════════
 
 class SettlementDialog(QDialog):
@@ -321,7 +319,6 @@ class SettlementDialog(QDialog):
     def _build(self):
         lay=QVBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(14)
         lay.addWidget(QLabel(f"💰  Settle — {self.card.get('card_name','Card')}"))
-        # Outstanding options
         limit=self.card.get("credit_limit",0) or self.card.get("acct_limit",0)
         balance=abs(self.bal.get_balance(self.card["account_id"]))
         cycle=self.cr.latest_cycle(self.card["account_id"])
@@ -331,24 +328,37 @@ class SettlementDialog(QDialog):
         self.settle_opt.addItem(f"Current Outstanding — {fmt_money(balance)}",balance)
         self.settle_opt.addItem(f"Statement Outstanding — {fmt_money(stmt_due)}",stmt_due)
         self.settle_opt.addItem(f"Minimum Outstanding — {fmt_money(min_due)}",min_due)
-        self.settle_opt.setMinimumHeight(36); lay.addWidget(QLabel("Repay Option:")); lay.addWidget(self.settle_opt)
-        # Source account
+        self.settle_opt.addItem("Custom Amount...", -1)
+        self.settle_opt.setMinimumHeight(36); self.settle_opt.currentIndexChanged.connect(self._on_opt_changed)
+        lay.addWidget(QLabel("Repay Option:")); lay.addWidget(self.settle_opt)
+        # Custom amount (hidden unless "Custom Amount..." selected)
+        self.custom_row = QWidget(); custom_lay = QHBoxLayout(self.custom_row); custom_lay.setContentsMargins(0,0,0,0)
+        custom_lay.addWidget(QLabel("Amount:"))
+        self.custom_amt = QDoubleSpinBox(); self.custom_amt.setRange(0,99999999); self.custom_amt.setPrefix("₹ "); self.custom_amt.setDecimals(0); self.custom_amt.setMinimumHeight(36)
+        custom_lay.addWidget(self.custom_amt, 1)
+        self.custom_row.hide(); lay.addWidget(self.custom_row)
         lay.addWidget(QLabel("Pay From:"))
         self.settle_src=QComboBox()
         for a in self.acct.list_active():
             if a["account_type"]!="CREDIT_CARD": self.settle_src.addItem(a["display_name"],a["account_id"])
         self.settle_src.setMinimumHeight(36); lay.addWidget(self.settle_src)
-        # Payment method
         lay.addWidget(QLabel("Payment Method:"))
         self.settle_method=QComboBox(); self.settle_method.addItems(PAYMENT_METHODS); self.settle_method.setMinimumHeight(36); lay.addWidget(self.settle_method)
-        # Buttons
         br=QHBoxLayout(); br.addStretch()
         c=QPushButton("Cancel"); c.clicked.connect(self.reject); br.addWidget(c)
-        rb=QPushButton("💸  Settle"); rb.setObjectName("primary"); rb.setMinimumHeight(40); rb.setCursor(Qt.PointingHandCursor); rb.clicked.connect(self._repay); br.addWidget(rb)
+        rb=QPushButton("  Settle  "); rb.setStyleSheet(f"QPushButton{{background:{C['accent']};color:white;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:700;}}QPushButton:hover{{background:#4338CA;}}")
+        rb.setMinimumHeight(40); rb.setCursor(Qt.PointingHandCursor); rb.clicked.connect(self._repay); br.addWidget(rb)
         lay.addLayout(br)
+    def _on_opt_changed(self, idx):
+        is_custom = self.settle_opt.currentData() == -1
+        self.custom_row.setVisible(is_custom)
     def _repay(self):
-        amt=self.settle_opt.currentData(); src_id=self.settle_src.currentData(); method=self.settle_method.currentText()
-        if not amt or amt<=0: QMessageBox.warning(self,"Invalid","No outstanding amount."); return
+        if self.settle_opt.currentData() == -1:
+            amt = self.custom_amt.value()
+        else:
+            amt = self.settle_opt.currentData()
+        src_id=self.settle_src.currentData(); method=self.settle_method.currentText()
+        if not amt or amt<=0: QMessageBox.warning(self,"Invalid","Enter a valid amount."); return
         if not src_id: QMessageBox.warning(self,"No Source","Select a source account."); return
         today=date.today().isoformat(); desc=f"Card settlement — {self.card.get('card_name','')}"; gid=str(uuid.uuid4())
         self.tx_repo.create(tx_date=today,account_id=src_id,pay_method=method,tx_type="DEBIT",amount=amt,description=desc,transaction_kind="TRANSFER",transfer_group_id=gid,category="transfer",pf_category="internal_transfer")
@@ -387,8 +397,6 @@ class RemindersWidget(QWidget):
                     if dd>=0: col="#EF4444" if dd<=3 else("#F59E0B" if dd<=7 else "#10B981"); reminders.append((dd,f"💰 {name} — Due {due.strftime('%d %b')} ({fmt_money(total)})",col))
                     else: reminders.append((-1,f"🚨 {name} — OVERDUE {abs(dd)}d ({fmt_money(total)})","#EF4444"))
                 except: pass
-            gd=card.get("grace_days",20)
-            if gd>0: reminders.append((gd+30,f"ℹ {name} — Grace: {gd} days","#6B7280"))
         reminders.sort(key=lambda r:r[0])
         if not reminders: lbl=QLabel("No upcoming reminders."); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.lay.addWidget(lbl)
         else:
@@ -401,7 +409,7 @@ class RemindersWidget(QWidget):
 
 
 # ═══════════════════════════════════════════════
-# MAIN CARDS TAB — new layout
+# MAIN CARDS TAB
 # ═══════════════════════════════════════════════
 
 class CardsTab(QWidget):
@@ -409,65 +417,55 @@ class CardsTab(QWidget):
         super().__init__(parent)
         self.db=db; self.cr=repos["cards"]; self.acct=repos["accounts"]
         self.tx_repo=repos["transactions"]; self.bal=services["balance"]
-        self._selected_card = None
-        self._build()
+        self._selected_card=None; self._build()
 
     def _build(self):
         root=QVBoxLayout(self); root.setContentsMargins(28,16,28,16); root.setSpacing(10)
-        # Header
         hr=QHBoxLayout(); hr.setSpacing(12)
         h=QLabel("💳  Credit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
         ab=QPushButton("＋  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38); ab.setCursor(Qt.PointingHandCursor); ab.clicked.connect(self._add_card); hr.addWidget(ab)
         root.addLayout(hr)
 
-        # Horizontal splitter: Left (cards+details) | Right (reminders)
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter{background:transparent;border:none;}")
+        splitter=QSplitter(Qt.Horizontal); splitter.setStyleSheet("QSplitter{background:transparent;border:none;}")
 
-        # LEFT PAN
-        left = QWidget(); left_lay = QVBoxLayout(left); left_lay.setContentsMargins(0,0,0,0); left_lay.setSpacing(8)
-
-        # Active/Inactive tabs
+        # LEFT PAN — tabs + carousel FIXED on top, details SCROLLABLE below
+        left=QWidget(); left_lay=QVBoxLayout(left); left_lay.setContentsMargins(0,0,0,0); left_lay.setSpacing(0)
+        fixed_top=QWidget(); ft_lay=QVBoxLayout(fixed_top); ft_lay.setContentsMargins(0,0,0,8); ft_lay.setSpacing(8)
         tabs_row=QHBoxLayout(); tabs_row.setSpacing(8)
         self.tab_active=QPushButton("✅  Active Cards"); self.tab_inactive=QPushButton("⏸  Closed Cards")
         self._sub_btns=[self.tab_active,self.tab_inactive]
         for b in self._sub_btns: b.setMinimumHeight(32); b.setCursor(Qt.PointingHandCursor)
         self.tab_active.clicked.connect(lambda:self._switch_sub(0)); self.tab_inactive.clicked.connect(lambda:self._switch_sub(1))
         for b in self._sub_btns: tabs_row.addWidget(b)
-        tabs_row.addStretch(); left_lay.addLayout(tabs_row)
-
-        # Carousel
+        tabs_row.addStretch(); ft_lay.addLayout(tabs_row)
         self.carousel=CarouselView([]); self.carousel.setMinimumHeight(200); self.carousel.setMaximumHeight(240)
-        self.carousel.card_clicked.connect(self._on_card_clicked)
-        left_lay.addWidget(self.carousel)
+        self.carousel.card_clicked.connect(self._on_card_clicked); ft_lay.addWidget(self.carousel)
+        left_lay.addWidget(fixed_top)  # FIXED — does not scroll
 
-        # Details space (hidden until card selected)
-        self.details_container = QFrame()
-        self.details_container.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;")
-        self.details_container.hide()
-        self.details_lay = QVBoxLayout(self.details_container)
-        self.details_lay.setContentsMargins(16,14,16,14); self.details_lay.setSpacing(12)
-        left_lay.addWidget(self.details_container, 1)
-
+        # Scrollable details area
+        self.details_scroll=QScrollArea(); self.details_scroll.setWidgetResizable(True)
+        self.details_scroll.setFrameShape(QFrame.NoFrame); self.details_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self.details_container=QWidget(); self.details_container.setStyleSheet("background:transparent;"); self.details_container.hide()
+        self.details_lay=QVBoxLayout(self.details_container); self.details_lay.setContentsMargins(0,0,0,0); self.details_lay.setSpacing(12)
+        self.details_scroll.setWidget(self.details_container)
+        left_lay.addWidget(self.details_scroll, 1)  # STRETCH — scrollable
         splitter.addWidget(left)
 
-        # RIGHT PAN — Reminders
-        right = QWidget(); right_lay = QVBoxLayout(right); right_lay.setContentsMargins(8,0,0,0); right_lay.setSpacing(0)
-        self.reminders = RemindersWidget(self.cr)
-        rem_scroll = QScrollArea(); rem_scroll.setWidgetResizable(True); rem_scroll.setFrameShape(QFrame.NoFrame)
+        # RIGHT PAN — Reminders (minimum width 280)
+        right=QWidget(); right.setMinimumWidth(280)
+        right_lay=QVBoxLayout(right); right_lay.setContentsMargins(8,0,0,0); right_lay.setSpacing(0)
+        self.reminders=RemindersWidget(self.cr)
+        rem_scroll=QScrollArea(); rem_scroll.setWidgetResizable(True); rem_scroll.setFrameShape(QFrame.NoFrame)
         rem_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}"); rem_scroll.setWidget(self.reminders)
         right_lay.addWidget(rem_scroll)
         splitter.addWidget(right)
-
-        splitter.setStretchFactor(0, 3); splitter.setStretchFactor(1, 1)
-        root.addWidget(splitter, 1)
-
+        splitter.setStretchFactor(0,3); splitter.setStretchFactor(1,1)
+        root.addWidget(splitter,1)
         self._switch_sub(0)
 
     def _switch_sub(self, idx):
         for i,b in enumerate(self._sub_btns): b.setStyleSheet(_tab_btn_active() if i==idx else _tab_btn_inactive())
-        self._selected_card = None; self.details_container.hide()
-        self._load_cards()
+        self._selected_card=None; self.details_container.hide(); self._load_cards()
 
     def _utils(self, cards):
         u={}
@@ -479,76 +477,75 @@ class CardsTab(QWidget):
     def _load_cards(self):
         ac=self.cr.list_active()
         ic=[dict(r) for r in self.db.execute("SELECT c.*,a.display_name AS acct_name,a.credit_limit AS acct_limit FROM cards c JOIN accounts a ON a.account_id=c.account_id WHERE c.is_active=0 ORDER BY c.sort_order").fetchall()]
-        idx = 0 if self.tab_active.isChecked() or not self.tab_inactive.isChecked() else 1
-        # Determine which is active based on style
-        active_idx = 0 if self._sub_btns[0].styleSheet() == _tab_btn_active() else 1
-        if active_idx==0: cards=ac
-        else: cards=ic
-        self._current_cards = cards
-        self.carousel.load_cards(cards, self._utils(cards))
-        self.reminders.load_reminders(ac)  # always show active reminders
+        active_idx=0 if self._sub_btns[0].styleSheet()==_tab_btn_active() else 1
+        cards=ac if active_idx==0 else ic
+        self.carousel.load_cards(cards,self._utils(cards))
+        self.reminders.load_reminders(ac)
 
     def _on_card_clicked(self, card_id):
-        """Show details below carousel when card stripe is clicked."""
-        card = self.cr.get(card_id)
+        card=self.cr.get(card_id)
         if not card: return
-        self._selected_card = card
-        self._show_details(card)
+        self._selected_card=card; self._show_details(card)
 
     def _show_details(self, card):
-        """Build details space: KPI box → transactions by cycle → settlement button."""
-        # Clear
         while self.details_lay.count():
             itm=self.details_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
+        aid=card["account_id"]
+        limit=card.get("credit_limit",0) or card.get("acct_limit",0)
+        balance=abs(self.bal.get_balance(aid))
+        util=(balance/limit*100) if limit>0 else 0
+        cycle=self.cr.latest_cycle(aid)
+        c1=card.get("card_color_1","#3a3a3a"); c2=card.get("card_color_2","#0f0f0f")
 
-        aid = card["account_id"]
-        limit = card.get("credit_limit",0) or card.get("acct_limit",0)
-        balance = abs(self.bal.get_balance(aid))
-        util = (balance/limit*100) if limit>0 else 0
-        cycle = self.cr.latest_cycle(aid)
+        # ── Header: card name with card gradient style ──
+        hdr=QFrame()
+        hdr.setStyleSheet(f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {c1},stop:1 {c2});border-radius:12px;}}QLabel{{background:transparent;}}")
+        hdr_lay=QHBoxLayout(hdr); hdr_lay.setContentsMargins(20,12,20,12)
+        name_lbl=QLabel(f"<b style='font-size:16px;color:white;'>{card.get('card_name','Card')}</b>")
+        hdr_lay.addWidget(name_lbl); hdr_lay.addStretch()
+        net_lbl=QLabel(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{card.get('card_network','')} {card.get('card_class','')}</span>")
+        hdr_lay.addWidget(net_lbl)
+        self.details_lay.addWidget(hdr)
 
-        # ── KPI Box: Limit | Statement Date | Due Date | Amount Utilized ──
-        kpi = QFrame()
-        kpi.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:10px;padding:12px;")
-        kpi_lay = QHBoxLayout(kpi); kpi_lay.setSpacing(20); kpi_lay.setContentsMargins(12,8,12,8)
-
-        stmt_date = card.get("statement_date","—") or "—"
-        due_date = cycle.get("due_date","—") if cycle else "—"
-
-        for label, value, color in [
-            ("Limit", fmt_money(limit), "#4F46E5"),
-            ("Statement", stmt_date, C['text']),
-            ("Due Date", due_date, "#EF4444"),
-            ("Utilized", fmt_money(balance), "#EF4444" if util>70 else("#F59E0B" if util>30 else "#10B981")),
-        ]:
-            col = QVBoxLayout(); col.setSpacing(2)
-            ll = QLabel(label); ll.setStyleSheet(f"color:{C['text3']};font-size:10px;font-weight:600;")
-            vl = QLabel(str(value)); vl.setStyleSheet(f"color:{color};font-size:15px;font-weight:800;")
-            col.addWidget(ll); col.addWidget(vl)
-            kpi_lay.addLayout(col)
-        kpi_lay.addStretch()
-        self.details_lay.addWidget(kpi)
+        # ── KPI Box ──
+        kpi=QFrame(); kpi.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;padding:12px;")
+        kpi_lay=QHBoxLayout(kpi); kpi_lay.setSpacing(20); kpi_lay.setContentsMargins(12,8,12,8)
+        stmt_date=card.get("statement_date","—") or "—"
+        due_date=cycle.get("due_date","—") if cycle else "—"
+        util_color="#EF4444" if util>70 else("#F59E0B" if util>30 else "#10B981")
+        for label,value,color in [("Limit",fmt_money(limit),"#4F46E5"),("Statement",stmt_date,C['text']),("Due Date",due_date,"#EF4444"),("Utilized",f"{fmt_money(balance)} ({util:.0f}%)",util_color)]:
+            col=QVBoxLayout(); col.setSpacing(2)
+            ll=QLabel(label); ll.setStyleSheet(f"color:{C['text3']};font-size:10px;font-weight:600;")
+            vl=QLabel(str(value)); vl.setStyleSheet(f"color:{color};font-size:15px;font-weight:800;")
+            col.addWidget(ll); col.addWidget(vl); kpi_lay.addLayout(col)
+        kpi_lay.addStretch(); self.details_lay.addWidget(kpi)
 
         # ── Transactions grouped by statement cycle ──
-        txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True)
-        txn_scroll.setFrameShape(QFrame.NoFrame); txn_scroll.setMaximumHeight(300)
+        txn_scroll=QScrollArea(); txn_scroll.setWidgetResizable(True); txn_scroll.setFrameShape(QFrame.NoFrame); txn_scroll.setMaximumHeight(350)
         txn_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        txn_inner = QWidget(); txn_inner.setStyleSheet("background:transparent;")
-        txn_lay = QVBoxLayout(txn_inner); txn_lay.setSpacing(4); txn_lay.setContentsMargins(0,0,0,0)
+        txn_inner=QWidget(); txn_inner.setStyleSheet("background:transparent;")
+        txn_lay=QVBoxLayout(txn_inner); txn_lay.setSpacing(4); txn_lay.setContentsMargins(0,0,0,0)
 
-        cycles = self.cr.get_cycles(aid)
+        cycles=self.cr.get_cycles(aid)
         if cycles:
             for cyc in cycles:
                 sd=cyc.get("cycle_start_date") or cyc.get("statement_date",""); ed=cyc.get("statement_date") or ""
+                total=cyc.get("total_due",0)
+                # Cycle utilization for this cycle
+                cycle_txns=self.tx_repo.list_filters(account_id=aid,date_from=sd,date_to=ed,limit=500) if sd and ed else []
+                cycle_spend=sum(t["amount"] for t in cycle_txns if t["tx_type"]=="DEBIT" and t.get("transaction_kind","REGULAR")=="REGULAR")
+                cycle_util=(cycle_spend/limit*100) if limit>0 else 0
+                cu_color="#EF4444" if cycle_util>70 else("#F59E0B" if cycle_util>30 else "#10B981")
                 ch=QFrame(); ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:6px 10px;")
                 cl=QHBoxLayout(ch); cl.setContentsMargins(8,4,8,4)
-                cl.addWidget(QLabel(f"<b>📅 {sd} → {ed}</b>")); cl.addStretch()
-                cl.addWidget(QLabel(f"Due: {fmt_money(cyc.get('total_due',0))}"))
+                cl.addWidget(QLabel(f"<b>📅 {sd} → {ed}</b>"))
+                cl.addStretch()
+                cl.addWidget(QLabel(f"<span style='color:{cu_color};font-weight:700;'>{cycle_util:.0f}% utilized</span>"))
+                cl.addWidget(QLabel(f"  Due: <b style='color:#EF4444'>{fmt_money(total)}</b>"))
                 txn_lay.addWidget(ch)
-                txns=self.tx_repo.list_filters(account_id=aid,date_from=sd,date_to=ed,limit=200) if sd and ed else []
-                if txns:
-                    for tx in txns: txn_lay.addWidget(_tx_card(tx))
+                if cycle_txns:
+                    for tx in cycle_txns: txn_lay.addWidget(_tx_card(tx))
                 else:
                     nt=QLabel("No transactions."); nt.setStyleSheet(f"color:{C['text3']};font-size:11px;padding:6px;"); txn_lay.addWidget(nt)
         else:
@@ -565,26 +562,22 @@ class CardsTab(QWidget):
                     for tx in mtxns: txn_lay.addWidget(_tx_card(tx))
             else:
                 nt=QLabel("No transactions found."); nt.setStyleSheet(f"color:{C['text3']};font-size:12px;"); txn_lay.addWidget(nt)
-        txn_lay.addStretch()
-        txn_scroll.setWidget(txn_inner)
-        self.details_lay.addWidget(txn_scroll, 1)
+        txn_lay.addStretch(); txn_scroll.setWidget(txn_inner)
+        self.details_lay.addWidget(txn_scroll,1)
 
-        # ── Settlement button as footer ──
-        settle_row = QHBoxLayout(); settle_row.addStretch()
-        settle_btn = QPushButton("💰  Settle Bill"); settle_btn.setObjectName("primary")
-        settle_btn.setMinimumHeight(38); settle_btn.setMinimumWidth(160)
-        settle_btn.setCursor(Qt.PointingHandCursor)
-        settle_btn.clicked.connect(lambda: self._open_settle(card))
-        settle_row.addWidget(settle_btn)
-        self.details_lay.addLayout(settle_row)
+        # ── Single settle button (fix 5: indigo text, not primary bg) ──
+        settle_row=QHBoxLayout(); settle_row.addStretch()
+        settle_btn=QPushButton("💰  Settle Bill")
+        settle_btn.setStyleSheet(f"QPushButton{{background:transparent;color:{C['accent']};border:2px solid {C['accent']};border-radius:8px;padding:8px 24px;font-size:14px;font-weight:700;}}QPushButton:hover{{background:{C['accent']};color:white;}}")
+        settle_btn.setMinimumHeight(38); settle_btn.setCursor(Qt.PointingHandCursor)
+        settle_btn.clicked.connect(lambda:self._open_settle(card))
+        settle_row.addWidget(settle_btn); self.details_lay.addLayout(settle_row)
 
         self.details_container.show()
 
     def _open_settle(self, card):
-        """Open settlement popup dialog."""
-        dlg = SettlementDialog(card, self.cr, self.tx_repo, self.acct, self.bal, self)
-        dlg.settled.connect(lambda: self._show_details(card))  # refresh details after settle
-        dlg.exec_()
+        dlg=SettlementDialog(card,self.cr,self.tx_repo,self.acct,self.bal,self)
+        dlg.settled.connect(lambda:self._show_details(card)); dlg.exec_()
 
     def _add_card(self):
         dlg=AddCardDialog(self.cr,self.acct,self); dlg.card_added.connect(self.refresh); dlg.exec_()
