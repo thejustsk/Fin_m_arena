@@ -160,15 +160,20 @@ CREATE TABLE IF NOT EXISTS notes_trash (
 CREATE TABLE IF NOT EXISTS cards (
     card_id         TEXT PRIMARY KEY,
     account_id      TEXT NOT NULL REFERENCES accounts,
+    card_name       TEXT,
     last_four       TEXT,
     card_network    TEXT DEFAULT 'VISA',
     card_type       TEXT DEFAULT 'PERSONAL',
+    card_class      TEXT DEFAULT '',
+    card_brand      TEXT DEFAULT '',
     issuer_bank     TEXT,
     cardholder_name TEXT,
+    card_number     TEXT,
     expiry_month    INTEGER,
     expiry_year     INTEGER,
     billing_day     INTEGER DEFAULT 1,
     statement_day   INTEGER DEFAULT 1,
+    statement_date  TEXT DEFAULT '',
     grace_days      INTEGER DEFAULT 20,
     annual_fee      REAL DEFAULT 0,
     joining_fee     REAL DEFAULT 0,
@@ -261,6 +266,11 @@ def run_migrations(db):
         ("cards", "joining_fee", "REAL DEFAULT 0"),
         ("cards", "interest_rate", "REAL DEFAULT 3.5"),
         ("cards", "reward_program", "TEXT"),
+        ("cards", "card_name", "TEXT"),
+        ("cards", "card_class", "TEXT DEFAULT ''"),
+        ("cards", "card_brand", "TEXT DEFAULT ''"),
+        ("cards", "card_number", "TEXT"),
+        ("cards", "statement_date", "TEXT DEFAULT ''"),
     ]
     for table, col, typedef in _safe_cols:
         try:
