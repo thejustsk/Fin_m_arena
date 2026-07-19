@@ -440,8 +440,8 @@ class RemindersWidget(QWidget):
                     except:
                         pass
 
-            # Type 1: Statement generating (5 days before statement, only if there are transactions)
-            if stmt_day and all_txns:
+            # Type 1: Statement generating (5 days before statement, only if balance > 0)
+            if stmt_day:
                 try:
                     stmt = today.replace(day=min(stmt_day, 28))
                     if stmt <= today:
@@ -450,13 +450,13 @@ class RemindersWidget(QWidget):
                         else:
                             stmt = stmt.replace(month=today.month + 1)
                     du = (stmt - today).days
-                    curr_debits = cycle_data[-1]["debits"] if cycle_data else 0
-                    if curr_debits == 0:
-                        # Fallback: sum debits from all transactions
-                        curr_debits = sum(t["amount"] for t in all_txns if t["tx_type"] == "DEBIT")
-                    if 0 <= du <= 5 and curr_debits > 0:
+                    outstanding = 0
+                    if self.bal:
+                        try: outstanding = abs(self.bal.get_balance(aid))
+                        except: pass
+                    if 0 <= du <= 5 and outstanding > 0:
                         col = "#F59E0B" if du <= 2 else "#4F46E5"
-                        reminders.append((du, f"📅 {name} — Statement in {du}d (₹{curr_debits:,.0f})", col))
+                        reminders.append((du, f"📅 {name} — Statement in {du}d (₹{outstanding:,.0f})", col))
                 except:
                     pass
 
