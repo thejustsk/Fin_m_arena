@@ -568,7 +568,7 @@ class TransactionEntryTab(QWidget):
         qd = self.date_edit.date() if self.stack.currentIndex() == 0 else self.tf_date.date()
         d = qd.toPyDate()
         kw = {"date_from": (d - timedelta(days=7)).isoformat(),
-              "date_to": d.isoformat(), "limit": 50}
+              "date_to": (d + timedelta(days=7)).isoformat(), "limit": 50}
         if kind == "transfer": kw["kind"] = "TRANSFER"
         txns = self.tx_repo.list_filters(**kw)
 
