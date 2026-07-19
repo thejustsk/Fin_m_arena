@@ -23,6 +23,20 @@ PAYMENT_METHODS = [
     "CANARA AI", "SIB MIRROR", "OTHER"
 ]
 
+_ACCT_TYPE_LABEL = {
+    "CURRENT": "Debit",
+    "CREDIT_CARD": "Credit Card",
+    "WALLET": "Wallet",
+    "CASH": "Cash",
+}
+
+def _acct_display(name, acct_type):
+    """Format account name with type suffix: 'HDFC Savings  ·  Debit'."""
+    label = _ACCT_TYPE_LABEL.get(acct_type, "")
+    if label:
+        return f"{name}  ·  {label}"
+    return name
+
 def _toggle_css(on, color):
     if on:
         return (f"background:{color};color:#FFF;border:none;"
@@ -720,9 +734,11 @@ class TransactionEntryTab(QWidget):
         self._acct_list = []
         for a in self.acct_repo.list_active():
             name, aid = a["display_name"], a["account_id"]
-            self.ac_combo.add_item(name, aid)
-            self.tf_from.add_item(name, aid); self.tf_to.add_item(name, aid)
-            self._acct_list.append((name, aid))
+            atype = a.get("account_type", "")
+            label = _acct_display(name, atype)
+            self.ac_combo.add_item(label, aid)
+            self.tf_from.add_item(label, aid); self.tf_to.add_item(label, aid)
+            self._acct_list.append((label, aid))
         for m in PAYMENT_METHODS:
             self.method_combo.add_item(m, m); self.tf_method.add_item(m, m)
         self._cat_pf = {}
