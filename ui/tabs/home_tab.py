@@ -220,6 +220,11 @@ class HomeTab(QWidget):
         top_row.addWidget(today_lbl)
         root.addLayout(top_row)
 
+        # ── Subtitle ──
+        sub = QLabel("Welcome to your financial summary...")
+        sub.setStyleSheet(f"font-size:14px;color:{C['text3']};margin-top:-4px;")
+        root.addWidget(sub)
+
         # ── KPI Period Cards ──
         self.kpi_row = QHBoxLayout()
         self.kpi_row.setSpacing(12)
@@ -272,11 +277,7 @@ class HomeTab(QWidget):
         cols.addLayout(right_col, 2)
         root.addLayout(cols, 1)
 
-        # ── Quick Access (all 8 + Gmail) ──
-        qa_title = QLabel("Quick Access")
-        qa_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
-        root.addWidget(qa_title)
-
+        # ── Quick Access ──
         qa_row = QHBoxLayout()
         qa_row.setSpacing(10)
         tiles = [
@@ -407,7 +408,7 @@ class HomeTab(QWidget):
                 itm.widget().deleteLater()
 
         debits = sorted([t for t in txns if t["tx_type"] == "DEBIT"],
-                        key=lambda t: t["amount"], reverse=True)[:8]
+                        key=lambda t: t["amount"], reverse=True)[:7]
         if debits:
             for tx in debits:
                 self.top_lay.addWidget(_tx_card(tx))
@@ -443,7 +444,7 @@ class HomeTab(QWidget):
         rate_lbl.setStyleSheet(f"color:{rate_color};font-size:28px;font-weight:900;")
         self.savings_inner.addWidget(rate_lbl)
 
-        # Bar — red for negative, green for positive
+        # Bar — uses stretch factors for automatic sizing
         bar_bg = QFrame()
         bar_bg.setFixedHeight(8)
         bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:4px;")
@@ -451,13 +452,12 @@ class HomeTab(QWidget):
         bar_lay.setContentsMargins(0, 0, 0, 0)
         bar_lay.setSpacing(0)
         bar_fill = QFrame()
-        fill_pct = max(0, min(100, abs(rate)))
         bar_fill.setStyleSheet(f"background:{rate_color};border-radius:4px;")
-        bar_lay.addWidget(bar_fill)
-        bar_lay.addStretch()
+        stretch_fill = max(1, int(abs(rate)))
+        stretch_rest = max(1, 100 - int(abs(rate)))
+        bar_lay.addWidget(bar_fill, stretch_fill)
+        bar_lay.addStretch(stretch_rest)
         self.savings_inner.addWidget(bar_bg)
-        QTimer.singleShot(100, lambda w=bar_fill, bg=bar_bg, pct=fill_pct:
-                          w.setFixedWidth(max(0, int(bg.sizeHint().width() * pct / 100))))
 
         # Numbers row — created as widgets, not layout (so _clear_layout removes them)
         nums = QHBoxLayout()
