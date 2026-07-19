@@ -60,14 +60,25 @@ new Chart(document.getElementById('c1'), {
     }
 });
 
+var todayIdx = __TODAY_IDX__;
+var trendData = __TREND_D__;
+var pointBg = trendData.map(function(_, i) { return i === todayIdx ? '#EF4444' : '#4F46E5'; });
+var pointR = trendData.map(function(_, i) { return i === todayIdx ? 7 : 3; });
+var pointBorder = trendData.map(function(_, i) { return i === todayIdx ? '#fff' : '#4F46E5'; });
+var borderWidth = trendData.map(function(_, i) { return i === todayIdx ? 3 : 0; });
+
 new Chart(document.getElementById('c2'), {
     type: 'line',
     data: {
         labels: __TREND_L__,
         datasets: [{
-            label: 'Spending', data: __TREND_D__,
+            label: 'Spending', data: trendData,
             borderColor: '#4F46E5', backgroundColor: 'rgba(79,70,229,0.08)',
-            fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#4F46E5'
+            fill: true, tension: 0.4,
+            pointRadius: pointR,
+            pointBackgroundColor: pointBg,
+            pointBorderColor: pointBorder,
+            pointBorderWidth: borderWidth
         }]
     },
     options: {
@@ -363,13 +374,26 @@ class HomeTab(QWidget):
                 cn = t.get("cat_name") or "Other"
                 cats[cn] = cats.get(cn, 0) + t["amount"]
 
-        trend_debit = {}
-        for t in txns:
-            if t["tx_type"] == "DEBIT":
-                d = t["tx_date"]
-                key = d[:7] if self._period == "year" else d
-                trend_debit[key] = trend_debit.get(key, 0) + t["amount"]
-        all_dates = sorted(trend_debit.keys())
+        # Spending trend — for "today", show last 7 days with today highlighted
+        if self._period == "today":
+            today_d = date.today()
+            week_from = (today_d - timedelta(days=6)).isoformat()
+            week_txns = self.tx.list_filters(date_from=week_from, date_to=today_d.isoformat(), limit=10000)
+            trend_debit = {}
+            for t in week_txns:
+                if t["tx_type"] == "DEBIT":
+                    trend_debit[t["tx_date"]] = trend_debit.get(t["tx_date"], 0) + t["amount"]
+            all_dates = [(today_d - timedelta(days=j)).isoformat() for j in range(6, -1, -1)]
+            today_idx = 6
+        else:
+            trend_debit = {}
+            for t in txns:
+                if t["tx_type"] == "DEBIT":
+                    d = t["tx_date"]
+                    key = d[:7] if self._period == "year" else d
+                    trend_debit[key] = trend_debit.get(key, 0) + t["amount"]
+            all_dates = sorted(trend_debit.keys())
+            today_idx = -1
 
         need_total = sum(t["amount"] for t in txns if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
         want_total = sum(t["amount"] for t in txns if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
@@ -396,6 +420,7 @@ class HomeTab(QWidget):
             trend_labels = [d[5:] for d in all_dates]
         html = html.replace("__TREND_L__", json.dumps(trend_labels))
         html = html.replace("__TREND_D__", json.dumps([round(trend_debit.get(d, 0), 2) for d in all_dates]))
+        html = html.replace("__TODAY_IDX__", str(today_idx))
         html = html.replace("__NEED__", str(round(need_total, 2)))
         html = html.replace("__WANT__", str(round(want_total + none_total, 2)))
         html = html.replace("__ACCT_L__", json.dumps(all_accts))
