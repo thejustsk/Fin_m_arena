@@ -41,7 +41,7 @@ QFrame#card {{ background: {C['surface']}; border: 1px solid {C['border2']}; bor
 QFrame#metric-card {{ background: {C['surface']}; border: 1px solid {C['border2']}; border-radius: {C['radius']}; padding: 16px 20px; }}
 QProgressBar {{ background: {C['surface2']}; border: none; border-radius: 4px; height: 6px; }}
 QProgressBar::chunk {{ background: {C['accent']}; border-radius: 4px; }}
-QWidget#sidebar {{ background: #FFFFFF; border-right: 1px solid {C['border']}; }}
+QWidget#sidebar {{ background: white; }}
 QPushButton#sidebar-item {{
     background: transparent; color: #4338CA; border: none;
     border-radius: {C['radius_sm']}; padding: 9px 14px; text-align: left; font-weight: 600;

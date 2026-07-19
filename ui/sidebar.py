@@ -45,7 +45,7 @@ NAV_GROUPS = [
 ]
 
 EXPANDED_W = 230
-COLLAPSED_W = 68
+COLLAPSED_W = 76
 ANIM_STEPS = 10
 ANIM_MS = 180
 
@@ -83,15 +83,32 @@ class Sidebar(QWidget):
         self._expanded = True
         self._animating = False
         self._has_dues = False
+        self._due_count = 0
         self._due_dots = []
         self._build()
 
     def _build(self):
-        self.setStyleSheet(f"background: #FFFFFF; border-right: 1px solid {C['border']};")
+        self.setStyleSheet("background: transparent;")
 
-        self.lay = QVBoxLayout(self)
+        # Outer layout with margins so the card floats
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(8, 8, 0, 8)
+        self._outer.setSpacing(0)
+
+        # Card container
+        self.card = QFrame()
+        self.card.setObjectName("sidebar-card")
+        self.card.setStyleSheet(
+            f"QFrame#sidebar-card{{background:#F0EEFF;border:1px solid {C['border2']};"
+            f"border-radius:12px;}}"
+            f"QLabel{{background:transparent;border:none;outline:none;}}")
+        from ui.widgets.metric_card import add_shadow
+        add_shadow(self.card, blur=16, y_offset=2)
+
+        self.lay = QVBoxLayout(self.card)
         self.lay.setContentsMargins(10, 14, 10, 14)
         self.lay.setSpacing(2)
+        self._outer.addWidget(self.card)
 
         # ── Header — click to toggle ──
         hdr = QHBoxLayout()
@@ -233,6 +250,10 @@ class Sidebar(QWidget):
         self._anim_start = start
         self._anim_delta = end - start
 
+        # Reduce margins on collapse to prevent icon clipping
+        m = 8 if self._expanded else 4
+        self._outer.setContentsMargins(m, m, 0, m)
+
         self.title_label.setVisible(self._expanded)
         self.hdr_frame.setVisible(self._expanded)
         self.title_icon.setVisible(not self._expanded)
@@ -287,7 +308,7 @@ class Sidebar(QWidget):
 
         if not self._expanded and self._has_dues:
             self._dots_container.show()
-            count = self._rem_lay.count()
+            count = self._due_count
             for _ in range(min(count, 8)):
                 dot = QFrame()
                 dot.setFixedSize(32, 6)
@@ -308,7 +329,7 @@ class Sidebar(QWidget):
 
         if not self._cr:
             self._rem_header.hide(); self._rem_scroll.hide()
-            self._has_dues = False; self._refresh_dots()
+            self._has_dues = False; self._due_count = 0; self._refresh_dots()
             return
 
         today = date.today()
@@ -351,10 +372,11 @@ class Sidebar(QWidget):
 
         reminders.sort(key=lambda r: r[0])
         self._has_dues = len(reminders) > 0
+        self._due_count = len(reminders)
 
         if not reminders:
             self._rem_header.hide(); self._rem_scroll.hide()
-            self._has_dues = False; self._refresh_dots()
+            self._has_dues = False; self._due_count = 0; self._refresh_dots()
             return
 
         # Expanded: show cards. Collapsed: show dots.
