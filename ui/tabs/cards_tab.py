@@ -94,20 +94,39 @@ def _calc_due(stmt_str, grace_days):
 
 
 def _build_cycles(stmt_day, num=8):
-    """Build last N cycles from statement day. Returns [(start, end), ...] newest first."""
+    """Build cycles from statement day. Includes current period.
+    Returns list of (start, end) tuples, newest first.
+    """
+    if not stmt_day:
+        return []
     today = date.today()
-    stmt_dates = []
-    cur = today.replace(day=min(stmt_day, 28))
+    sd = min(stmt_day, 28)
+
+    # Find most recent statement date <= today
+    cur = today.replace(day=sd)
     if cur > today:
-        cur = (cur.replace(day=1) - timedelta(days=1)).replace(day=min(stmt_day, 28))
-    for _ in range(num):
-        stmt_dates.append(cur)
+        cur = (cur.replace(day=1) - timedelta(days=1)).replace(day=sd)
+
+    # Generate statement dates going backwards
+    stmt_dates = [cur]
+    for _ in range(num - 1):
         prev = (cur.replace(day=1) - timedelta(days=1))
-        cur = prev.replace(day=min(stmt_day, 28))
-    stmt_dates.reverse()
+        cur = prev.replace(day=sd)
+        stmt_dates.append(cur)
+    stmt_dates.reverse()  # oldest first
+
+    # Add NEXT statement date to cover current period
+    last = stmt_dates[-1]
+    if last.month == 12:
+        nxt = last.replace(year=last.year + 1, month=1, day=sd)
+    else:
+        nxt = last.replace(month=last.month + 1, day=sd)
+    stmt_dates.append(nxt)
+
+    # Build cycles
     cycles = []
     for i in range(1, len(stmt_dates)):
-        cycles.append((stmt_dates[i-1] + timedelta(days=1), stmt_dates[i]))
+        cycles.append((stmt_dates[i - 1] + timedelta(days=1), stmt_dates[i]))
     cycles.reverse()  # newest first
     return cycles
 
@@ -137,7 +156,7 @@ def _fifo_allocate(cycles, all_txns):
     # FIFO: allocate each payment to oldest cycle with remaining > 0
     for tx in credits:
         amt = tx["amount"]
-        for cd in cycle_data:
+        for cd in reversed(cycle_data):  # oldest first
             if cd["remaining"] > 0 and amt > 0:
                 alloc = min(amt, cd["remaining"])
                 cd["paid"] += alloc
@@ -739,7 +758,7 @@ class CardsTab(QWidget):
         self.header_lay.addWidget(hdr)
         self.header_container.show()
 
-        # ── Transactions with FIFO cycle headers ──
+        # ── Transactions with FIFO cycle headers (newest first) ──
         txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True)
         txn_scroll.setFrameShape(QFrame.NoFrame)
         txn_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
@@ -748,51 +767,79 @@ class CardsTab(QWidget):
         txn_lay.setSpacing(4); txn_lay.setContentsMargins(0, 0, 0, 0)
 
         all_txns = self._current_all_txns
+        cycle_data = self._current_cycle_data
 
         if not all_txns:
             nt = QLabel("No transactions found for this card.")
             nt.setStyleSheet(f"color:{C['text3']};font-size:12px;padding:20px;")
             nt.setAlignment(Qt.AlignCenter)
             txn_lay.addWidget(nt)
-        else:
-            # Always show ALL transactions grouped by date
+        elif not cycle_data:
+            # No cycles (no statement_date) — flat list
             all_txns.sort(key=lambda t: (t["tx_date"], t.get("created_at", "")), reverse=True)
             by_date = OrderedDict()
             for tx in all_txns:
                 d = tx["tx_date"]
                 if d not in by_date: by_date[d] = []
                 by_date[d].append(tx)
-
-            # Cycle headers: insert at cycle start dates
-            cycle_data = self._current_cycle_data
-            cycle_starts = {cd["start"].isoformat(): cd for cd in cycle_data if cd["debits"] > 0}
-            shown_cycles = set()
-
             for d_str, day_txns in by_date.items():
-                # Insert cycle header if this date starts a new cycle
-                if d_str in cycle_starts and d_str not in shown_cycles:
-                    shown_cycles.add(d_str)
-                    cd = cycle_starts[d_str]
-                    rem_color = "#10B981" if cd["remaining"] <= 0 else ("#F59E0B" if cd["remaining"] <= cd["debits"] * 0.5 else "#EF4444")
-                    ch = QFrame()
-                    ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:8px 12px;")
-                    cl = QHBoxLayout(ch); cl.setContentsMargins(8, 6, 8, 6); cl.setSpacing(12)
-                    cl.addWidget(QLabel(f"<b>📅 {cd['start'].isoformat()} → {cd['end'].isoformat()}</b>"))
-                    cl.addStretch()
-                    cl.addWidget(QLabel(f"<span style='color:#EF4444;font-weight:700;'>Spent: {fmt_money(cd['debits'])}</span>"))
-                    if cd["paid"] > 0:
-                        cl.addWidget(QLabel(f"<span style='color:#10B981;font-weight:700;'>Paid: {fmt_money(cd['paid'])}</span>"))
-                    cl.addWidget(QLabel(f"<span style='color:{rem_color};font-weight:700;'>Remaining: {fmt_money(cd['remaining'])}</span>"))
-                    txn_lay.addWidget(ch)
-
-                # Day header
-                try:
-                    txn_lay.addWidget(_day_header(date.fromisoformat(d_str).strftime("%A, %d %b")))
-                except:
-                    txn_lay.addWidget(_day_header(d_str))
-
-                # Transaction cards
+                try: txn_lay.addWidget(_day_header(date.fromisoformat(d_str).strftime("%A, %d %b")))
+                except: txn_lay.addWidget(_day_header(d_str))
                 for tx in day_txns:
+                    txn_lay.addWidget(_tx_card(tx))
+        else:
+            # Group transactions by cycle_id for fast lookup
+            # cycle_data is already newest first from _build_cycles
+            # Assign each transaction to its cycle
+            txn_by_cycle = {i: [] for i in range(len(cycle_data))}
+            unassigned = []
+            for tx in all_txns:
+                tx_date = tx["tx_date"]
+                assigned = False
+                for i, cd in enumerate(cycle_data):
+                    if cd["start"].isoformat() <= tx_date <= cd["end"].isoformat():
+                        txn_by_cycle[i].append(tx)
+                        assigned = True
+                        break
+                if not assigned:
+                    unassigned.append(tx)
+
+            # Show cycles newest first, skip empty
+            for i, cd in enumerate(cycle_data):
+                cycle_txns = txn_by_cycle.get(i, [])
+                if not cycle_txns:
+                    continue
+
+                # Cycle header with FIFO stats
+                rem_color = "#10B981" if cd["remaining"] <= 0 else ("#F59E0B" if cd["remaining"] <= cd["debits"] * 0.5 else "#EF4444")
+                ch = QFrame()
+                ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:8px 12px;")
+                cl = QHBoxLayout(ch); cl.setContentsMargins(8, 6, 8, 6); cl.setSpacing(12)
+                cl.addWidget(QLabel(f"<b>📅 {cd['start'].isoformat()} → {cd['end'].isoformat()}</b>"))
+                cl.addStretch()
+                cl.addWidget(QLabel(f"<span style='color:#EF4444;font-weight:700;'>Spent: {fmt_money(cd['debits'])}</span>"))
+                if cd["paid"] > 0:
+                    cl.addWidget(QLabel(f"<span style='color:#10B981;font-weight:700;'>Paid: {fmt_money(cd['paid'])}</span>"))
+                cl.addWidget(QLabel(f"<span style='color:{rem_color};font-weight:700;'>Remaining: {fmt_money(cd['remaining'])}</span>"))
+                txn_lay.addWidget(ch)
+
+                # Group by date within cycle (newest first)
+                by_date = OrderedDict()
+                for tx in sorted(cycle_txns, key=lambda t: t["tx_date"], reverse=True):
+                    d = tx["tx_date"]
+                    if d not in by_date: by_date[d] = []
+                    by_date[d].append(tx)
+                for d_str, day_txns in by_date.items():
+                    try: txn_lay.addWidget(_day_header(date.fromisoformat(d_str).strftime("%A, %d %b")))
+                    except: txn_lay.addWidget(_day_header(d_str))
+                    for tx in day_txns:
+                        txn_lay.addWidget(_tx_card(tx))
+
+            # Show unassigned transactions (before first cycle)
+            if unassigned:
+                txn_lay.addWidget(QLabel("<b>Earlier Transactions</b>").setStyleSheet(
+                    f"color:{C['text3']};font-size:12px;font-weight:700;padding:8px 0 4px 0;background:transparent;border:none;"))
+                for tx in sorted(unassigned, key=lambda t: t["tx_date"], reverse=True):
                     txn_lay.addWidget(_tx_card(tx))
 
         txn_lay.addStretch()
