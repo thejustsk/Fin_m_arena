@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QTableWidget, QTableWidgetItem,
                               QTabWidget, QLineEdit, QComboBox, QDoubleSpinBox,
                               QFormLayout, QDialog, QDialogButtonBox, QMessageBox,
-                              QSpinBox, QCheckBox)
+                              QSpinBox, QCheckBox, QFrame)
 from PyQt5.QtCore import Qt
 from ui.theme import C
 from ui.sidebar import fmt_money
@@ -16,6 +16,7 @@ class SettingsTab(QWidget):
         super().__init__(parent)
         self.db = db
         self.acct = repos["accounts"]
+        self.cards = repos.get("cards")
         self.lu = repos["lookups"]
         self.sec = services["security"]
         self._build()
@@ -95,6 +96,7 @@ class SettingsTab(QWidget):
         l.addRow("Backup:", bb)
         return w
 
+    # ── Add Account (CURRENT / CASH / WALLET only) ──
     def _add_account(self):
         d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
         n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
@@ -110,6 +112,52 @@ class SettingsTab(QWidget):
                 self.refresh()
             except ValueError as e:
                 QMessageBox.warning(self, "Duplicate", str(e))
+
+    # ── Edit Account ──
+    def _edit_account(self, acct_data):
+        """Open edit dialog. Credit cards → cards tab edit dialog. Others → pre-filled account dialog."""
+        acct_type = acct_data.get("account_type", "")
+        aid = acct_data["account_id"]
+
+        if acct_type == "CREDIT_CARD" and self.cards:
+            # Use the Cards tab edit dialog
+            card = self.cards.get_by_account(aid)
+            if card:
+                from ui.tabs.cards_tab import AddCardDialog
+                dlg = AddCardDialog(self.cards, self.acct, card=card, parent=self)
+                dlg.card_updated.connect(self.refresh)
+                dlg.exec_()
+                return
+            else:
+                QMessageBox.warning(self, "Not Found", "No card record found for this account.")
+                return
+
+        # Non-credit: pre-filled account dialog
+        d = QDialog(self)
+        d.setWindowTitle("Edit Account")
+        d.setMinimumWidth(400)
+        f = QFormLayout(d)
+
+        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); f.addRow("Name:", n)
+        lb = QLineEdit(); lb.setText(acct_data.get("short_label", "")); lb.setMaxLength(4); f.addRow("Label:", lb)
+        t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"])
+        idx = t.findText(acct_type)
+        if idx >= 0: t.setCurrentIndex(idx)
+        t.setEnabled(False)  # type can't be changed
+        f.addRow("Type:", t)
+        ob = QDoubleSpinBox(); ob.setPrefix("₹ "); ob.setRange(-99999999, 99999999)
+        ob.setValue(acct_data.get("opening_balance", 0)); f.addRow("Opening Balance:", ob)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Update")
+        bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
+
+        if d.exec_() == QDialog.Accepted and n.text().strip():
+            self.acct.update(aid,
+                             display_name=n.text().strip(),
+                             short_label=(lb.text() or n.text()[:4]).upper(),
+                             opening_balance=ob.value())
+            self.refresh()
 
     def _add_category(self):
         name, ok = QInputDialog_getText(self, "New Category", "Name:")
@@ -170,12 +218,28 @@ class SettingsTab(QWidget):
             self.acct_table.setItem(i, 2, QTableWidgetItem(a["account_type"]))
             self.acct_table.setItem(i, 3, QTableWidgetItem(fmt_money(a["opening_balance"])))
             self.acct_table.setItem(i, 4, QTableWidgetItem("✓" if a["is_active"] else "✗"))
-            btn = QPushButton("Deactivate" if a["is_active"] else "Activate")
-            btn.setStyleSheet(f"color:{C['red'] if a['is_active'] else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 8px;")
-            btn.setCursor(Qt.PointingHandCursor)
+
+            # Action: Edit + Activate/Deactivate in a row
+            action_w = QWidget()
+            action_lay = QHBoxLayout(action_w)
+            action_lay.setContentsMargins(4, 2, 4, 2)
+            action_lay.setSpacing(6)
+
+            edit_btn = QPushButton("Edit")
+            edit_btn.setStyleSheet(f"color:{C['accent']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 10px;")
+            edit_btn.setCursor(Qt.PointingHandCursor)
+            acct_data = dict(a)
+            edit_btn.clicked.connect(lambda _, ad=acct_data: self._edit_account(ad))
+            action_lay.addWidget(edit_btn)
+
+            toggle_btn = QPushButton("Deactivate" if a["is_active"] else "Activate")
+            toggle_btn.setStyleSheet(f"color:{C['red'] if a['is_active'] else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 8px;")
+            toggle_btn.setCursor(Qt.PointingHandCursor)
             aid = a["account_id"]; active = a["is_active"]
-            btn.clicked.connect(lambda _, aid=aid, act=active: self._toggle_account(aid, act))
-            self.acct_table.setCellWidget(i, 5, btn)
+            toggle_btn.clicked.connect(lambda _, aid=aid, act=active: self._toggle_account(aid, act))
+            action_lay.addWidget(toggle_btn)
+
+            self.acct_table.setCellWidget(i, 5, action_w)
 
         cats = self.lu.list_categories()
         self.cat_table.setRowCount(len(cats))
