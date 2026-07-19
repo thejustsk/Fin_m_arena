@@ -114,13 +114,14 @@ class Sidebar(QWidget):
         hdr = QHBoxLayout()
         hdr.setSpacing(8)
 
-        # Collapsed: "FM" monogram icon
-        self.title_icon = QLabel("FM")
-        self.title_icon.setFixedSize(40, 40)
+        # Collapsed: FM monogram — same height/style as selected nav button
+        self.title_icon = QLabel(" FM ")
+        self.title_icon.setFixedHeight(40)
         self.title_icon.setAlignment(Qt.AlignCenter)
         self.title_icon.setStyleSheet(
-            f"font-size: 15px; font-weight: 800; color: white; "
-            f"background: {_PRIMARY}; border-radius: 10px;")
+            "font-size: 14px; font-weight: 800; color: white; "
+            "background: #4338CA; border: none; border-radius: 8px; "
+            "padding: 8px 12px;")
         self.title_icon.setCursor(QCursor(Qt.PointingHandCursor))
         self.title_icon.mousePressEvent = lambda e: self._toggle()
         hdr.addWidget(self.title_icon)
