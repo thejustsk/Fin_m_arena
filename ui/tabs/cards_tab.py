@@ -478,29 +478,11 @@ class RemindersWidget(QWidget):
             if not stmt_day:
                 continue
 
-            # Get all transactions
-            try:
-                all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000) if self.tx_repo else []
-            except:
-                all_txns = []
-
-            # Calculate total outstanding using FIFO
-            total_remaining = 0
-            cycle_data = []
-            if all_txns:
-                if stmt_day:
-                    try:
-                        cycles = _build_cycles(stmt_day, 12)
-                        cycle_data = _fifo_allocate(cycles, all_txns)
-                        total_remaining = sum(cd["remaining"] for cd in cycle_data)
-                    except:
-                        pass
-                if total_remaining == 0:
-                    # Fallback: just use balance from transactions
-                    try:
-                        total_remaining = abs(self.bal.get_balance(aid)) if self.bal else 0
-                    except:
-                        pass
+            # Outstanding balance for statement-reminder check
+            outstanding = 0
+            if self.bal:
+                try: outstanding = abs(self.bal.get_balance(aid))
+                except: pass
 
             # Type 1: Statement generating (5 days before statement, only if balance > 0)
             if stmt_day:
@@ -512,33 +494,54 @@ class RemindersWidget(QWidget):
                         else:
                             stmt = stmt.replace(month=today.month + 1)
                     du = (stmt - today).days
-                    outstanding = 0
-                    if self.bal:
-                        try: outstanding = abs(self.bal.get_balance(aid))
-                        except: pass
                     if 0 <= du <= 5 and outstanding > 0:
-                        col = "#F59E0B" if du <= 2 else "#4F46E5"
+                        col = "#D97706" if du <= 2 else "#4F46E5"
                         reminders.append((du, f"📅 {name} — Statement in {du}d (₹{outstanding:,.0f})", col))
                 except:
                     pass
 
-            # Due reminders — show total remaining across ALL cycles
-            if total_remaining > 0:
-                due_str = card.get("due_date", "") or ""
-                if not due_str:
-                    due_str = _calc_due(stmt_str, grace)
-                if due_str:
-                    try:
-                        due = date.fromisoformat(due_str)
-                        dd = (due - today).days
-                        if dd >= -5:
-                            col = "#EF4444" if dd <= 0 else ("#F59E0B" if dd <= 3 else "#10B981")
-                            if dd < 0:
-                                reminders.append((-100, f"🚨 OVERDUE {abs(dd)}d — {name} (₹{total_remaining:,.0f})", col))
-                            else:
-                                reminders.append((dd, f"💰 Due in {dd}d — {name} (₹{total_remaining:,.0f})", col))
-                    except:
-                        pass
+            # ── Due reminders — per-cycle from card_cycles table ──
+            # Current cycle = statement_date >= today → skip
+            # Previous cycles = statement_date < today AND remaining > 0 → generate reminder
+            try:
+                saved_cycles = self.cr.get_cycles(aid)
+            except:
+                saved_cycles = []
+            today_iso = today.isoformat()
+            for cyc in saved_cycles:
+                # cyc fields: cycle_start_date, statement_date (=cycle end), remaining, due_date
+                cyc_end = cyc.get("statement_date", "")
+                if not cyc_end or cyc_end >= today_iso:
+                    continue  # current cycle — skip
+
+                remaining = cyc.get("remaining", 0) or 0
+                if remaining <= 0:
+                    continue  # fully paid — skip
+
+                due_date_str = cyc.get("due_date", "") or ""
+                if not due_date_str or "-" not in due_date_str:
+                    continue  # no due date set — skip
+
+                # Build cycle name from cycle_start_date
+                cs_str = cyc.get("cycle_start_date", "")
+                try:
+                    cycle_nm = _cycle_name(date.fromisoformat(cs_str))
+                except:
+                    cycle_nm = cs_str
+
+                try:
+                    due_dt = date.fromisoformat(due_date_str)
+                    dd = (due_dt - today).days
+                except:
+                    continue
+
+                if dd < 0:
+                    # OVERDUE — due date has passed
+                    reminders.append((-100, f"🚨 OVERDUE {abs(dd)}d — {name} ({cycle_nm})  ₹{remaining:,.0f}", "#DC2626"))
+                else:
+                    # UPCOMING due
+                    col = "#D97706" if dd <= 3 else "#059669"
+                    reminders.append((dd, f"💰 Due in {dd}d — {name} ({cycle_nm})  ₹{remaining:,.0f}", col))
 
         # High-value transactions
         min_limit = 499
@@ -781,14 +784,12 @@ class CardsTab(QWidget):
         cycles = _build_cycles(stmt_day, 12)
         self._current_cycle_data = _fifo_allocate(cycles, self._current_all_txns)
 
-        # Amount Due = remaining from LAST COMPLETED cycle (the one that's due)
-        # NOT the sum of all cycles (that = current outstanding)
+        # Amount Due = sum of remaining from ALL previous cycles (excluding current)
         amount_due = 0
         today_str = date.today().isoformat()
         for cd in self._current_cycle_data:
-            if cd["end"].isoformat() <= today_str and cd["remaining"] > 0:
-                amount_due = cd["remaining"]
-                break  # newest completed cycle first (cycles are newest-first)
+            if cd["end"].isoformat() < today_str:  # previous cycle only
+                amount_due += cd["remaining"]
         # Save default due date to card if not set
         if amount_due > 0 and not due_str:
             grace = card.get("grace_days", 20)
@@ -824,6 +825,10 @@ class CardsTab(QWidget):
         self.header_lay.addWidget(hdr)
         self.header_container.show()
 
+        # Statement info for cycle headers
+        stmt_str = card.get("statement_date", "")
+        grace = card.get("grace_days", 20)
+
         # ── Transactions with FIFO cycle headers (newest first) ──
         txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True)
         txn_scroll.setFrameShape(QFrame.NoFrame)
@@ -834,6 +839,12 @@ class CardsTab(QWidget):
 
         all_txns = self._current_all_txns
         cycle_data = self._current_cycle_data
+
+        # Load saved cycles from DB for due date lookups
+        try:
+            saved_cycles = self.cr.get_cycles(aid)
+        except:
+            saved_cycles = []
 
         if not all_txns:
             nt = QLabel("No transactions found for this card.")
@@ -876,17 +887,49 @@ class CardsTab(QWidget):
                 if not cycle_txns:
                     continue
 
-                # Cycle header with FIFO stats
-                rem_color = "#10B981" if cd["remaining"] <= 0 else ("#F59E0B" if cd["remaining"] <= cd["debits"] * 0.5 else "#EF4444")
+                # Cycle header with FIFO stats + card gradient bg
+                rem_color = "#059669" if cd["remaining"] <= 0 else ("#D97706" if cd["remaining"] <= cd["debits"] * 0.5 else "#DC2626")
                 ch = QFrame()
-                ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:8px 12px;")
-                cl = QHBoxLayout(ch); cl.setContentsMargins(8, 6, 8, 6); cl.setSpacing(12)
-                cl.addWidget(QLabel(f"<b>📅 {cd['start'].isoformat()} → {cd['end'].isoformat()}</b>"))
+                ch.setMinimumHeight(40)
+                ch.setStyleSheet(f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {c1}22,stop:1 {c2}22);border:none;border-radius:8px;padding:6px 8px;")
+                cl = QHBoxLayout(ch); cl.setContentsMargins(10, 4, 10, 4); cl.setSpacing(8)
+                # Cycle name + statement ordinal
+                cycle_name = _cycle_name(cd["start"])
+                stmt_label = _stmt_display(stmt_str) if stmt_str else ""
+                cl.addWidget(QLabel(f"<b style='color:{C['text']};'>📅 {cycle_name}  (stmt: {stmt_label})</b>"))
                 cl.addStretch()
-                cl.addWidget(QLabel(f"<span style='color:#EF4444;font-weight:700;'>Spent: {fmt_money(cd['debits'])}</span>"))
+                cl.addWidget(QLabel(f"<span style='color:#DC2626;font-weight:700;'>Spent: {fmt_money(cd['debits'])}</span>"))
                 if cd["paid"] > 0:
-                    cl.addWidget(QLabel(f"<span style='color:#10B981;font-weight:700;'>Paid: {fmt_money(cd['paid'])}</span>"))
+                    cl.addWidget(QLabel(f"<span style='color:#059669;font-weight:700;'>Paid: {fmt_money(cd['paid'])}</span>"))
                 cl.addWidget(QLabel(f"<span style='color:{rem_color};font-weight:700;'>Remaining: {fmt_money(cd['remaining'])}</span>"))
+                # Editable due date per cycle
+                due_lbl = QLabel(f"<span style='color:{C['text3']};font-size:11px;'>Due:</span>")
+                cl.addWidget(due_lbl)
+                due_edit = QDateEdit(); due_edit.setCalendarPopup(True); due_edit.setDisplayFormat("dd MMM yyyy")
+                due_edit.setFixedHeight(28); due_edit.setMinimumWidth(130)
+                due_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                due_edit.setStyleSheet(f"QDateEdit{{border:1px solid {C['border']};border-radius:4px;padding:2px 6px;font-size:11px;background:white;color:{C['text']};}}")
+                # Get saved due_date from DB, or calculate default
+                saved_due = ""
+                for sc in saved_cycles:
+                    if sc.get("cycle_start_date","") == cd["start"].isoformat():
+                        saved_due = sc.get("due_date","") or ""
+                        break
+                if not saved_due:
+                    try: saved_due = (cd["end"] + timedelta(days=grace)).isoformat()
+                    except: pass
+                try:
+                    due_edit.setDate(QDate.fromString(saved_due, "yyyy-MM-dd") if saved_due and "-" in saved_due else QDate.currentDate())
+                except:
+                    due_edit.setDate(QDate.currentDate())
+                _cyc_cs = cd["start"].isoformat()
+                def _save_cycle_due(d, cs=_cyc_cs):
+                    for sc in saved_cycles:
+                        if sc.get("cycle_start_date","") == cs:
+                            self.cr.update_cycle(sc["cycle_id"], due_date=d.toString("yyyy-MM-dd"))
+                            break
+                due_edit.dateChanged.connect(_save_cycle_due)
+                cl.addWidget(due_edit)
                 txn_lay.addWidget(ch)
 
                 # Group by date within cycle (newest first)
@@ -903,8 +946,9 @@ class CardsTab(QWidget):
 
             # Show unassigned transactions (before first cycle)
             if unassigned:
-                txn_lay.addWidget(QLabel("<b>Earlier Transactions</b>").setStyleSheet(
-                    f"color:{C['text3']};font-size:12px;font-weight:700;padding:8px 0 4px 0;background:transparent;border:none;"))
+                unassigned_lbl = QLabel("<b>Earlier Transactions</b>")
+                unassigned_lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;font-weight:700;padding:8px 0 4px 0;background:transparent;border:none;")
+                txn_lay.addWidget(unassigned_lbl)
                 for tx in sorted(unassigned, key=lambda t: t["tx_date"], reverse=True):
                     txn_lay.addWidget(_tx_card(tx))
 
@@ -919,21 +963,24 @@ class CardsTab(QWidget):
         aid = card["account_id"]
         balance = abs(self.bal.get_balance(aid))
 
-        # Calculate FIFO total remaining
+        # Amount Due = sum of remaining from all previous cycles (not current)
         stmt_day = _parse_stmt_day(card.get("statement_date", ""))
-        total_remaining = balance
+        amount_due = 0
         if stmt_day:
             try:
                 all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
-                cycles = _build_cycles(stmt_day, 6)
+                cycles = _build_cycles(stmt_day, 12)
                 cycle_data = _fifo_allocate(cycles, all_txns)
-                total_remaining = sum(cd["remaining"] for cd in cycle_data)
+                today_str = date.today().isoformat()
+                for cd in cycle_data:
+                    if cd["end"].isoformat() < today_str:
+                        amount_due += cd["remaining"]
             except:
                 pass
 
         self.sf_opt.blockSignals(True); self.sf_opt.clear()
-        self.sf_opt.addItem(f"Total Outstanding — {fmt_money(total_remaining)}", total_remaining)
-        self.sf_opt.addItem(f"Current Balance — {fmt_money(balance)}", balance)
+        self.sf_opt.addItem(f"Amount Due — {fmt_money(amount_due)}", amount_due)
+        self.sf_opt.addItem(f"Current Outstanding — {fmt_money(balance)}", balance)
         self.sf_opt.addItem("Custom Amount...", -1)
         self.sf_opt.blockSignals(False)
 
@@ -968,6 +1015,8 @@ class CardsTab(QWidget):
             # Clear custom amount
             self.sf_custom_amt.setValue(0)
             self.sf_opt.setCurrentIndex(0)
+            # Re-compute FIFO cycles into DB so reminders pick up new data
+            self._save_cycles(self._selected_card)
             # Real-time update: refresh everything
             self._show_details(self._selected_card)
             self.reminders.load_reminders(self.cr.list_active())
