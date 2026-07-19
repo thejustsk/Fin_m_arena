@@ -23,6 +23,14 @@ _ACCT_TYPE_ICON = {
     "CASH": "💵",
 }
 
+# Gradient pairs for type header cards
+_TYPE_GRADIENTS = {
+    "CURRENT":     ("#3B82F6", "#BFDBFE"),  # blue
+    "CREDIT_CARD": ("#EF4444", "#FECACA"),  # red
+    "WALLET":      ("#F59E0B", "#FDE68A"),  # amber
+    "CASH":        ("#10B981", "#A7F3D0"),  # green
+}
+
 
 class BalancesTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
@@ -135,13 +143,22 @@ class BalancesTab(QWidget):
 
         # ── Net Worth ──
         nw = self.bal.net_worth()
+        nw_color = "#10B981" if nw >= 0 else "#EF4444"
         self.nw_val.setText(fmt_money(nw))
+        self.nw_val.setStyleSheet(f"color:{nw_color};font-size:26px;font-weight:900;")
 
         # ── Breakdown by type — update existing labels ──
         type_totals = self.bal.by_type()
         for acct_type, val_lbl in self._bd_labels.items():
             val = type_totals.get(acct_type, 0)
             val_lbl.setText(fmt_money(val))
+            # Credit cards: balance is liability, so negative = good (green), positive = red
+            # Others: positive = good (green), negative = red
+            if acct_type == "CREDIT_CARD":
+                vc = "#10B981" if val <= 0 else "#EF4444"
+            else:
+                vc = "#10B981" if val >= 0 else "#EF4444"
+            val_lbl.setStyleSheet(f"color:{vc};font-size:15px;font-weight:700;")
 
         # ── Account Balances ──
         self._clear_layout(self.acct_container)
@@ -165,29 +182,57 @@ class BalancesTab(QWidget):
                 type_total = sum(r.get("balance", 0) for r in accts)
                 single = len(accts) == 1
 
-                # Type header card (gradient gray to white)
+                # Type header card
+                g1, g2 = _TYPE_GRADIENTS.get(acct_type, ("#6B7280", "#F9FAFB"))
                 hdr = QFrame()
                 hdr.setStyleSheet(
                     f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                    f"stop:0 #6B7280,stop:1 #F9FAFB);border-radius:10px;}}"
+                    f"stop:0 {g1},stop:1 {g2});border-radius:10px;}}"
                     f"QLabel{{background:transparent;border:none;}}")
-                hdr_lay = QHBoxLayout(hdr)
+                hdr_lay = QVBoxLayout(hdr)
                 hdr_lay.setContentsMargins(14, 10, 14, 10)
-                hdr_lay.setSpacing(8)
+                hdr_lay.setSpacing(4)
+                # Icon + name + amount row
+                top_row = QHBoxLayout()
+                top_row.setSpacing(8)
                 h_icon = QLabel(icon)
                 h_icon.setStyleSheet("font-size:16px;")
-                hdr_lay.addWidget(h_icon)
+                top_row.addWidget(h_icon)
                 if single:
                     acct_name = accts[0].get("display_name", label)
                     h_text = QLabel(f"<b style='font-size:13px;color:#111827;'>{acct_name}</b>")
                 else:
                     h_text = QLabel(f"<b style='font-size:13px;color:#111827;'>{label}</b>")
-                hdr_lay.addWidget(h_text)
-                hdr_lay.addStretch()
+                top_row.addWidget(h_text)
+                top_row.addStretch()
                 tc = C['green'] if type_total >= 0 else C['red']
                 sign = "" if type_total >= 0 else "- "
                 h_total = QLabel(f"<b style='font-size:14px;color:{tc};'>{sign}{fmt_money(abs(type_total))}</b>")
-                hdr_lay.addWidget(h_total)
+                top_row.addWidget(h_total)
+                hdr_lay.addLayout(top_row)
+                # Utilization bar for single credit card accounts
+                if single and acct_type == "CREDIT_CARD":
+                    limit = accts[0].get("credit_limit", 0) or 0
+                    util = min(abs(type_total) / limit, 1.0) if limit > 0 else 0
+                    if util < 0.3:
+                        util_color = "#10B981"
+                    elif util < 0.7:
+                        util_color = "#F59E0B"
+                    else:
+                        util_color = "#EF4444"
+                    bar_bg = QFrame()
+                    bar_bg.setFixedHeight(4)
+                    bar_bg.setStyleSheet(f"background:rgba(0,0,0,0.1);border-radius:2px;")
+                    bar_lay = QHBoxLayout(bar_bg)
+                    bar_lay.setContentsMargins(0, 0, 0, 0)
+                    bar_lay.setSpacing(0)
+                    bar_fill = QFrame()
+                    bar_fill.setStyleSheet(f"background:{util_color};border-radius:2px;")
+                    fs = max(1, int(util * 100))
+                    rs = max(1, 100 - fs)
+                    bar_lay.addWidget(bar_fill, fs)
+                    bar_lay.addStretch(rs)
+                    hdr_lay.addWidget(bar_bg)
                 self.acct_container.addWidget(hdr)
 
                 # Individual account cards
@@ -198,17 +243,45 @@ class BalancesTab(QWidget):
                         card.setStyleSheet(
                             f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
                             f"border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
-                        card_lay = QHBoxLayout(card)
+                        card_lay = QVBoxLayout(card)
                         card_lay.setContentsMargins(14, 8, 14, 8)
-                        card_lay.setSpacing(8)
+                        card_lay.setSpacing(4)
+                        # Name + balance row
+                        row = QHBoxLayout()
+                        row.setSpacing(8)
                         name_lbl = QLabel(r.get("display_name", "—"))
                         name_lbl.setStyleSheet(f"font-size:13px;font-weight:600;color:{C['text']};")
-                        card_lay.addWidget(name_lbl, 1)
+                        row.addWidget(name_lbl, 1)
                         bal_color = C['green'] if bal >= 0 else C['red']
                         s = "" if bal >= 0 else "- "
                         bal_lbl = QLabel(f"{s}{fmt_money(abs(bal))}")
                         bal_lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{bal_color};")
-                        card_lay.addWidget(bal_lbl)
+                        row.addWidget(bal_lbl)
+                        card_lay.addLayout(row)
+                        # Utilization bar for credit cards (no text) — same as carousel
+                        if acct_type == "CREDIT_CARD":
+                            limit = r.get("credit_limit", 0) or 0
+                            util = min(abs(bal) / limit, 1.0) if limit > 0 else 0
+                            # Exact same color thresholds as CardItem._draw_front
+                            if util < 0.3:
+                                util_color = "#10B981"
+                            elif util < 0.7:
+                                util_color = "#F59E0B"
+                            else:
+                                util_color = "#EF4444"
+                            bar_bg = QFrame()
+                            bar_bg.setFixedHeight(4)
+                            bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:2px;")
+                            bar_lay = QHBoxLayout(bar_bg)
+                            bar_lay.setContentsMargins(0, 0, 0, 0)
+                            bar_lay.setSpacing(0)
+                            bar_fill = QFrame()
+                            bar_fill.setStyleSheet(f"background:{util_color};border-radius:2px;")
+                            fs = max(1, int(util * 100))
+                            rs = max(1, 100 - fs)
+                            bar_lay.addWidget(bar_fill, fs)
+                            bar_lay.addStretch(rs)
+                            card_lay.addWidget(bar_bg)
                         self.acct_container.addWidget(card)
         else:
             no_acct = QLabel("No accounts yet.")
