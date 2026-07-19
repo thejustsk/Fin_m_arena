@@ -250,8 +250,10 @@ class CardItem(QGraphicsObject):
         if fw>0: painter.setBrush(bc); painter.drawRoundedRect(QRectF(bx,by,fw,bh),4,4)
         painter.setPen(QColor(255,255,255,200)); painter.setFont(QFont("Arial",7,QFont.Bold))
         painter.drawText(QRectF(bx,by,bw,bh), Qt.AlignCenter, f"{util*100:.0f}% utilized")
-        painter.setPen(QColor(255,255,255,235)); tf=QFont("Arial",14,QFont.Bold); tf.setItalic(True); tf.setLetterSpacing(QFont.AbsoluteSpacing,1.0); painter.setFont(tf)
-        painter.drawText(QRectF(-w/2,h/2-52,w-20,22), Qt.AlignRight|Qt.AlignVCenter, self.data.get("card_network","VISA"))
+        network=self.data.get("card_network","VISA")
+        if network and network != "OTHER":
+            painter.setPen(QColor(255,255,255,235)); tf=QFont("Arial",14,QFont.Bold); tf.setItalic(True); tf.setLetterSpacing(QFont.AbsoluteSpacing,1.0); painter.setFont(tf)
+            painter.drawText(QRectF(-w/2,h/2-52,w-20,22), Qt.AlignRight|Qt.AlignVCenter, network)
         cls=self.data.get("card_class","")
         if cls: painter.setPen(QColor(255,255,255,150)); painter.setFont(QFont("Arial",10)); painter.drawText(QRectF(-w/2,h/2-32,w-20,18), Qt.AlignRight|Qt.AlignVCenter, cls)
     def _draw_back(self, painter):
@@ -362,8 +364,10 @@ class CardPreviewWidget(QWidget):
         if brand: p.setPen(QColor(255,255,255,170)); p.setFont(QFont("Arial",10)); p.drawText(QRectF(20,34,w-40,16),Qt.AlignLeft|Qt.AlignVCenter,brand)
         chip=QRectF(24,h/2-13,34,26); cg=QLinearGradient(chip.topLeft(),chip.bottomLeft()); cg.setColorAt(0,QColor("#f2f2f2")); cg.setColorAt(1,QColor("#999999"))
         p.setPen(Qt.NoPen); p.setBrush(cg); p.drawRoundedRect(chip,4,4)
-        network=self._data.get("card_network","VISA"); p.setPen(QColor(255,255,255,235)); tf=QFont("Arial",14,QFont.Bold); tf.setItalic(True); p.setFont(tf)
-        p.drawText(QRectF(0,h-52,w-20,22),Qt.AlignRight|Qt.AlignVCenter,network)
+        network=self._data.get("card_network","VISA")
+        if network and network != "OTHER":
+            p.setPen(QColor(255,255,255,235)); tf=QFont("Arial",14,QFont.Bold); tf.setItalic(True); p.setFont(tf)
+            p.drawText(QRectF(0,h-52,w-20,22),Qt.AlignRight|Qt.AlignVCenter,network)
         cls=self._data.get("card_class","")
         if cls: p.setPen(QColor(255,255,255,150)); p.setFont(QFont("Arial",10)); p.drawText(QRectF(0,h-32,w-20,18),Qt.AlignRight|Qt.AlignVCenter,cls)
         pen=QPen(QColor(255,255,255,40)); pen.setWidth(1); p.setPen(pen); p.setBrush(Qt.NoBrush); p.drawRoundedRect(rect.adjusted(0.5,0.5,-0.5,-0.5),CARD_RADIUS,CARD_RADIUS); p.end()
@@ -393,14 +397,19 @@ class CardBackPreviewWidget(QWidget):
 
 class AddCardDialog(QDialog):
     card_added = pyqtSignal()
-    def __init__(self, cards_repo, accounts_repo, parent=None):
+    card_updated = pyqtSignal()
+    def __init__(self, cards_repo, accounts_repo, card=None, parent=None):
         super().__init__(parent); self.cr=cards_repo; self.acct=accounts_repo
-        self.setWindowTitle("Add Credit Card"); self.setMinimumWidth(600)
+        self._card = card; self._is_edit = card is not None
+        title = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
+        self.setWindowTitle(title); self.setMinimumWidth(640)
         self.setStyleSheet(f"QDialog{{background:{C['bg']};}}"); self._build()
+        if self._is_edit: self._prefill()
     def _build(self):
         lay=QHBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(20)
         fc=QVBoxLayout(); fc.setSpacing(8)
-        hdr=QLabel("💳  Add New Credit Card"); hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
+        hdr_text = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
+        hdr=QLabel(hdr_text); hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
         form=QFormLayout(); form.setSpacing(8); form.setLabelAlignment(Qt.AlignRight)
         self.card_name=QLineEdit(); self.card_name.setPlaceholderText("e.g. AMAZON PAY ICICI CARD"); self.card_name.textChanged.connect(self._upd); form.addRow("Card Name *",self.card_name)
         self.issuer=QLineEdit(); self.issuer.setPlaceholderText("e.g. ICICI BANK"); self.issuer.textChanged.connect(self._upd); form.addRow("Bank *",self.issuer)
@@ -421,12 +430,68 @@ class AddCardDialog(QDialog):
         self.color_idx.currentIndexChanged.connect(self._upd); form.addRow("Card Style",self.color_idx)
         fc.addLayout(form)
         br=QHBoxLayout(); br.addStretch(); c=QPushButton("Cancel"); c.clicked.connect(self.reject); br.addWidget(c)
-        a=QPushButton("  Add Card  "); a.setObjectName("primary"); a.clicked.connect(self._save); br.addWidget(a); fc.addLayout(br); lay.addLayout(fc)
+        btn_text = "  Update  " if self._is_edit else "  Add Card  "
+        a=QPushButton(btn_text); a.setObjectName("primary"); a.clicked.connect(self._save); br.addWidget(a); fc.addLayout(br); lay.addLayout(fc)
         pc=QVBoxLayout(); pc.setSpacing(8)
         fl=QLabel("Front"); fl.setStyleSheet(f"color:{C['text2']};font-size:13px;font-weight:700;"); pc.addWidget(fl)
         self.preview=CardPreviewWidget(); pc.addWidget(self.preview)
         bl=QLabel("Back"); bl.setStyleSheet(f"color:{C['text2']};font-size:13px;font-weight:700;"); pc.addWidget(bl)
-        self.back_preview=CardBackPreviewWidget(); pc.addWidget(self.back_preview); pc.addStretch(); lay.addLayout(pc)
+        self.back_preview=CardBackPreviewWidget(); pc.addWidget(self.back_preview)
+        # Activate / Deactivate button (always visible, works in both add & edit)
+        self.toggle_btn = QPushButton()
+        self.toggle_btn.setMinimumHeight(36); self.toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.toggle_btn.clicked.connect(self._toggle_active)
+        if self._is_edit:
+            self._refresh_toggle_btn()
+            pc.addWidget(self.toggle_btn)
+        else:
+            self.toggle_btn.hide()
+        pc.addStretch(); lay.addLayout(pc)
+    def _refresh_toggle_btn(self):
+        if not self._is_edit or not self._card: return
+        active = self._card.get("is_active", 1)
+        if active:
+            self.toggle_btn.setText("⏸  Deactivate Card")
+            self.toggle_btn.setStyleSheet(f"QPushButton{{background:transparent;color:#DC2626;border:2px solid #DC2626;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:700;}}QPushButton:hover{{background:#DC2626;color:white;}}")
+        else:
+            self.toggle_btn.setText("✅  Activate Card")
+            self.toggle_btn.setStyleSheet(f"QPushButton{{background:transparent;color:#059669;border:2px solid #059669;border-radius:8px;padding:6px 16px;font-size:12px;font-weight:700;}}QPushButton:hover{{background:#059669;color:white;}}")
+    def _toggle_active(self):
+        if not self._is_edit or not self._card: return
+        cid = self._card["card_id"]
+        aid = self._card["account_id"]
+        cur = self._card.get("is_active", 1)
+        new_val = 0 if cur else 1
+        self.cr.update(cid, is_active=new_val)
+        # Also toggle the linked account
+        try: self.acct.update(aid, is_active=new_val)
+        except: pass
+        state = "activated" if new_val else "deactivated"
+        QMessageBox.information(self, "Done", f"Card {state}.")
+        self.card_updated.emit(); self.accept()
+    def _prefill(self):
+        c = self._card
+        self.card_name.setText(c.get("card_name",""))
+        self.issuer.setText(c.get("issuer_bank",""))
+        self.brand.setText(c.get("card_brand",""))
+        net = c.get("card_network","VISA")
+        idx = self.network.findText(net)
+        if idx >= 0: self.network.setCurrentIndex(idx)
+        self.card_class.setText(c.get("card_class",""))
+        self.last_four.setText(c.get("last_four",""))
+        self.cardholder.setText(c.get("cardholder_name",""))
+        lim = c.get("credit_limit",0) or c.get("acct_limit",0)
+        self.credit_limit.setValue(lim)
+        self.expiry_month.setValue(c.get("expiry_month",12))
+        self.expiry_year.setValue(c.get("expiry_year",2028))
+        self.statement_date.setText(c.get("statement_date",""))
+        self.grace_days.setValue(c.get("grace_days",20))
+        self.annual_fee.setValue(c.get("annual_fee",0))
+        # Find gradient index by matching colors
+        c1 = c.get("card_color_1",""); c2 = c.get("card_color_2","")
+        for i, (g1, g2) in enumerate(DEFAULT_GRADIENTS):
+            if g1 == c1 and g2 == c2:
+                self.color_idx.setCurrentIndex(i); break
     def _upd(self):
         c1,c2=DEFAULT_GRADIENTS[self.color_idx.currentIndex()]
         d=dict(issuer_bank=self.issuer.text().strip() or "BANK",card_brand=self.brand.text().strip(),card_network=self.network.currentText(),card_class=self.card_class.text().strip(),cardholder_name=self.cardholder.text().strip() or "CARDHOLDER",last_four=self.last_four.text().strip() or "0000",expiry_month=self.expiry_month.value(),expiry_year=self.expiry_year.value(),card_color_1=c1,card_color_2=c2)
@@ -434,17 +499,40 @@ class AddCardDialog(QDialog):
     def _save(self):
         name=self.card_name.text().strip(); bank=self.issuer.text().strip(); limit=self.credit_limit.value()
         if not name or not bank or limit<=0: QMessageBox.warning(self,"Missing","Card name, bank, and credit limit required."); return
-        existing=None
-        for a in self.acct.list_active():
-            if a["display_name"].upper()==name.upper(): existing=a; break
-        if existing: aid=existing["account_id"]
-        else:
-            aid=str(uuid.uuid4())
-            self.acct.create(account_id=aid,display_name=name,short_label=name[:8].upper(),account_type="CREDIT_CARD",credit_limit=limit,opening_balance=0,color_hex="#7C3AED")
         c1,c2=DEFAULT_GRADIENTS[self.color_idx.currentIndex()]
-        due = _calc_due(self.statement_date.text().strip(), self.grace_days.value())
-        self.cr.create(account_id=aid,card_name=name,issuer_bank=bank,card_brand=self.brand.text().strip(),card_network=self.network.currentText(),card_class=self.card_class.text().strip(),last_four=self.last_four.text().strip() or "0000",cardholder_name=self.cardholder.text().strip() or name.upper(),expiry_month=self.expiry_month.value(),expiry_year=self.expiry_year.value(),statement_date=self.statement_date.text().strip(),due_date=due,grace_days=self.grace_days.value(),annual_fee=self.annual_fee.value(),card_color_1=c1,card_color_2=c2)
-        self.card_added.emit(); self.accept()
+        if self._is_edit:
+            # ── UPDATE mode ──
+            cid = self._card["card_id"]; aid = self._card["account_id"]
+            due = _calc_due(self.statement_date.text().strip(), self.grace_days.value())
+            self.cr.update(cid,
+                card_name=name, issuer_bank=bank,
+                card_brand=self.brand.text().strip(),
+                card_network=self.network.currentText(),
+                card_class=self.card_class.text().strip(),
+                last_four=self.last_four.text().strip() or "0000",
+                cardholder_name=self.cardholder.text().strip() or name.upper(),
+                expiry_month=self.expiry_month.value(),
+                expiry_year=self.expiry_year.value(),
+                statement_date=self.statement_date.text().strip(),
+                due_date=due, grace_days=self.grace_days.value(),
+                annual_fee=self.annual_fee.value(),
+                card_color_1=c1, card_color_2=c2)
+            # Sync account display name
+            try: self.acct.update(aid, display_name=name, short_label=name[:8].upper(), credit_limit=limit)
+            except: pass
+            self.card_updated.emit(); self.accept()
+        else:
+            # ── CREATE mode ──
+            existing=None
+            for a in self.acct.list_active():
+                if a["display_name"].upper()==name.upper(): existing=a; break
+            if existing: aid=existing["account_id"]
+            else:
+                aid=str(uuid.uuid4())
+                self.acct.create(account_id=aid,display_name=name,short_label=name[:8].upper(),account_type="CREDIT_CARD",credit_limit=limit,opening_balance=0,color_hex="#7C3AED")
+            due = _calc_due(self.statement_date.text().strip(), self.grace_days.value())
+            self.cr.create(account_id=aid,card_name=name,issuer_bank=bank,card_brand=self.brand.text().strip(),card_network=self.network.currentText(),card_class=self.card_class.text().strip(),last_four=self.last_four.text().strip() or "0000",cardholder_name=self.cardholder.text().strip() or name.upper(),expiry_month=self.expiry_month.value(),expiry_year=self.expiry_year.value(),statement_date=self.statement_date.text().strip(),due_date=due,grace_days=self.grace_days.value(),annual_fee=self.annual_fee.value(),card_color_1=c1,card_color_2=c2)
+            self.card_added.emit(); self.accept()
 
 
 # ═══════════════════════════════════════════════
@@ -773,7 +861,12 @@ class CardsTab(QWidget):
         r1 = QHBoxLayout()
         r1.addWidget(QLabel(f"<b style='font-size:16px;color:white;'>{card.get('card_name', 'Card')}</b>"))
         r1.addStretch()
-        r1.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{card.get('card_network', '')} {card.get('card_class', '')}</span>"))
+        net_label = card.get('card_network', '')
+        if net_label == "OTHER": net_label = ''
+        cls_label = card.get('card_class', '')
+        sub_text = f"{net_label} {cls_label}".strip()
+        if sub_text:
+            r1.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{sub_text}</span>"))
         hdr_lay.addLayout(r1)
 
         # Two-balance: Statement Balance + Current Balance
@@ -822,6 +915,14 @@ class CardsTab(QWidget):
             c.addWidget(QLabel(f"<b style='color:{color};font-size:13px;'>{value}</b>"))
             r2.addLayout(c)
         r2.addStretch(); hdr_lay.addLayout(r2)
+        # Edit button — bottom-right of header
+        edit_btn = QPushButton("✏️  Edit Card")
+        edit_btn.setStyleSheet("QPushButton{background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 14px;font-size:11px;font-weight:700;}QPushButton:hover{background:rgba(255,255,255,0.35);}")
+        edit_btn.setCursor(Qt.PointingHandCursor)
+        edit_btn.setFixedHeight(28)
+        edit_btn.clicked.connect(lambda: self._edit_card(card))
+        r3 = QHBoxLayout(); r3.addStretch(); r3.addWidget(edit_btn)
+        hdr_lay.addLayout(r3)
         self.header_lay.addWidget(hdr)
         self.header_container.show()
 
@@ -1027,7 +1128,14 @@ class CardsTab(QWidget):
             QMessageBox.warning(self, "Error", f"Settlement failed: {e}")
 
     def _add_card(self):
-        dlg = AddCardDialog(self.cr, self.acct, self); dlg.card_added.connect(self.refresh); dlg.exec_()
+        dlg = AddCardDialog(self.cr, self.acct, parent=self)
+        dlg.card_added.connect(self.refresh)
+        dlg.exec_()
+
+    def _edit_card(self, card):
+        dlg = AddCardDialog(self.cr, self.acct, card=card, parent=self)
+        dlg.card_updated.connect(self.refresh)
+        dlg.exec_()
 
     def refresh(self):
         self._selected_card = None; self.details_container.hide(); self.header_container.hide(); self.settle_footer.hide()
