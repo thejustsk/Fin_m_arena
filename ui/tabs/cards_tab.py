@@ -21,10 +21,34 @@ STRIPE_RECT = QRectF(-CARD_W / 2, -CARD_H / 2 + 20, CARD_W, 32)
 EASE_FACTOR = 0.16; PX_PER_UNIT = CARD_W * 0.9; DRAG_THRESHOLD = 6
 
 DEFAULT_GRADIENTS = [
-    ("#3a3a3a", "#0f0f0f"), ("#1c3d5a", "#0a0f14"), ("#4b2e2e", "#120909"),
-    ("#2e4b34", "#0a120c"), ("#3a2e4b", "#0f0a14"), ("#4b3a1a", "#120d05"),
-    ("#1a3a3a", "#050f0f"), ("#4b1a3a", "#12050d"), ("#2a2a4b", "#08081b"),
-    ("#4b3a2a", "#150f08"),
+    ("#3a3a3a", "#0f0f0f"),    # Meridian Bank
+    ("#1c3d5a", "#0a0f14"),    # Solace Bank
+    ("#4b2e2e", "#120909"),    # Vertex Trust
+    ("#2e4b34", "#0a120c"),    # Palisade Bank
+    ("#3a2e4b", "#0f0a14"),    # Anchorpoint Bank
+    ("#4b3a1a", "#120d05"),    # Lumen Financial
+    ("#1a3a3a", "#050f0f"),    # Cobalt Bank
+    ("#4b1a3a", "#12050d"),    # Granite Trust
+    ("#2a2a4b", "#08081b"),    # Auric Bank
+    ("#4b3a2a", "#150f08"),    # Northgate Bank
+    ("#1a2a4b", "#05081b"),    # Harborline Bank
+    ("#3a1a1a", "#0f0505"),    # Sterling Vault
+    ("#2a4b3a", "#081b10"),    # Cascade Bank
+    ("#4a4a1a", "#141405"),    # Ridgeway Trust
+    ("#1a4a3a", "#051410"),    # Ivory Bank
+    ("#3a2a1a", "#0f0805"),    # Falcon Bank
+    ("#2a1a3a", "#08051b"),    # Crescent Trust
+    ("#4a1a2a", "#14050b"),    # Marble Bank
+    ("#1a1a3a", "#05051b"),    # Obsidian Bank
+    ("#3a4a1a", "#0f1405"),    # Summit Trust
+]
+
+GRADIENT_NAMES = [
+    "Meridian Bank", "Solace Bank", "Vertex Trust", "Palisade Bank",
+    "Anchorpoint Bank", "Lumen Financial", "Cobalt Bank", "Granite Trust",
+    "Auric Bank", "Northgate Bank", "Harborline Bank", "Sterling Vault",
+    "Cascade Bank", "Ridgeway Trust", "Ivory Bank", "Falcon Bank",
+    "Crescent Trust", "Marble Bank", "Obsidian Bank", "Summit Trust",
 ]
 
 PAYMENT_METHODS = [
@@ -355,7 +379,7 @@ class AddCardDialog(QDialog):
         self.grace_days=QSpinBox(); self.grace_days.setRange(0,55); self.grace_days.setValue(20); form.addRow("Grace Period (days)",self.grace_days)
         self.annual_fee=QDoubleSpinBox(); self.annual_fee.setRange(0,99999); self.annual_fee.setPrefix("₹ "); self.annual_fee.setDecimals(0); form.addRow("Annual Fee",self.annual_fee)
         self.color_idx=QComboBox()
-        for i in range(len(DEFAULT_GRADIENTS)): self.color_idx.addItem(f"Style {i+1}")
+        for name in GRADIENT_NAMES: self.color_idx.addItem(name)
         self.color_idx.currentIndexChanged.connect(self._upd); form.addRow("Card Style",self.color_idx)
         fc.addLayout(form)
         br=QHBoxLayout(); br.addStretch(); c=QPushButton("Cancel"); c.clicked.connect(self.reject); br.addWidget(c)
