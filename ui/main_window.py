@@ -65,6 +65,9 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(tab)
             self._tabs[key] = tab
 
+        # Connect Home tab's quick-access signal
+        self._tabs["home"].go.connect(self._nav)
+
         layout.addWidget(self.stack)
 
         # Start with sidebar collapsed

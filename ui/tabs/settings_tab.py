@@ -99,7 +99,7 @@ class SettingsTab(QWidget):
         d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
         n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setPlaceholderText("4-char label"); lb.setMaxLength(4); f.addRow("Label:", lb)
-        t = QComboBox(); t.addItems(["CURRENT", "CASH"]); f.addRow("Type:", t)
+        t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"]); f.addRow("Type:", t)
         ob = QDoubleSpinBox(); ob.setPrefix("₹ "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
