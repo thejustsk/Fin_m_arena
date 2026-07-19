@@ -1,37 +1,192 @@
-"""Home tab — dashboard with real stats, account balances, recent transactions."""
+"""Home tab — Visual dashboard with KPI period switchers and Chart.js charts."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QGridLayout, QFrame, QScrollArea, QSizePolicy)
-from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QCursor, QColor
+                              QFrame, QScrollArea, QSizePolicy)
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl
+from PyQt5.QtGui import QCursor
 from datetime import datetime, date, timedelta
 from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.widgets.metric_card import MetricCard, add_shadow
-from ui.tabs.database_tab import _tx_card, _day_header
+from ui.tabs.database_tab import _tx_card, _day_header, ChartView
+import json
 
 
-_ACCT_TYPE_LABEL = {
-    "CURRENT": "Debit",
-    "CREDIT_CARD": "Credit Card",
-    "WALLET": "Wallet",
-    "CASH": "Cash",
-}
+# ── Chart HTML template for Home (4 charts) ──
+HOME_CHART_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',system-ui,sans-serif; background:transparent; padding:12px; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.card { background:#fff; border-radius:12px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,0.06); border:1px solid #E5E7EB; }
+.card.full { grid-column:1 / -1; }
+.title { font-size:12px; font-weight:700; color:#374151; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+canvas { max-height:200px; }
+</style>
+</head><body>
+<div class="grid">
+  <div class="card">
+    <div class="title"><span class="dot" style="background:#4F46E5"></span>Spending by Category</div>
+    <canvas id="c1"></canvas>
+  </div>
+  <div class="card">
+    <div class="title"><span class="dot" style="background:#10B981"></span>Spending Trend</div>
+    <canvas id="c2"></canvas>
+  </div>
+  <div class="card full">
+    <div class="title"><span class="dot" style="background:#F59E0B"></span>Need vs Want</div>
+    <canvas id="c3" style="max-height:70px"></canvas>
+  </div>
+  <div class="card full">
+    <div class="title"><span class="dot" style="background:#8B5CF6"></span>Income vs Expense by Account</div>
+    <canvas id="c4"></canvas>
+  </div>
+</div>
+<script>
+const COLORS = ['#4F46E5','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#06B6D4','#F97316','#14B8A6','#6366F1'];
 
-_ACCT_TYPE_ICON = {
-    "CURRENT": "🏦",
-    "CREDIT_CARD": "💳",
-    "WALLET": "👛",
-    "CASH": "💵",
-}
+new Chart(document.getElementById('c1'), {
+    type: 'doughnut',
+    data: {
+        labels: __CAT_L__,
+        datasets: [{ data: __CAT_D__, backgroundColor: COLORS, borderWidth: 3, borderColor: '#fff' }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: { legend: { position: 'bottom', labels: { padding: 10, usePointStyle: true, pointStyle: 'circle', font: { size: 10 } } } }
+    }
+});
 
-# All type headers use the same dark gradient
-_TYPE_GRADIENTS = {
-    "CURRENT":     ("#6B7280", "#F9FAFB"),
-    "CREDIT_CARD": ("#6B7280", "#F9FAFB"),
-    "WALLET":      ("#6B7280", "#F9FAFB"),
-    "CASH":        ("#6B7280", "#F9FAFB"),
-}
+new Chart(document.getElementById('c2'), {
+    type: 'line',
+    data: {
+        labels: __TREND_L__,
+        datasets: [{
+            label: 'Spending', data: __TREND_D__,
+            borderColor: '#4F46E5', backgroundColor: 'rgba(79,70,229,0.08)',
+            fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#4F46E5'
+        }]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { grid: { color: '#F3F4F6' } }, x: { grid: { display: false } } }
+    }
+});
+
+new Chart(document.getElementById('c3'), {
+    type: 'bar',
+    data: {
+        labels: ['Spending'],
+        datasets: [
+            { label: 'Need', data: [__NEED__], backgroundColor: '#4F46E5', borderRadius: 6 },
+            { label: 'Want', data: [__WANT__], backgroundColor: '#F59E0B', borderRadius: 6 }
+        ]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y', stacked: true,
+        plugins: {
+            legend: { position: 'top', labels: { usePointStyle: true, font: { size: 11, weight: '600' } } },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        var total = __NEED__ + __WANT__;
+                        var pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                        var val = '₹' + ctx.raw.toLocaleString('en-IN');
+                        return ctx.dataset.label + ': ' + val + ' (' + pct + '%)';
+                    }
+                }
+            }
+        },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, grid: { display: false } } }
+    }
+});
+
+// 4. Income vs Expense by Account — horizontal bar, auto-scales for 20+ accounts
+var acctLabels = __ACCT_L__;
+var acctCanvas = document.getElementById('c4');
+acctCanvas.style.height = Math.max(200, acctLabels.length * 24) + 'px';
+
+new Chart(acctCanvas, {
+    type: 'bar',
+    data: {
+        labels: acctLabels,
+        datasets: [
+            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 4 },
+            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 4 }
+        ]
+    },
+    options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { position: 'top', labels: { usePointStyle: true, font: { size: 11 } } } },
+        scales: {
+            x: { grid: { color: '#F3F4F6' }, ticks: { font: { size: 10 } } },
+            y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+        }
+    }
+});
+</script>
+</body></html>"""
+
+
+class KPICard(QFrame):
+    """Selectable KPI card — layout created once, content updated via methods."""
+    clicked = pyqtSignal(str)
+
+    def __init__(self, period, label, parent=None):
+        super().__init__(parent)
+        self.period = period
+        self._selected = False
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        self.setMinimumHeight(80)
+
+        # Create layout ONCE
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(4)
+
+        self._lbl = QLabel(f"💸  {label} · Expense")
+        lay.addWidget(self._lbl)
+
+        self._amt = QLabel("₹0")
+        lay.addWidget(self._amt)
+
+        self._cnt = QLabel("0 txns")
+        lay.addWidget(self._cnt)
+
+        self._update_style()
+
+    def set_data(self, amount, count):
+        self._amt.setText(str(amount))
+        suffix = "txn" if count == 1 else "txns"
+        self._cnt.setText(f"{count} {suffix}")
+        self._update_style()
+
+    def set_selected(self, selected):
+        self._selected = selected
+        self._update_style()
+
+    def _update_style(self):
+        if self._selected:
+            self.setStyleSheet(
+                f"QFrame{{background:{C['accent']};border:none;border-radius:12px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            self._lbl.setStyleSheet("color:rgba(255,255,255,0.7);font-size:10px;font-weight:700;letter-spacing:1px;")
+            self._amt.setStyleSheet("color:white;font-size:18px;font-weight:800;")
+            self._cnt.setStyleSheet("color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;")
+        else:
+            self.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border']};border-radius:12px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            self._lbl.setStyleSheet(f"color:{C['text3']};font-size:10px;font-weight:700;letter-spacing:1px;")
+            self._amt.setStyleSheet(f"color:{C['text']};font-size:18px;font-weight:800;")
+            self._cnt.setStyleSheet(f"color:{C['text3']};font-size:11px;font-weight:600;")
+
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.period)
 
 
 class HomeTab(QWidget):
@@ -43,7 +198,8 @@ class HomeTab(QWidget):
         self.bal = services["balance"]
         self.tx = repos["transactions"]
         self.acct = repos["accounts"]
-        self.cards = repos.get("cards")
+        self.lu = repos["lookups"]
+        self._period = "month"
         self._build()
 
     def _build(self):
@@ -64,238 +220,277 @@ class HomeTab(QWidget):
         top_row.addWidget(today_lbl)
         root.addLayout(top_row)
 
-        # ── Net Worth ──
-        self.nw_label = QLabel()
-        self.nw_label.setStyleSheet(f"font-size:15px;color:{C['text3']};")
-        root.addWidget(self.nw_label)
+        # ── KPI Period Cards ──
+        self.kpi_row = QHBoxLayout()
+        self.kpi_row.setSpacing(12)
+        self.kpi_cards = {}
+        for period, label in [("today", "Today"), ("week", "This Week"), ("month", "This Month"), ("year", "This Year")]:
+            card = KPICard(period, label)
+            card.clicked.connect(self._on_period)
+            self.kpi_cards[period] = card
+            self.kpi_row.addWidget(card)
+        root.addLayout(self.kpi_row)
 
-        # ── Metric Cards ──
-        self.metrics_row = QHBoxLayout()
-        self.metrics_row.setSpacing(14)
-        self.m_today_spend = MetricCard("Today's Spend", "₹0", C['red'], "💸")
-        self.m_today_txns = MetricCard("Today's Txns", "0", C['accent'], "📊")
-        self.m_month_spend = MetricCard("This Month", "₹0", C['amber'], "📅")
-        self.m_total_txns = MetricCard("This Month Txns", "0", C['text3'], "📋")
-        for mc in [self.m_today_spend, self.m_today_txns, self.m_month_spend, self.m_total_txns]:
-            add_shadow(mc)
-            self.metrics_row.addWidget(mc)
-        root.addLayout(self.metrics_row)
-
-        # ── Two-column: Accounts + Recent Transactions ──
+        # ── Two-column: Charts + Insights ──
         cols = QHBoxLayout()
         cols.setSpacing(20)
 
-        # LEFT: Account Balances
-        left_col = QVBoxLayout()
-        left_col.setSpacing(6)
-        acct_title = QLabel("💰  Account Balances")
-        acct_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
-        left_col.addWidget(acct_title)
-        self.acct_scroll = QScrollArea()
-        self.acct_scroll.setWidgetResizable(True)
-        self.acct_scroll.setFrameShape(QFrame.NoFrame)
-        self.acct_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        acct_inner = QWidget()
-        acct_inner.setStyleSheet("background:transparent;")
-        self.acct_container = QVBoxLayout(acct_inner)
-        self.acct_container.setSpacing(6)
-        self.acct_container.setContentsMargins(0, 0, 4, 0)
-        self.acct_scroll.setWidget(acct_inner)
-        left_col.addWidget(self.acct_scroll, 1)
-        cols.addLayout(left_col, 1)
+        # LEFT: Charts
+        self.chart_view = ChartView()
+        cols.addWidget(self.chart_view, 3)
 
-        # RIGHT: Recent Transactions
+        # RIGHT: Top Transactions + Savings
         right_col = QVBoxLayout()
-        right_col.setSpacing(4)
-        recent_title = QLabel("🕐  Recent Transactions")
-        recent_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
-        right_col.addWidget(recent_title)
-        recent_scroll = QScrollArea()
-        recent_scroll.setWidgetResizable(True)
-        recent_scroll.setFrameShape(QFrame.NoFrame)
-        recent_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        recent_inner = QWidget()
-        recent_inner.setStyleSheet("background:transparent;")
-        self.recent_lay = QVBoxLayout(recent_inner)
-        self.recent_lay.setSpacing(3)
-        self.recent_lay.setContentsMargins(0, 0, 0, 0)
-        recent_scroll.setWidget(recent_inner)
-        right_col.addWidget(recent_scroll, 1)
-        cols.addLayout(right_col, 2)
+        right_col.setSpacing(12)
 
+        top_tx_title = QLabel("Top Transactions")
+        top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
+        right_col.addWidget(top_tx_title)
+
+        top_scroll = QScrollArea()
+        top_scroll.setWidgetResizable(True)
+        top_scroll.setFrameShape(QFrame.NoFrame)
+        top_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        top_inner = QWidget()
+        top_inner.setStyleSheet("background:transparent;")
+        self.top_lay = QVBoxLayout(top_inner)
+        self.top_lay.setSpacing(3)
+        self.top_lay.setContentsMargins(0, 0, 0, 0)
+        top_scroll.setWidget(top_inner)
+        right_col.addWidget(top_scroll, 1)
+
+        # Savings Rate card
+        self.savings_card = QFrame()
+        self.savings_card.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};border-radius:12px;}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        self.savings_inner = QVBoxLayout(self.savings_card)
+        self.savings_inner.setContentsMargins(16, 12, 16, 12)
+        self.savings_inner.setSpacing(6)
+        right_col.addWidget(self.savings_card)
+
+        cols.addLayout(right_col, 2)
         root.addLayout(cols, 1)
 
-        # ── Quick Access Tiles ──
+        # ── Quick Access (all 8 + Gmail) ──
         qa_title = QLabel("Quick Access")
-        qa_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
+        qa_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         root.addWidget(qa_title)
 
-        grid = QHBoxLayout()
-        grid.setSpacing(10)
+        qa_row = QHBoxLayout()
+        qa_row.setSpacing(10)
         tiles = [
             ("📝", "Transactions", "transaction_entry", C['accent']),
             ("🗄️", "Database", "database", "#8B5CF6"),
             ("💳", "Cards", "cards", C['red']),
+            ("💰", "Balances", "balances", C['green']),
             ("⚙️", "Settings", "settings", C['text3']),
             ("🔍", "Audit", "audit", C['amber']),
-            ("📈", "Wealth", "wealth", C['green']),
+            ("📈", "Wealth", "wealth", "#10B981"),
             ("📋", "Notes", "notes", "#EC4899"),
             ("📧", "Gmail", "gmail", "#06B6D4"),
         ]
         for ico, lbl, key, col in tiles:
             t = QFrame()
             t.setObjectName("tile")
-            t.setMinimumHeight(56)
+            t.setMinimumHeight(44)
             t.setCursor(QCursor(Qt.PointingHandCursor))
             t.setStyleSheet(
                 f"QFrame#tile{{background:{C['surface']};border:1px solid {C['border']};"
-                f"border-left:4px solid {col};border-radius:10px;}}"
+                f"border-left:3px solid {col};border-radius:8px;}}"
                 f"QFrame#tile:hover{{border-color:{col};background:{C['surface2']};}}")
-            tl2 = QHBoxLayout(t)
-            tl2.setContentsMargins(14, 6, 14, 6)
-            tl2.setSpacing(8)
+            tl = QHBoxLayout(t)
+            tl.setContentsMargins(12, 4, 12, 4)
+            tl.setSpacing(6)
             il = QLabel(ico)
-            il.setStyleSheet("font-size:20px;")
-            il.setFixedWidth(28)
-            tl2.addWidget(il)
+            il.setStyleSheet("font-size:16px;")
+            il.setFixedWidth(22)
+            tl.addWidget(il)
             nl = QLabel(lbl)
-            nl.setStyleSheet(f"font-size:12px;font-weight:600;color:{C['text']};")
-            tl2.addWidget(nl, 1)
-            add_shadow(t, blur=6, y_offset=1)
+            nl.setStyleSheet(f"font-size:11px;font-weight:600;color:{C['text']};")
+            tl.addWidget(nl, 1)
             t.mousePressEvent = lambda e, k=key: self.go.emit(k)
-            grid.addWidget(t)
-        root.addLayout(grid)
+            qa_row.addWidget(t)
+        root.addLayout(qa_row)
+
+    def _on_period(self, period):
+        self._period = period
+        for p, card in self.kpi_cards.items():
+            card.set_selected(p == period)
+        self._load_data()
 
     def refresh(self):
+        self._on_period("month")
+
+    def _date_range(self, period):
         today = date.today()
-        today_iso = today.isoformat()
-
-        # ── Net Worth ──
-        nw = self.bal.net_worth()
-        self.nw_label.setText(f"Your net worth is <b style='font-size:16px;color:{C['text']};'>{fmt_money(nw)}</b>")
-
-        # ── Today's stats ──
-        today_txns = self.tx.list_filters(date_from=today_iso, date_to=today_iso, limit=5000)
-        today_spend = sum(t["amount"] for t in today_txns if t["tx_type"] == "DEBIT")
-        self.m_today_spend.set_value(fmt_money(today_spend))
-        self.m_today_txns.set_value(str(len(today_txns)))
-
-        # ── This month stats ──
-        y, m = today.year, today.month
-        month_txns = self.tx.get_monthly(y, m)
-        month_spend = sum(t["amount"] for t in month_txns if t["tx_type"] == "DEBIT")
-        self.m_month_spend.set_value(fmt_money(month_spend))
-        self.m_total_txns.set_value(str(len(month_txns)))
-
-        # ── Account Balances ──
-        self._clear_layout(self.acct_container)
-
-        balances = self.bal.get_all()
-        if balances:
-            by_type = OrderedDict()
-            for t in ["CURRENT", "CREDIT_CARD", "WALLET", "CASH"]:
-                by_type[t] = []
-            for r in balances:
-                t = r.get("account_type", "CURRENT")
-                if t not in by_type:
-                    by_type[t] = []
-                by_type[t].append(r)
-
-            for acct_type, accts in by_type.items():
-                if not accts:
-                    continue
-                icon = _ACCT_TYPE_ICON.get(acct_type, "💰")
-                label = _ACCT_TYPE_LABEL.get(acct_type, acct_type)
-                g1, g2 = _TYPE_GRADIENTS.get(acct_type, ("#3a3a3a", "#0f0f0f"))
-                type_total = sum(r.get("balance", 0) for r in accts)
-                single = len(accts) == 1
-
-                # ── Gradient header card ──
-                hdr = QFrame()
-                hdr.setStyleSheet(
-                    f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                    f"stop:0 {g1},stop:1 {g2});border-radius:10px;}}"
-                    f"QLabel{{background:transparent;border:none;}}")
-                hdr_lay = QHBoxLayout(hdr)
-                hdr_lay.setContentsMargins(14, 10, 14, 10)
-                hdr_lay.setSpacing(8)
-                # Icon
-                h_icon = QLabel(icon)
-                h_icon.setStyleSheet("font-size:16px;")
-                hdr_lay.addWidget(h_icon)
-                # Label
-                if single:
-                    acct_name = accts[0].get("display_name", label)
-                    h_text = QLabel(f"<b style='font-size:13px;color:#111827;'>{acct_name}</b>")
-                else:
-                    h_text = QLabel(f"<b style='font-size:13px;color:#111827;'>{label}</b>")
-                hdr_lay.addWidget(h_text)
-                hdr_lay.addStretch()
-                # Balance (amount color stays green/red)
-                tc = C['green'] if type_total >= 0 else C['red']
-                sign = "" if type_total >= 0 else "- "
-                h_total = QLabel(f"<b style='font-size:14px;color:{tc};'>{sign}{fmt_money(abs(type_total))}</b>")
-                hdr_lay.addWidget(h_total)
-                self.acct_container.addWidget(hdr)
-
-                # ── Individual account cards (skip if single account) ──
-                if not single:
-                    for r in accts:
-                        bal = r.get("balance", 0)
-                        card = QFrame()
-                        card.setStyleSheet(
-                            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
-                            f"border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
-                        card_lay = QHBoxLayout(card)
-                        card_lay.setContentsMargins(14, 8, 14, 8)
-                        card_lay.setSpacing(8)
-                        name_lbl = QLabel(r.get("display_name", "—"))
-                        name_lbl.setStyleSheet(f"font-size:13px;font-weight:600;color:{C['text']};")
-                        card_lay.addWidget(name_lbl, 1)
-                        bal_color = C['green'] if bal >= 0 else C['red']
-                        s = "" if bal >= 0 else "- "
-                        bal_lbl = QLabel(f"{s}{fmt_money(abs(bal))}")
-                        bal_lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{bal_color};")
-                        card_lay.addWidget(bal_lbl)
-                        self.acct_container.addWidget(card)
+        if period == "today":
+            return today.isoformat(), today.isoformat()
+        elif period == "week":
+            return (today - timedelta(days=7)).isoformat(), today.isoformat()
+        elif period == "year":
+            return f"{today.year}-01-01", today.isoformat()
         else:
-            no_acct = QLabel("No accounts yet.")
-            no_acct.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-            self.acct_container.addWidget(no_acct)
-        self.acct_container.addStretch()
+            return f"{today.year}-{today.month:02d}-01", today.isoformat()
 
-        # ── Recent Transactions (last 7 days, max 8) ──
-        self._clear_layout(self.recent_lay)
+    def _load_data(self):
+        # Update ALL KPI cards
+        for p, card in self.kpi_cards.items():
+            d_from, d_to = self._date_range(p)
+            ptxns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
+            p_debit = sum(t["amount"] for t in ptxns if t["tx_type"] == "DEBIT")
+            card.set_data(fmt_money(p_debit), len(ptxns))
 
-        recent = self.tx.list_filters(
-            date_from=(today - timedelta(days=7)).isoformat(),
-            date_to=today_iso, limit=8)
-        if recent:
-            by_date = OrderedDict()
-            for tx in sorted(recent, key=lambda t: t["tx_date"], reverse=True):
-                d = tx["tx_date"]
-                if d not in by_date:
-                    by_date[d] = []
-                by_date[d].append(tx)
-            for d_str, day_txns in by_date.items():
-                try:
-                    self.recent_lay.addWidget(_day_header(
-                        date.fromisoformat(d_str).strftime("%A, %d %b")))
-                except:
-                    self.recent_lay.addWidget(_day_header(d_str))
-                for tx in day_txns:
-                    self.recent_lay.addWidget(_tx_card(tx))
+        # Get selected period's transactions
+        d_from, d_to = self._date_range(self._period)
+        txns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
+
+        self._render_charts(txns)
+        self._render_top(txns)
+        self._render_savings(txns)
+
+        if self.chart_view.view:
+            QTimer.singleShot(300, self._force_resize)
+
+    def _render_charts(self, txns):
+        if not self.chart_view.view:
+            return
+
+        cats = {}
+        for t in txns:
+            if t["tx_type"] == "DEBIT":
+                cn = t.get("cat_name") or "Other"
+                cats[cn] = cats.get(cn, 0) + t["amount"]
+
+        daily_debit = {}
+        for t in txns:
+            if t["tx_type"] == "DEBIT":
+                d = t["tx_date"]
+                daily_debit[d] = daily_debit.get(d, 0) + t["amount"]
+        all_dates = sorted(daily_debit.keys())
+
+        need_total = sum(t["amount"] for t in txns if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
+        want_total = sum(t["amount"] for t in txns if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
+        none_total = sum(t["amount"] for t in txns if t.get("neednwant") not in (0, 1) and t["tx_type"] == "DEBIT")
+
+        acct_cr = {}
+        acct_db = {}
+        for t in txns:
+            an = t.get("account_name") or t["account_id"]
+            if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") == "REGULAR":
+                acct_cr[an] = acct_cr.get(an, 0) + t["amount"]
+            elif t["tx_type"] == "DEBIT":
+                acct_db[an] = acct_db.get(an, 0) + t["amount"]
+        all_accts = sorted(set(list(acct_cr.keys()) + list(acct_db.keys())))
+
+        html = HOME_CHART_TEMPLATE
+        html = html.replace("__CAT_L__", json.dumps(list(cats.keys())))
+        html = html.replace("__CAT_D__", json.dumps([round(v, 2) for v in cats.values()]))
+        html = html.replace("__TREND_L__", json.dumps([d[5:] for d in all_dates]))
+        html = html.replace("__TREND_D__", json.dumps([round(daily_debit.get(d, 0), 2) for d in all_dates]))
+        html = html.replace("__NEED__", str(round(need_total, 2)))
+        html = html.replace("__WANT__", str(round(want_total + none_total, 2)))
+        html = html.replace("__ACCT_L__", json.dumps(all_accts))
+        html = html.replace("__ACCT_CR__", json.dumps([round(acct_cr.get(a, 0), 2) for a in all_accts]))
+        html = html.replace("__ACCT_DB__", json.dumps([round(acct_db.get(a, 0), 2) for a in all_accts]))
+
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8")
+        tmp.write(html)
+        tmp.close()
+        self.chart_view.view.load(QUrl.fromLocalFile(tmp.name))
+
+    def _render_top(self, txns):
+        while self.top_lay.count():
+            itm = self.top_lay.takeAt(0)
+            if itm.widget():
+                itm.widget().deleteLater()
+
+        debits = sorted([t for t in txns if t["tx_type"] == "DEBIT"],
+                        key=lambda t: t["amount"], reverse=True)[:8]
+        if debits:
+            for tx in debits:
+                self.top_lay.addWidget(_tx_card(tx))
         else:
-            no_tx = QLabel("No recent transactions.")
-            no_tx.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-            no_tx.setAlignment(Qt.AlignCenter)
-            self.recent_lay.addWidget(no_tx)
-        self.recent_lay.addStretch()
+            lbl = QLabel("No transactions.")
+            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            self.top_lay.addWidget(lbl)
+        self.top_lay.addStretch()
+
+    def _render_savings(self, txns):
+        # Fully clear — delete widgets AND layouts
+        self._clear_layout(self.savings_inner)
+
+        income = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
+        expense = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
+        savings = income - expense
+        if income > 0:
+            rate = (savings / income) * 100
+        elif expense > 0:
+            rate = -100
+        else:
+            rate = 0
+
+        rate_color = C['green'] if rate >= 0 else C['red']
+
+        # Title + rate
+        title = QLabel("Savings Rate")
+        title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        self.savings_inner.addWidget(title)
+
+        rate_lbl = QLabel(f"{rate:.0f}%")
+        rate_lbl.setStyleSheet(f"color:{rate_color};font-size:28px;font-weight:900;")
+        self.savings_inner.addWidget(rate_lbl)
+
+        # Bar — red for negative, green for positive
+        bar_bg = QFrame()
+        bar_bg.setFixedHeight(8)
+        bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:4px;")
+        bar_lay = QHBoxLayout(bar_bg)
+        bar_lay.setContentsMargins(0, 0, 0, 0)
+        bar_lay.setSpacing(0)
+        bar_fill = QFrame()
+        fill_pct = max(0, min(100, abs(rate)))
+        bar_fill.setStyleSheet(f"background:{rate_color};border-radius:4px;")
+        bar_lay.addWidget(bar_fill)
+        bar_lay.addStretch()
+        self.savings_inner.addWidget(bar_bg)
+        QTimer.singleShot(100, lambda w=bar_fill, bg=bar_bg, pct=fill_pct:
+                          w.setFixedWidth(max(0, int(bg.sizeHint().width() * pct / 100))))
+
+        # Numbers row — created as widgets, not layout (so _clear_layout removes them)
+        nums = QHBoxLayout()
+        for text, color in [
+            (f"↑ Income  {fmt_money(income)}", C['green']),
+            (f"= Savings  {fmt_money(savings)}", rate_color),
+            (f"↓ Expense  {fmt_money(expense)}", C['red']),
+        ]:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"color:{color};font-size:11px;font-weight:600;")
+            nums.addWidget(lbl)
+            nums.addStretch()
+        # Wrap in a QWidget so _clear_layout can delete it
+        nums_widget = QWidget()
+        nums_widget.setStyleSheet("background:transparent;border:none;")
+        nums_widget.setLayout(nums)
+        self.savings_inner.addWidget(nums_widget)
 
     @staticmethod
     def _clear_layout(layout):
+        """Delete all child widgets AND nested layouts."""
         while layout.count():
             itm = layout.takeAt(0)
             w = itm.widget()
             if w:
                 w.deleteLater()
+            child_lay = itm.layout()
+            if child_lay:
+                HomeTab._clear_layout(child_lay)
+
+    def _force_resize(self):
+        if self.chart_view.view:
+            self.chart_view.view.update()
+            s = self.chart_view.view.size()
+            self.chart_view.view.resize(s.width(), s.height() - 1)
+            QTimer.singleShot(50, lambda: self.chart_view.view.resize(s.width(), s.height()))
