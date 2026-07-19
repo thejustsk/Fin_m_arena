@@ -93,6 +93,25 @@ def _calc_due(stmt_str, grace_days):
     return (stmt + timedelta(days=grace_days)).isoformat()
 
 
+def _ordinal(n):
+    """Return n with ordinal suffix: 1st, 2nd, 3rd, 20th, etc."""
+    if 11 <= (n % 100) <= 13: return f"{n}th"
+    return f"{n}{['th','st','nd','rd','th','th','th','th','th','th'][n % 10]}"
+
+
+def _stmt_display(stmt_str):
+    """Format statement date with ordinal: '6th', '20th', etc."""
+    if not stmt_str: return "—"
+    day = _parse_stmt_day(stmt_str)
+    if day: return _ordinal(day)
+    return stmt_str
+
+
+def _cycle_name(start_date):
+    """Cycle name = start month + year, e.g. 'Jan 2025'."""
+    return start_date.strftime("%b %Y")
+
+
 def _build_cycles(stmt_day, num=8):
     """Build cycles from statement day. Includes current period.
     Returns list of (start, end) tuples, newest first.
@@ -677,8 +696,38 @@ class CardsTab(QWidget):
             "WHERE c.is_active=0 ORDER BY c.sort_order").fetchall()]
         active_idx = 0 if self._sub_btns[0].styleSheet() == _tab_btn_active() else 1
         cards = ac if active_idx == 0 else ic
+        # Save cycles for all active cards on tab entry
+        for card in ac:
+            self._save_cycles(card)
         self.carousel.load_cards(cards, self._utils(cards))
         self.reminders.load_reminders(ac)
+
+    def _save_cycles(self, card):
+        """Compute FIFO and save cycle data to card_cycles table."""
+        aid = card["account_id"]
+        stmt_day = _parse_stmt_day(card.get("statement_date", ""))
+        grace = card.get("grace_days", 20)
+        if not stmt_day:
+            return
+        all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
+        cycles = _build_cycles(stmt_day, 12)
+        cycle_data = _fifo_allocate(cycles, all_txns)
+        for cd in cycle_data:
+            try:
+                default_due = (cd["end"] + timedelta(days=grace)).isoformat()
+            except:
+                default_due = ""
+            self.cr.upsert_cycle(
+                account_id=aid,
+                cycle_start_date=cd["start"].isoformat(),
+                statement_date=cd["end"].isoformat(),
+                debits=cd["debits"],
+                paid=cd["paid"],
+                remaining=cd["remaining"],
+                due_date=default_due,
+                total_due=cd["remaining"],
+                minimum_due=round(cd["remaining"] * 0.05, 2) if cd["remaining"] > 0 else 0,
+            )
 
     def _on_card_clicked(self, card_id):
         card = self.cr.get(card_id)
@@ -724,36 +773,45 @@ class CardsTab(QWidget):
         cycles = _build_cycles(stmt_day, 12)
         self._current_cycle_data = _fifo_allocate(cycles, self._current_all_txns)
 
-        # Amount Due = total FIFO remaining (settlement always reduces this)
-        amount_due = sum(cd["remaining"] for cd in self._current_cycle_data) if self._current_cycle_data else 0
+        # Amount Due = remaining from LAST COMPLETED cycle (the one that's due)
+        # NOT the sum of all cycles (that = current outstanding)
+        amount_due = 0
+        today_str = date.today().isoformat()
+        for cd in self._current_cycle_data:
+            if cd["end"].isoformat() <= today_str and cd["remaining"] > 0:
+                amount_due = cd["remaining"]
+                break  # newest completed cycle first (cycles are newest-first)
+        # Save default due date to card if not set
+        if amount_due > 0 and not due_str:
+            grace = card.get("grace_days", 20)
+            due_str = _calc_due(card.get("statement_date", ""), grace)
+            if due_str:
+                self.cr.update(card["card_id"], due_date=due_str)
+                card["due_date"] = due_str
 
-        # Current Outstanding = utilization right now
         current_outstanding = balance
+
+        stmt_display = _stmt_display(card.get("statement_date", ""))
+        due_display = ""
+        if due_str and "-" in due_str:
+            try:
+                due_display = date.fromisoformat(due_str).strftime("%d %b %Y")
+            except:
+                due_display = due_str
+        else:
+            due_display = "—"
 
         for label, value, color in [
             ("Limit", fmt_money(limit), "rgba(255,255,255,0.7)"),
-            ("Statement", stmt_date, "rgba(255,255,255,0.9)"),
+            ("Statement", f"Every {stmt_display}", "rgba(255,255,255,0.9)"),
             ("Amount Due", fmt_money(amount_due), "#FCA5A5" if amount_due > 0 else "rgba(255,255,255,0.9)"),
+            ("Due Date", due_display, "#FCA5A5" if amount_due > 0 else "rgba(255,255,255,0.9)"),
             ("Current Outstanding", fmt_money(current_outstanding), util_color),
         ]:
             c = QVBoxLayout(); c.setSpacing(0)
             c.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>{label}</span>"))
             c.addWidget(QLabel(f"<b style='color:{color};font-size:13px;'>{value}</b>"))
             r2.addLayout(c)
-
-        # Editable due date
-        due_col = QVBoxLayout(); due_col.setSpacing(0)
-        due_col.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>Due Date</span>"))
-        self._due_edit = QDateEdit(); self._due_edit.setCalendarPopup(True); self._due_edit.setDisplayFormat("dd MMM yyyy")
-        self._due_edit.setFixedHeight(28); self._due_edit.setMinimumWidth(110)
-        self._due_edit.setStyleSheet("QDateEdit{background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;}")
-        try:
-            self._due_edit.setDate(QDate.fromString(due_str, "yyyy-MM-dd") if due_str and "-" in due_str else QDate.currentDate())
-        except:
-            self._due_edit.setDate(QDate.currentDate())
-        self._due_edit.dateChanged.connect(lambda d: self._save_due_date(card, d))
-        due_col.addWidget(self._due_edit)
-        r2.addLayout(due_col)
         r2.addStretch(); hdr_lay.addLayout(r2)
         self.header_lay.addWidget(hdr)
         self.header_container.show()
@@ -848,11 +906,6 @@ class CardsTab(QWidget):
         self.details_container.show()
 
         self._populate_settle_footer(card)
-
-    def _save_due_date(self, card, qdate):
-        new_date = qdate.toString("yyyy-MM-dd")
-        self.cr.update(card["card_id"], due_date=new_date)
-        card["due_date"] = new_date
 
     def _populate_settle_footer(self, card):
         aid = card["account_id"]

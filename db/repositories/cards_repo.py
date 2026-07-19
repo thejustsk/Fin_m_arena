@@ -13,7 +13,6 @@ class CardsRepo:
     # ── Cards CRUD ──
 
     def list_active(self):
-        """All active cards with their account info joined."""
         return _rows(self.db.execute("""
             SELECT c.*, a.display_name AS acct_name, a.credit_limit AS acct_limit,
                    a.opening_balance, a.color_hex
@@ -24,7 +23,6 @@ class CardsRepo:
         """).fetchall())
 
     def list_credit_cards(self):
-        """Legacy: list CREDIT_CARD accounts (used by setup/settings)."""
         return _rows(self.db.execute(
             "SELECT * FROM accounts WHERE account_type='CREDIT_CARD' AND is_active=1"
         ).fetchall())
@@ -64,12 +62,12 @@ class CardsRepo:
 
     def get_cycles(self, account_id):
         return _rows(self.db.execute(
-            "SELECT * FROM card_cycles WHERE account_id=? ORDER BY statement_date DESC",
+            "SELECT * FROM card_cycles WHERE account_id=? ORDER BY cycle_start_date DESC",
             (account_id,)).fetchall())
 
     def latest_cycle(self, account_id):
         r = self.db.execute(
-            "SELECT * FROM card_cycles WHERE account_id=? ORDER BY statement_date DESC LIMIT 1",
+            "SELECT * FROM card_cycles WHERE account_id=? ORDER BY cycle_start_date DESC LIMIT 1",
             (account_id,)).fetchone()
         return dict(r) if r else None
 
@@ -83,10 +81,30 @@ class CardsRepo:
         self.db.commit()
         return kw["cycle_id"]
 
-    # ── Helpers ──
+    def upsert_cycle(self, account_id, cycle_start_date, statement_date, **kw):
+        """Insert or update a cycle by (account_id, cycle_start_date)."""
+        existing = self.db.execute(
+            "SELECT cycle_id FROM card_cycles WHERE account_id=? AND cycle_start_date=?",
+            (account_id, cycle_start_date)).fetchone()
+        if existing:
+            cycle_id = existing["cycle_id"]
+            kw["statement_date"] = statement_date
+            sets = ", ".join(f"{k}=?" for k in kw)
+            self.db.execute(f"UPDATE card_cycles SET {sets} WHERE cycle_id=?", (*kw.values(), cycle_id))
+            self.db.commit()
+            return cycle_id
+        else:
+            kw["account_id"] = account_id
+            kw["cycle_start_date"] = cycle_start_date
+            kw["statement_date"] = statement_date
+            return self.add_cycle(**kw)
+
+    def update_cycle(self, cycle_id, **kw):
+        sets = ", ".join(f"{k}=?" for k in kw)
+        self.db.execute(f"UPDATE card_cycles SET {sets} WHERE cycle_id=?", (*kw.values(), cycle_id))
+        self.db.commit()
 
     def get_card_spends(self, account_id, date_from, date_to):
-        """Sum of debits for a card account between two dates."""
         r = self.db.execute(
             "SELECT COALESCE(SUM(amount),0) FROM transactions "
             "WHERE account_id=? AND tx_type='DEBIT' AND tx_date>=? AND tx_date<=?",
@@ -94,7 +112,6 @@ class CardsRepo:
         return r[0] if r else 0
 
     def get_card_payments(self, account_id, date_from, date_to):
-        """Sum of credits (payments) for a card account between two dates."""
         r = self.db.execute(
             "SELECT COALESCE(SUM(amount),0) FROM transactions "
             "WHERE account_id=? AND tx_type='CREDIT' AND tx_date>=? AND tx_date<=?",
@@ -102,7 +119,6 @@ class CardsRepo:
         return r[0] if r else 0
 
     def get_recent_transactions(self, account_id, limit=10):
-        """Recent transactions for a card."""
         return _rows(self.db.execute(
             "SELECT t.*, c.display_name AS cat_name, c.color_hex AS cat_color, "
             "pm.display_name AS method_name "

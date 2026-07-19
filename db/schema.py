@@ -183,7 +183,9 @@ CREATE TABLE IF NOT EXISTS cards (
 CREATE TABLE IF NOT EXISTS card_cycles (
     cycle_id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts,
     cycle_start_date TEXT, statement_date TEXT, due_date TEXT,
-    total_due REAL, minimum_due REAL, source TEXT DEFAULT 'MANUAL', detected_at TEXT
+    total_due REAL DEFAULT 0, minimum_due REAL DEFAULT 0,
+    debits REAL DEFAULT 0, paid REAL DEFAULT 0, remaining REAL DEFAULT 0,
+    source TEXT DEFAULT 'MANUAL', detected_at TEXT
 );
 CREATE TABLE IF NOT EXISTS budgets (
     budget_id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
@@ -273,6 +275,9 @@ def run_migrations(db):
         ("cards", "card_number", "TEXT"),
         ("cards", "statement_date", "TEXT DEFAULT ''"),
         ("cards", "due_date", "TEXT DEFAULT ''"),
+        ("card_cycles", "debits", "REAL DEFAULT 0"),
+        ("card_cycles", "paid", "REAL DEFAULT 0"),
+        ("card_cycles", "remaining", "REAL DEFAULT 0"),
     ]
     for table, col, typedef in _safe_cols:
         try:
