@@ -1,10 +1,12 @@
-"""Setup wizard — 4 steps: Password → 2FA (mandatory) → Accounts → Done."""
+"""Setup wizard — 4 steps: Password → 2FA (mandatory) → Accounts → Done.
+Dark theme matching login screen. Enter key support."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QLineEdit, QComboBox, QPushButton,
                               QStackedWidget, QFrame, QMessageBox,
                               QScrollArea)
-from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer
+from PyQt5.QtGui import (QPainter, QColor, QRadialGradient, QLinearGradient,
+                          QPen, QPainterPath, QCursor, QFont)
 import io
 from ui.theme import C
 from ui.widgets.metric_card import add_shadow
@@ -15,32 +17,98 @@ try:
 except ImportError:
     HAS_TOTP = False
 
-# ── Inline button styles (not QSS-dependent) ──
+# ── Dark theme styles matching login screen ──
+INPUT_STYLE = """
+    QLineEdit {
+        background: rgba(255,255,255,0.07);
+        border: none;
+        border-bottom: 2px solid rgba(255,255,255,0.2);
+        border-radius: 0px;
+        padding: 12px 4px;
+        font-size: 15px;
+        font-weight: 500;
+        color: #FFFFFF;
+    }
+    QLineEdit:focus {
+        border-bottom: 2px solid #818CF8;
+        background: rgba(255,255,255,0.10);
+    }
+"""
+
+COMBO_STYLE = """
+    QComboBox {
+        background: rgba(255,255,255,0.07);
+        border: none;
+        border-bottom: 2px solid rgba(255,255,255,0.2);
+        border-radius: 0px;
+        padding: 12px 4px;
+        font-size: 14px;
+        font-weight: 500;
+        color: #FFFFFF;
+    }
+    QComboBox:focus {
+        border-bottom: 2px solid #818CF8;
+    }
+    QComboBox::drop-down {
+        border: none;
+        width: 24px;
+    }
+    QComboBox::down-arrow {
+        image: none;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 6px solid rgba(255,255,255,0.5);
+        margin-right: 8px;
+    }
+    QComboBox QAbstractItemView {
+        background: #1E293B;
+        color: white;
+        selection-background-color: #4F46E5;
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+"""
+
 BTN_NEXT = """
     QPushButton {
-        background: #4F46E5; color: #FFFFFF; border: none;
-        border-radius: 8px; padding: 12px 28px;
-        font-size: 15px; font-weight: 700;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+            stop:0 #4F46E5, stop:1 #7C3AED);
+        color: #FFFFFF; border: none; border-radius: 10px;
+        padding: 14px; font-size: 16px; font-weight: 700;
     }
-    QPushButton:hover { background: #4338CA; }
+    QPushButton:hover {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+            stop:0 #4338CA, stop:1 #6D28D9);
+    }
     QPushButton:pressed { background: #3730A3; }
 """
+
 BTN_DONE = """
     QPushButton {
-        background: #059669; color: #FFFFFF; border: none;
-        border-radius: 8px; padding: 12px 28px;
-        font-size: 15px; font-weight: 700;
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+            stop:0 #059669, stop:1 #10B981);
+        color: #FFFFFF; border: none; border-radius: 10px;
+        padding: 14px; font-size: 16px; font-weight: 700;
     }
-    QPushButton:hover { background: #047857; }
-    QPushButton:pressed { background: #065F46; }
+    QPushButton:hover {
+        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+            stop:0 #047857, stop:1 #059669);
+    }
 """
+
 BTN_BACK = """
     QPushButton {
-        background: transparent; color: #667085;
-        border: 1px solid #D0D5DD; border-radius: 8px;
-        padding: 12px 28px; font-size: 14px; font-weight: 500;
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.5);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        padding: 14px 28px;
+        font-size: 14px;
+        font-weight: 500;
     }
-    QPushButton:hover { background: #F0F2F5; color: #101828; }
+    QPushButton:hover {
+        background: rgba(255,255,255,0.12);
+        color: #F1F5F9;
+    }
 """
 
 
@@ -58,39 +126,61 @@ class SetupWizard(QWidget):
 
     def _build(self):
         self.setWindowTitle("Finance Manager — First Time Setup")
-        self.setMinimumSize(580, 680)
-        self.setStyleSheet(f"background: {C['bg']};")
+        self.setMinimumSize(580, 720)
+        self.setStyleSheet("background: #0B1120;")
 
         outer = QVBoxLayout(self)
         outer.setAlignment(Qt.AlignCenter)
         outer.setContentsMargins(20, 20, 20, 20)
 
-        # ── Card container ──
+        # ── Card container (dark theme) ──
         self.card = QFrame()
-        self.card.setFixedSize(540, 640)
-        self.card.setStyleSheet(f"""
-            QFrame {{
-                background: {C['surface']};
-                border: 1px solid {C['border2']};
-                border-radius: 20px;
-            }}
+        self.card.setFixedSize(520, 680)
+        self.card.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0,y1:0,x2:0.3,y2:1,
+                    stop:0 #1E293B, stop:1 #0F172A);
+                border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 24px;
+            }
         """)
         add_shadow(self.card, blur=48, y_offset=12)
 
         cl = QVBoxLayout(self.card)
         cl.setContentsMargins(36, 28, 36, 28)
-        cl.setSpacing(12)
+        cl.setSpacing(16)
+
+        # ── Header with icon ──
+        header = QLabel("💰  Finance Manager")
+        header.setStyleSheet("font-size: 22px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
+        header.setAlignment(Qt.AlignCenter)
+        cl.addWidget(header)
 
         # ── Progress dots ──
         dots_row = QHBoxLayout()
         dots_row.setAlignment(Qt.AlignCenter)
         self.dots = []
-        for i in range(4):  # 4 steps now
+        for i in range(4):
             d = QLabel("●" if i == 0 else "○")
-            d.setStyleSheet(f"font-size: 18px; color: {C['accent'] if i == 0 else C['border']};")
+            d.setStyleSheet(f"font-size: 16px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
             dots_row.addWidget(d)
             self.dots.append(d)
         cl.addLayout(dots_row)
+
+        # ── Step title ──
+        self.step_title = QLabel("Create Your Password")
+        self.step_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
+        self.step_title.setAlignment(Qt.AlignCenter)
+        cl.addWidget(self.step_title)
+
+        # ── Step subtitle ──
+        self.step_sub = QLabel("Secure your financial data with a strong password")
+        self.step_sub.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.4); background: transparent; border: none;")
+        self.step_sub.setAlignment(Qt.AlignCenter)
+        self.step_sub.setWordWrap(True)
+        cl.addWidget(self.step_sub)
+
+        cl.addSpacing(8)
 
         # ── Stacked pages ──
         self.stack = QStackedWidget()
@@ -106,7 +196,7 @@ class SetupWizard(QWidget):
 
         self.back_btn = QPushButton("← Back")
         self.back_btn.setStyleSheet(BTN_BACK)
-        self.back_btn.setCursor(Qt.PointingHandCursor)
+        self.back_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.back_btn.clicked.connect(self._prev)
         self.back_btn.hide()
         nav.addWidget(self.back_btn)
@@ -115,7 +205,7 @@ class SetupWizard(QWidget):
 
         self.next_btn = QPushButton("Next  →")
         self.next_btn.setStyleSheet(BTN_NEXT)
-        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.next_btn.setMinimumHeight(48)
         self.next_btn.setMinimumWidth(160)
         self.next_btn.clicked.connect(self._next)
@@ -130,26 +220,30 @@ class SetupWizard(QWidget):
     def _page_password(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(16)
-
-        title = QLabel("Create Your Password")
-        title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {C['text']};")
-        title.setAlignment(Qt.AlignCenter)
-        lay.addWidget(title)
-
-        lay.addSpacing(8)
+        lay.setSpacing(20)
+        lay.setContentsMargins(0, 8, 0, 0)
 
         self.pw1 = QLineEdit()
         self.pw1.setEchoMode(QLineEdit.Password)
         self.pw1.setPlaceholderText("Password  (min 4 characters)")
-        self.pw1.setMinimumHeight(46)
+        self.pw1.setMinimumHeight(48)
+        self.pw1.setStyleSheet(INPUT_STYLE)
+        self.pw1.returnPressed.connect(self._next)
         lay.addWidget(self.pw1)
 
         self.pw2 = QLineEdit()
         self.pw2.setEchoMode(QLineEdit.Password)
         self.pw2.setPlaceholderText("Confirm password")
-        self.pw2.setMinimumHeight(46)
+        self.pw2.setMinimumHeight(48)
+        self.pw2.setStyleSheet(INPUT_STYLE)
+        self.pw2.returnPressed.connect(self._next)
         lay.addWidget(self.pw2)
+
+        # Error label
+        self.pw_err = QLabel("")
+        self.pw_err.setStyleSheet("color: #EF4444; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        self.pw_err.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.pw_err)
 
         lay.addStretch()
         return page
@@ -160,27 +254,21 @@ class SetupWizard(QWidget):
     def _page_2fa(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(10)
+        lay.setSpacing(12)
+        lay.setContentsMargins(0, 8, 0, 0)
         lay.setAlignment(Qt.AlignCenter)
 
-        title = QLabel("Set Up Two-Factor Authentication")
-        title.setStyleSheet(f"font-size: 18px; font-weight: 800; color: {C['text']};")
-        title.setAlignment(Qt.AlignCenter)
-        lay.addWidget(title)
-
-        # QR code — isolated, no text around it
+        # QR code
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setFixedSize(220, 220)
+        self.qr_label.setFixedSize(200, 200)
         self.qr_label.setStyleSheet(
-            "background: white; border: 2px solid #E5E7EB; border-radius: 12px; padding: 8px;")
+            "background: white; border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 8px;")
         lay.addWidget(self.qr_label, alignment=Qt.AlignCenter)
 
-        lay.addSpacing(6)
-
-        # Secret key — below QR, clearly separated
+        # Secret key
         sec_lbl = QLabel("Can't scan? Enter this key manually:")
-        sec_lbl.setStyleSheet(f"font-size: 12px; color: {C['text3']};")
+        sec_lbl.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.4); background: transparent; border: none;")
         sec_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(sec_lbl)
 
@@ -188,18 +276,18 @@ class SetupWizard(QWidget):
         self.secret_label.setAlignment(Qt.AlignCenter)
         self.secret_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.secret_label.setStyleSheet(
-            f"font-family: 'Courier New', monospace; font-size: 16px; font-weight: 700; "
-            f"color: {C['accent']}; background: {C['accent_bg']}; "
-            "padding: 10px 16px; border-radius: 8px; border: 1px solid #C7D2FE; "
+            "font-family: 'Courier New', monospace; font-size: 15px; font-weight: 700; "
+            "color: #818CF8; background: rgba(79,70,229,0.15); "
+            "padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(79,70,229,0.3); "
             "letter-spacing: 2px;")
         lay.addWidget(self.secret_label)
 
-        lay.addSpacing(6)
+        lay.addSpacing(8)
 
         note = QLabel("Open your authenticator app (Google Authenticator, Authy, etc.)\n"
                        "Scan the QR code or enter the key above.\n"
                        "You'll need the 6-digit code every time you log in.")
-        note.setStyleSheet(f"font-size: 12px; color: {C['text3']}; line-height: 1.4;")
+        note.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.5; background: transparent; border: none;")
         note.setAlignment(Qt.AlignCenter)
         note.setWordWrap(True)
         lay.addWidget(note)
@@ -214,16 +302,12 @@ class SetupWizard(QWidget):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(12)
+        lay.setContentsMargins(0, 8, 0, 0)
 
-        title = QLabel("Add Your Accounts")
-        title.setStyleSheet(f"font-size: 20px; font-weight: 800; color: {C['text']};")
-        title.setAlignment(Qt.AlignCenter)
-        lay.addWidget(title)
-
-        hint = QLabel("Bank accounts and cash only.\n"
-                       "Credit cards & wallets are added from their own tabs.")
-        hint.setStyleSheet(f"font-size: 12px; color: {C['text3']};")
+        hint = QLabel("Bank accounts and cash only.\nCredit cards & wallets are added from their own tabs.")
+        hint.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.35); background: transparent; border: none;")
         hint.setAlignment(Qt.AlignCenter)
+        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         # Scrollable area for account rows
@@ -240,14 +324,18 @@ class SetupWizard(QWidget):
         lay.addWidget(scroll, 1)
 
         add_btn = QPushButton("＋  Add Account")
-        add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {C['accent_bg']}; color: {C['accent']};
-                border: 1.5px dashed {C['accent']}; border-radius: 8px;
-                padding: 10px; font-size: 13px; font-weight: 600;
-            }}
-            QPushButton:hover {{ background: #D6DEFF; }}
+        add_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(79,70,229,0.12);
+                color: #818CF8;
+                border: 1.5px dashed rgba(79,70,229,0.4);
+                border-radius: 10px;
+                padding: 12px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: rgba(79,70,229,0.2); }
         """)
         add_btn.clicked.connect(self._add_acct_row)
         lay.addWidget(add_btn)
@@ -261,20 +349,22 @@ class SetupWizard(QWidget):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(16)
+        lay.setContentsMargins(0, 20, 0, 0)
         lay.setAlignment(Qt.AlignCenter)
 
+        # Animated checkmark
         check = QLabel("✓")
-        check.setStyleSheet(f"font-size: 72px; color: {C['green']};")
+        check.setStyleSheet("font-size: 72px; color: #10B981; background: transparent; border: none;")
         check.setAlignment(Qt.AlignCenter)
         lay.addWidget(check)
 
         self.done_title = QLabel("All Set!")
-        self.done_title.setStyleSheet(f"font-size: 24px; font-weight: 800; color: {C['text']};")
+        self.done_title.setStyleSheet("font-size: 28px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
         self.done_title.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.done_title)
 
         self.done_detail = QLabel("")
-        self.done_detail.setStyleSheet(f"font-size: 14px; color: {C['text3']};")
+        self.done_detail.setStyleSheet("font-size: 14px; color: rgba(255,255,255,0.5); background: transparent; border: none;")
         self.done_detail.setAlignment(Qt.AlignCenter)
         self.done_detail.setWordWrap(True)
         lay.addWidget(self.done_detail)
@@ -287,7 +377,7 @@ class SetupWizard(QWidget):
     # ══════════════════════════════════════════════
     def _generate_2fa(self):
         if self._totp_secret:
-            return  # already generated
+            return
         if not HAS_TOTP:
             QMessageBox.critical(self, "Missing Dependency",
                                  "2FA requires pyotp and qrcode.\n\n"
@@ -295,10 +385,8 @@ class SetupWizard(QWidget):
             return
         secret = pyotp.random_base32()
         self._totp_secret = secret
-        # Persist to DB
         self.sec.repo.set_totp(secret, True)
 
-        # Render QR
         totp = pyotp.TOTP(secret)
         uri = totp.provisioning_uri("FinanceManager", issuer_name="FinanceManager")
         qr = qrcode.QRCode(version=1, box_size=6, border=2)
@@ -308,49 +396,52 @@ class SetupWizard(QWidget):
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
+        from PyQt5.QtGui import QPixmap
         pixmap = QPixmap()
         pixmap.loadFromData(buf.read())
         self.qr_label.setPixmap(
-            pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.secret_label.setText(secret)
 
     # ══════════════════════════════════════════════
-    # Add account row
+    # Add account row (dark theme)
     # ══════════════════════════════════════════════
     def _add_acct_row(self):
         row = QFrame()
-        row.setStyleSheet(f"""
-            QFrame {{
-                background: {C['surface2']};
-                border: 1px solid {C['border2']};
-                border-radius: 8px;
-                padding: 6px;
-            }}
+        row.setStyleSheet("""
+            QFrame {
+                background: rgba(255,255,255,0.04);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+            }
         """)
         rl = QHBoxLayout(row)
-        rl.setContentsMargins(8, 6, 8, 6)
+        rl.setContentsMargins(10, 8, 10, 8)
         rl.setSpacing(8)
 
         name = QLineEdit()
         name.setPlaceholderText("Account name")
         name.setMinimumHeight(40)
+        name.setStyleSheet(INPUT_STYLE)
         rl.addWidget(name, 3)
 
         atype = QComboBox()
         atype.addItems(["CURRENT", "CASH"])
         atype.setMinimumHeight(40)
+        atype.setStyleSheet(COMBO_STYLE)
         rl.addWidget(atype, 1)
 
         bal = QLineEdit()
         bal.setPlaceholderText("₹ Opening balance")
         bal.setMinimumHeight(40)
+        bal.setStyleSheet(INPUT_STYLE)
         rl.addWidget(bal, 2)
 
         x = QPushButton("✕")
-        x.setFixedSize(40, 40)
-        x.setCursor(Qt.PointingHandCursor)
+        x.setFixedSize(36, 36)
+        x.setCursor(QCursor(Qt.PointingHandCursor))
         x.setStyleSheet(
-            f"color:{C['red']}; background:transparent; border:none; font-size:18px; font-weight:bold;")
+            "color:#EF4444; background:rgba(239,68,68,0.1); border:none; border-radius:8px; font-size:16px; font-weight:bold;")
         entry = (name, atype, bal)
         x.clicked.connect(lambda: (
             self.acct_layout.removeWidget(row),
@@ -361,18 +452,31 @@ class SetupWizard(QWidget):
 
         self.acct_layout.addWidget(row)
         self.acct_rows.append(entry)
+        name.setFocus()
 
     # ══════════════════════════════════════════════
     # Navigation
     # ══════════════════════════════════════════════
     def _update_ui(self):
         self.stack.setCurrentIndex(self.step)
+
+        # Update dots
         for i, d in enumerate(self.dots):
             d.setText("●" if i == self.step else "○")
-            d.setStyleSheet(
-                f"font-size: 18px; color: {C['accent'] if i == self.step else C['border']};")
-        self.back_btn.setVisible(self.step > 0)
+            d.setStyleSheet(f"font-size: 16px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
 
+        # Update title/subtitle
+        titles = [
+            ("Create Your Password", "Secure your financial data with a strong password"),
+            ("Set Up Two-Factor Authentication", "Scan the QR code with your authenticator app"),
+            ("Add Your Accounts", "Add your bank accounts and cash wallets"),
+            ("All Set!", "You're ready to start managing your finances"),
+        ]
+        self.step_title.setText(titles[self.step][0])
+        self.step_sub.setText(titles[self.step][1])
+
+        # Update buttons
+        self.back_btn.setVisible(self.step > 0)
         if self.step == 3:
             self.next_btn.setText("Go to Home  ✓")
             self.next_btn.setStyleSheet(BTN_DONE)
@@ -385,16 +489,17 @@ class SetupWizard(QWidget):
         if self.step == 0:
             pw = self.pw1.text()
             if len(pw) < 4:
-                QMessageBox.warning(self, "Error", "Password must be at least 4 characters.")
+                self.pw_err.setText("Password must be at least 4 characters.")
                 self.pw1.setFocus()
                 return
             if pw != self.pw2.text():
-                QMessageBox.warning(self, "Error", "Passwords do not match.")
+                self.pw_err.setText("Passwords do not match.")
                 self.pw2.setFocus()
                 return
+            self.pw_err.setText("")
             self.sec.set_pw(pw)
             self.step = 1
-            self._generate_2fa()  # generate QR when entering 2FA page
+            self._generate_2fa()
             self._update_ui()
             return
 
@@ -412,14 +517,12 @@ class SetupWizard(QWidget):
                 nm = name_edit.text().strip()
                 if not nm:
                     continue
-                # Check duplicates within wizard rows
                 if nm.lower() in seen_names:
                     QMessageBox.warning(self, "Duplicate",
                                         f"'{nm}' is entered twice. Please remove the duplicate.")
                     name_edit.setFocus()
                     return
                 seen_names.add(nm.lower())
-                # Check duplicates in DB
                 if self.repo.exists(nm):
                     QMessageBox.warning(self, "Duplicate",
                                         f"Account '{nm}' already exists in the database.")
