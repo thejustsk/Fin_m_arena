@@ -74,9 +74,10 @@ class MainWindow(QMainWindow):
         self.sidebar.setFixedWidth(COLLAPSED_W)
         self.sidebar._expanded = False
         self.sidebar.title_label.hide()
+        self.sidebar.hdr_frame.hide()
+        self.sidebar.title_icon.show()
         for lbl in self.sidebar._labels:
             lbl.hide()
-        self.sidebar.toggle_btn.setText("▶")
         from ui.sidebar import NAV_GROUPS
         for group_label, items in NAV_GROUPS:
             for key, icon, label_text in items:

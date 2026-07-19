@@ -8,7 +8,7 @@ C = {
     "green": "#059669", "green_bg": "#ECFDF5",
     "red": "#DC2626", "red_bg": "#FEF2F2",
     "amber": "#D97706", "amber_bg": "#FFFBEB",
-    "sidebar": "#0F172A", "sidebar_text": "#94A3B8",
+    "sidebar": "#FFFFFF", "sidebar_text": "#4338CA",
     "radius": "12px", "radius_sm": "8px",
 }
 
@@ -41,16 +41,11 @@ QFrame#card {{ background: {C['surface']}; border: 1px solid {C['border2']}; bor
 QFrame#metric-card {{ background: {C['surface']}; border: 1px solid {C['border2']}; border-radius: {C['radius']}; padding: 16px 20px; }}
 QProgressBar {{ background: {C['surface2']}; border: none; border-radius: 4px; height: 6px; }}
 QProgressBar::chunk {{ background: {C['accent']}; border-radius: 4px; }}
-QWidget#sidebar {{ background: {C['sidebar']}; }}
+QWidget#sidebar {{ background: #FFFFFF; border-right: 1px solid {C['border']}; }}
 QPushButton#sidebar-item {{
-    background: transparent; color: {C['sidebar_text']}; border: none;
-    border-radius: {C['radius_sm']}; padding: 9px 14px; text-align: left;
+    background: transparent; color: #4338CA; border: none;
+    border-radius: {C['radius_sm']}; padding: 9px 14px; text-align: left; font-weight: 600;
 }}
-QPushButton#sidebar-item:hover {{ background: rgba(255,255,255,0.06); color: white; }}
-QPushButton#sidebar-item[active="true"] {{ background: rgba(99,102,241,0.2); color: white; font-weight: 600; }}
-QFrame#networth-widget {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {C['accent']},stop:1 #7C3AED);
-    border-radius: {C['radius']}; padding: 14px 16px;
-}}
+QPushButton#sidebar-item:hover {{ background: {C['surface2']}; color: #111827; font-weight: 700; }}
 QGroupBox {{ font-weight: 600; border: 1px solid {C['border2']}; border-radius: {C['radius']}; margin-top: 12px; padding: 16px 12px 12px; }}
 """

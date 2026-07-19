@@ -1,8 +1,9 @@
-"""Collapsible sidebar — clean dark theme, no label backgrounds."""
+"""Sidebar — white theme with indigo accent, icon toggle, due reminders."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QPushButton, QFrame)
+                              QPushButton, QFrame, QScrollArea)
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 from PyQt5.QtGui import QCursor
+from datetime import date, timedelta
 from ui.theme import C
 
 
@@ -48,6 +49,23 @@ COLLAPSED_W = 68
 ANIM_STEPS = 10
 ANIM_MS = 180
 
+# Indigo palette — white bg
+_PRIMARY = "#4338CA"
+_PRIMARY_LIGHT = "#6366F1"
+_PRIMARY_PALE = "#E0E7FF"
+
+
+def _parse_stmt_day(stmt_str):
+    try:
+        day_str = "".join(c for c in stmt_str if c.isdigit())
+        if day_str: return int(day_str)
+    except: pass
+    return None
+
+
+def _cycle_name(start_date):
+    return start_date.strftime("%b %Y")
+
 
 class Sidebar(QWidget):
     nav = pyqtSignal(str)
@@ -59,96 +77,67 @@ class Sidebar(QWidget):
         self.bal = bal_svc
         self._cr = repos.get("cards") if repos else None
         self._tx_repo = repos.get("transactions") if repos else None
+        self._acct_repo = repos.get("accounts") if repos else None
         self._btns = {}
         self._labels = []
-        self._dues_widgets = []
         self._expanded = True
         self._animating = False
+        self._has_dues = False
+        self._due_dots = []
         self._build()
 
     def _build(self):
-        # Pure dark background, no gradients
-        self.setStyleSheet("background: #111827;")
+        self.setStyleSheet(f"background: #FFFFFF; border-right: 1px solid {C['border']};")
 
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(10, 14, 10, 14)
         self.lay.setSpacing(2)
 
-        # ── Header ──
+        # ── Header — click to toggle ──
         hdr = QHBoxLayout()
         hdr.setSpacing(8)
 
-        self.title_icon = QLabel("💰")
-        self.title_icon.setStyleSheet("font-size: 22px; background: transparent; border: none; outline: none;")
-        self.title_icon.setAttribute(Qt.WA_TranslucentBackground)
+        # Collapsed: "FM" monogram icon
+        self.title_icon = QLabel("FM")
+        self.title_icon.setFixedSize(40, 40)
+        self.title_icon.setAlignment(Qt.AlignCenter)
+        self.title_icon.setStyleSheet(
+            f"font-size: 15px; font-weight: 800; color: white; "
+            f"background: {_PRIMARY}; border-radius: 10px;")
+        self.title_icon.setCursor(QCursor(Qt.PointingHandCursor))
+        self.title_icon.mousePressEvent = lambda e: self._toggle()
         hdr.addWidget(self.title_icon)
 
+        # Expanded: app name in white container
+        self.hdr_frame = QFrame()
+        self.hdr_frame.setCursor(QCursor(Qt.PointingHandCursor))
+        self.hdr_frame.setStyleSheet(
+            f"QFrame{{background:white;border:1px solid {C['border']};border-radius:10px;}}"
+            f"QLabel{{background:transparent;border:none;outline:none;}}")
+        self.hdr_frame.mousePressEvent = lambda e: self._toggle()
+        hf_lay = QHBoxLayout(self.hdr_frame)
+        hf_lay.setContentsMargins(12, 8, 12, 8)
+        hf_lay.setSpacing(6)
         self.title_label = QLabel("Finance Manager")
         self.title_label.setStyleSheet(
-            "color: #4C1D95; font-size: 15px; font-weight: 800; background: transparent; border: none;")
-        hdr.addWidget(self.title_label)
+            f"color: {_PRIMARY}; font-size: 15px; font-weight: 800;")
+        hf_lay.addWidget(self.title_label)
+        hdr.addWidget(self.hdr_frame, 1)
 
         hdr.addStretch()
-
-        self.toggle_btn = QPushButton("◀")
-        self.toggle_btn.setFixedSize(30, 30)
-        self.toggle_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.toggle_btn.setStyleSheet("""
-            QPushButton {
-                background: #374151;
-                color: #D1D5DB;
-                border: 1px solid #4B5563;
-                border-radius: 6px;
-                font-size: 12px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #4B5563;
-                color: #F9FAFB;
-                border-color: #6B7280;
-            }
-        """)
-        self.toggle_btn.clicked.connect(self._toggle)
-        hdr.addWidget(self.toggle_btn)
         self.lay.addLayout(hdr)
-
         self.lay.addSpacing(10)
 
-        # ── Net-worth widget — purple gradient ──
-        self.nw_frame = QFrame()
-        self.nw_frame.setCursor(QCursor(Qt.PointingHandCursor))
-        self.nw_frame.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #7C3AED, stop:1 #A855F7);
-                border-radius: 12px;
-                padding: 14px 16px;
-            }
-        """)
-        nwl = QVBoxLayout(self.nw_frame)
-        nwl.setContentsMargins(14, 10, 14, 10)
-        nwl.setSpacing(2)
+        # Initially expanded — monogram hidden
+        self.title_icon.hide()
 
-        self.nw_title = QLabel("NET WORTH")
-        self.nw_title.setStyleSheet(
-            "color: rgba(255,255,255,0.6); font-size: 9px; font-weight: 700; letter-spacing: 1.5px;")
-        nwl.addWidget(self.nw_title)
-
-        self.nw_val = QLabel("₹0")
-        self.nw_val.setStyleSheet("color: white; font-size: 18px; font-weight: 800;")
-        nwl.addWidget(self.nw_val)
-
-        self.nw_frame.mousePressEvent = lambda e: self.nav.emit("balances")
-        self.lay.addWidget(self.nw_frame)
-        self.lay.addSpacing(8)
-
-        # ── Grouped nav — NO background on labels ──
+        # ── Grouped nav ──
         for group_label, items in NAV_GROUPS:
             if group_label:
                 lbl = QLabel(group_label)
                 lbl.setStyleSheet(
-                    "color: #6B7280; font-size: 9px; font-weight: 700; "
-                    "letter-spacing: 1.5px; padding: 14px 12px 4px; background: transparent; border: none;")
+                    "color: #111827; font-size: 9px; font-weight: 700; "
+                    "letter-spacing: 1.5px; padding: 14px 12px 4px; background: transparent; border:none;")
                 self.lay.addWidget(lbl)
                 self._labels.append(lbl)
 
@@ -164,54 +153,71 @@ class Sidebar(QWidget):
 
         self.lay.addStretch()
 
-        # ── Payment Dues section ──
-        self._dues_header = QLabel("PAYMENT DUES")
-        self._dues_header.setStyleSheet(
-            "color: #6B7280; font-size: 9px; font-weight: 700; "
-            "letter-spacing: 1.5px; padding: 14px 12px 4px; background: transparent; border: none;")
-        self.lay.addWidget(self._dues_header)
-        self._dues_container = QWidget()
-        self._dues_container.setStyleSheet("background:transparent;")
-        self._dues_lay = QVBoxLayout(self._dues_container)
-        self._dues_lay.setContentsMargins(0, 0, 0, 0)
-        self._dues_lay.setSpacing(2)
-        self.lay.addWidget(self._dues_container)
-        self._dues_header.hide()
-        self._dues_container.hide()
+        # ── Collapsed due dots container (bottom-left) ──
+        self._dots_container = QWidget()
+        self._dots_container.setStyleSheet("background:transparent;border:none;")
+        self._dots_lay = QVBoxLayout(self._dots_container)
+        self._dots_lay.setContentsMargins(0, 0, 0, 0)
+        self._dots_lay.setSpacing(4)
+        self._dots_container.hide()
+        self.lay.addWidget(self._dots_container)
+
+        # ── Due / Overdue Reminders (expanded) ──
+        self._rem_header = QLabel("PAYMENT DUES")
+        self._rem_header.setStyleSheet(
+            f"color: {_PRIMARY}; font-size: 9px; font-weight: 700; "
+            f"letter-spacing: 1.5px; padding: 10px 12px 4px; background: transparent; border: none;")
+        self.lay.addWidget(self._rem_header)
+        self._rem_header.hide()
+
+        self._rem_scroll = QScrollArea()
+        self._rem_scroll.setWidgetResizable(True)
+        self._rem_scroll.setFrameShape(QFrame.NoFrame)
+        self._rem_scroll.setMaximumHeight(200)
+        self._rem_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        rem_inner = QWidget()
+        rem_inner.setStyleSheet("background:transparent;")
+        self._rem_lay = QVBoxLayout(rem_inner)
+        self._rem_lay.setContentsMargins(0, 0, 0, 0)
+        self._rem_lay.setSpacing(4)
+        self._rem_scroll.setWidget(rem_inner)
+        self.lay.addWidget(self._rem_scroll)
+        self._rem_scroll.hide()
 
         self.ver = QLabel("v3.1.0")
-        self.ver.setStyleSheet("color: #374151; font-size: 9px; padding: 4px 8px; background: transparent; border: none;")
+        self.ver.setStyleSheet(f"color: {C['text3']}; font-size: 9px; padding: 4px 8px; background: transparent; border: none;")
         self.lay.addWidget(self.ver)
 
     def _btn_css(self, active):
         if active:
-            return """
-                QPushButton {
-                    background: rgba(124, 58, 237, 0.15);
-                    color: #7C3AED;
+            return f"""
+                QPushButton {{
+                    background: {_PRIMARY};
+                    color: white;
                     border: none;
                     border-radius: 8px;
                     padding: 8px 12px;
                     text-align: left;
                     font-size: 13px;
                     font-weight: 700;
-                }
+                }}
             """
-        return """
-            QPushButton {
+        return f"""
+            QPushButton {{
                 background: transparent;
-                color: #1F2937;
+                color: {_PRIMARY};
                 border: none;
                 border-radius: 8px;
                 padding: 8px 12px;
                 text-align: left;
                 font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.06);
-                color: #E5E7EB;
-            }
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {C['surface']};
+                color: #111827;
+                font-weight: 700;
+            }}
         """
 
     # ── Smooth collapse / expand ──
@@ -227,11 +233,22 @@ class Sidebar(QWidget):
         self._anim_start = start
         self._anim_delta = end - start
 
-        # Update text
         self.title_label.setVisible(self._expanded)
+        self.hdr_frame.setVisible(self._expanded)
+        self.title_icon.setVisible(not self._expanded)
         for lbl in self._labels:
             lbl.setVisible(self._expanded)
-        self.toggle_btn.setText("◀" if self._expanded else "▶")
+
+        # Toggle reminders / dots
+        if self._expanded:
+            self._dots_container.hide()
+            if self._has_dues:
+                self._rem_header.show()
+                self._rem_scroll.show()
+        else:
+            self._rem_header.hide()
+            self._rem_scroll.hide()
+            self._refresh_dots()
 
         for group_label, items in NAV_GROUPS:
             for key, icon, label_text in items:
@@ -262,12 +279,115 @@ class Sidebar(QWidget):
     def select_home(self):
         self._sel("home")
 
-    def refresh_dues(self):
-        """Payment dues removed from sidebar — now in Cards tab."""
-        for w in self._dues_widgets:
+    def _refresh_dots(self):
+        """Show/hide stacked indigo dots for collapsed state."""
+        for w in self._due_dots:
             w.deleteLater()
-        self._dues_widgets.clear()
-        self._dues_header.hide(); self._dues_container.hide()
+        self._due_dots.clear()
+
+        if not self._expanded and self._has_dues:
+            self._dots_container.show()
+            count = self._rem_lay.count()
+            for _ in range(min(count, 8)):
+                dot = QFrame()
+                dot.setFixedSize(32, 6)
+                dot.setStyleSheet(f"background:{_PRIMARY};border-radius:3px;")
+                self._dots_lay.addWidget(dot, 0, Qt.AlignHCenter)
+                self._due_dots.append(dot)
+        else:
+            self._dots_container.hide()
+
+    def refresh_dues(self):
+        """Load due/overdue reminders from card_cycles table."""
+        # Clear existing reminders
+        while self._rem_lay.count():
+            itm = self._rem_lay.takeAt(0)
+            w = itm.widget()
+            if w:
+                w.deleteLater()
+
+        if not self._cr:
+            self._rem_header.hide(); self._rem_scroll.hide()
+            self._has_dues = False; self._refresh_dots()
+            return
+
+        today = date.today()
+        today_iso = today.isoformat()
+        reminders = []
+
+        cards = self._cr.list_active()
+        for card in cards:
+            name = card.get("card_name", card.get("issuer_bank", "Card"))
+            aid = card["account_id"]
+            try:
+                cycles = self._cr.get_cycles(aid)
+            except:
+                continue
+            for cyc in cycles:
+                cyc_end = cyc.get("statement_date", "")
+                if not cyc_end or cyc_end >= today_iso:
+                    continue
+                remaining = cyc.get("remaining", 0) or 0
+                if remaining <= 0:
+                    continue
+                due_str = cyc.get("due_date", "") or ""
+                if not due_str or "-" not in due_str:
+                    continue
+                cs_str = cyc.get("cycle_start_date", "")
+                try:
+                    cycle_nm = _cycle_name(date.fromisoformat(cs_str))
+                except:
+                    cycle_nm = cs_str
+                try:
+                    due_dt = date.fromisoformat(due_str)
+                    dd = (due_dt - today).days
+                except:
+                    continue
+                if dd < 0:
+                    reminders.append((-100, name, cycle_nm, remaining, "#EF4444", True))
+                else:
+                    col = "#D97706" if dd <= 3 else "#059669"
+                    reminders.append((dd, name, cycle_nm, remaining, col, False))
+
+        reminders.sort(key=lambda r: r[0])
+        self._has_dues = len(reminders) > 0
+
+        if not reminders:
+            self._rem_header.hide(); self._rem_scroll.hide()
+            self._has_dues = False; self._refresh_dots()
+            return
+
+        # Expanded: show cards. Collapsed: show dots.
+        if self._expanded:
+            self._rem_header.show(); self._rem_scroll.show()
+            self._dots_container.hide()
+        else:
+            self._rem_header.hide(); self._rem_scroll.hide()
+            self._refresh_dots()
+
+        # Same card style as Cards tab reminders
+        for _, name, cycle_nm, amount, color, is_overdue in reminders[:10]:
+            row = QFrame()
+            row.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+                f"border-radius:8px;padding:6px 10px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(8, 4, 8, 4)
+            rl.setSpacing(6)
+            dot = QLabel("■")
+            dot.setFixedWidth(14); dot.setFixedHeight(14)
+            dot.setStyleSheet(f"background:{color};border-radius:3px;")
+            rl.addWidget(dot)
+            name_lbl = QLabel(f"{name}  ·  {cycle_nm}")
+            name_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+            name_lbl.setWordWrap(True)
+            rl.addWidget(name_lbl, 1)
+            amt = QLabel(fmt_money(amount))
+            amt.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
+            rl.addWidget(amt)
+            self._rem_lay.addWidget(row)
 
     def update_nw(self):
-        self.nw_val.setText(fmt_money(self.bal.net_worth()))
+        """No-op — net worth now shown on Home tab."""
+        pass
