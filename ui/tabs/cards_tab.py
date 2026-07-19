@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.tabs.database_tab import _tx_card
+from ui.tabs.database_tab import _tx_card, _day_header
 import uuid
 
 CARD_W = 320; CARD_H = 200; CARD_RADIUS = 16; GAP = 40
@@ -371,12 +371,14 @@ class RemindersWidget(QWidget):
 
     def load_reminders(self, cards):
         while self.lay.count():
-            itm=self.lay.takeAt(0)
+            itm = self.lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
 
-        title=QLabel("⏰  Reminders"); title.setStyleSheet(f"color:{C['text']};font-size:14px;font-weight:700;")
+        title = QLabel("⏰  Reminders")
+        title.setStyleSheet(f"color:{C['text']};font-size:14px;font-weight:700;")
         self.lay.addWidget(title)
-        today = date.today(); reminders = []
+        today = date.today()
+        reminders = []
 
         for card in cards:
             name = card.get("card_name", card.get("issuer_bank", "Card"))
@@ -384,106 +386,90 @@ class RemindersWidget(QWidget):
             stmt_str = card.get("statement_date", "")
             grace = card.get("grace_days", 20)
             due_str = card.get("due_date", "") or ""
-            if not due_str:
-                due_str = _calc_due(stmt_str, grace)
 
-            # Get balance
+            # Get balance from transactions
             balance = 0
-            if self.bal:
-                try: balance = abs(self.bal.get_balance(aid))
-                except: pass
+            try:
+                row = self.cr.db.execute(
+                    "SELECT COALESCE(SUM(CASE WHEN tx_type='DEBIT' THEN amount ELSE -amount END),0) "
+                    "FROM transactions WHERE account_id=?", (aid,)).fetchone()
+                balance = abs(row[0]) if row else 0
+            except:
+                pass
 
-            # Calculate cycles
-            stmt_dates = _get_stmt_dates(stmt_str, 4)
-            if not stmt_dates:
-                continue
-            cycles = _cycle_from_stmt_dates(stmt_dates)
-            if not cycles:
-                continue
+            # Type 1: Statement generating (5 days before statement, only if balance > 0)
+            stmt_day = _parse_stmt_day(stmt_str)
+            if stmt_day and balance > 0:
+                try:
+                    stmt = today.replace(day=min(stmt_day, 28))
+                    if stmt <= today:
+                        if today.month == 12:
+                            stmt = stmt.replace(year=today.year + 1, month=1)
+                        else:
+                            stmt = stmt.replace(month=today.month + 1)
+                    du = (stmt - today).days
+                    if 0 <= du <= 5:
+                        col = "#F59E0B" if du <= 2 else "#4F46E5"
+                        reminders.append((du, f"📅 {name} — Statement generating in {du} days (₹{balance:,.0f})", col))
+                except:
+                    pass
 
-            # Current cycle = last cycle in list
-            curr_start, curr_end, curr_stmt = cycles[-1]
-            curr_cycle_txn_count = 0
-            if curr_start <= today:
-                curr_txns = self._get_txns(aid, curr_start.isoformat(), curr_end.isoformat())
-                curr_cycle_txn_count = len(curr_txns)
+            # Type 2: Payment due (only if balance > 0)
+            if balance > 0:
+                if not due_str:
+                    due_str = _calc_due(stmt_str, grace)
+                if due_str:
+                    try:
+                        due = date.fromisoformat(due_str)
+                        dd = (due - today).days
+                        if dd >= -5:
+                            col = "#EF4444" if dd <= 0 else ("#F59E0B" if dd <= 3 else "#10B981")
+                            if dd < 0:
+                                reminders.append((-100, f"🚨 OVERDUE {abs(dd)} days — {name} (₹{balance:,.0f})", col))
+                            else:
+                                reminders.append((dd, f"💰 Due in {dd} days — {name} (₹{balance:,.0f})", col))
+                    except:
+                        pass
 
-            # ── Statement generating reminder ──
-            # Shows 5 days before statement date, only if current cycle has transactions
-            if today <= curr_end:
-                days_to_stmt = (curr_end - today).days
-                if 0 <= days_to_stmt <= 5 and curr_cycle_txn_count > 0:
-                    # Calculate current cycle spending
-                    cycle_debits = sum(t["amount"] for t in self._get_txns(aid, curr_start.isoformat(), curr_end.isoformat()) if t["tx_type"] == "DEBIT")
-                    if cycle_debits > 0:
-                        col = "#F59E0B" if days_to_stmt <= 2 else "#4F46E5"
-                        reminders.append((days_to_stmt, f"📅 {name} — Statement generating in {days_to_stmt} days (₹{cycle_debits:,.0f})", col))
-
-            # ── Due reminder ──
-            # Only for completed cycles (statement date has passed)
-            # Due = cycle debits - payments made after statement date
-            if len(cycles) >= 2:
-                prev_start, prev_end, prev_stmt = cycles[-2]
-                if today > prev_end:
-                    # Statement has been generated for this cycle
-                    cycle_debits = sum(t["amount"] for t in self._get_txns(aid, prev_start.isoformat(), prev_end.isoformat()) if t["tx_type"] == "DEBIT")
-                    # Payments made after statement date (credits that reduce the due)
-                    payments_after = sum(t["amount"] for t in self._get_txns(aid, prev_end.isoformat(), today.isoformat()) if t["tx_type"] == "CREDIT")
-                    remaining_due = cycle_debits - payments_after
-                    if remaining_due > 0:
-                        # Calculate due date for this cycle
-                        try:
-                            due_calc = (prev_stmt + timedelta(days=grace)).isoformat()
-                        except:
-                            due_calc = due_str
-                        # Use edited due date if available and close enough
-                        if due_str:
-                            try:
-                                dd_calc = date.fromisoformat(due_calc)
-                                dd_card = date.fromisoformat(due_str)
-                                if abs((dd_calc - dd_card).days) <= 5:
-                                    due_calc = due_str
-                            except: pass
-                        try:
-                            due_date = date.fromisoformat(due_calc)
-                            dd = (due_date - today).days
-                            if dd >= -5:
-                                col = "#EF4444" if dd <= 0 else ("#F59E0B" if dd <= 3 else "#10B981")
-                                if dd < 0:
-                                    reminders.append((-100, f"🚨 OVERDUE {abs(dd)} days — {name} ({fmt_money(remaining_due)})", col))
-                                else:
-                                    reminders.append((dd, f"💰 Due in {dd} days — {name} ({fmt_money(remaining_due)})", col))
-                        except: pass
-
-        # ── High-value transactions ──
+        # Type 3: High-value transactions (last 5 days)
         min_limit = 499
         try:
             for pref in self.cr.db.execute("SELECT value FROM preferences WHERE key='min_txn_alert'").fetchall():
                 min_limit = int(pref[0])
-        except: pass
+        except:
+            pass
         if self.tx_repo:
             five_days_ago = (today - timedelta(days=5)).isoformat()
             for card in cards:
                 name = card.get("card_name", card.get("issuer_bank", "Card"))
                 try:
-                    txns = self.tx_repo.list_filters(account_id=card["account_id"], date_from=five_days_ago, date_to=today.isoformat(), limit=50)
+                    txns = self.tx_repo.list_filters(
+                        account_id=card["account_id"],
+                        date_from=five_days_ago,
+                        date_to=today.isoformat(), limit=50)
                     for tx in txns:
                         if tx["amount"] >= min_limit and tx["tx_type"] == "DEBIT":
-                            reminders.append((3, f"⚡ {name} — {fmt_money(tx['amount'])} on {tx['tx_date'][:5]}", "#8B5CF6"))
-                except: pass
+                            reminders.append((3, f"⚡ {name} — ₹{tx['amount']:,.0f} on {tx['tx_date'][:5]}", "#8B5CF6"))
+                except:
+                    pass
 
         reminders.sort(key=lambda r: r[0])
         if not reminders:
-            lbl = QLabel("No upcoming reminders."); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            lbl = QLabel("No upcoming reminders.")
+            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
             self.lay.addWidget(lbl)
         else:
             for _, text, color in reminders[:15]:
-                row = QFrame(); row.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;padding:6px 10px;")
+                row = QFrame()
+                row.setStyleSheet(f"background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;padding:6px 10px;")
                 rl = QHBoxLayout(row); rl.setContentsMargins(8, 4, 8, 4)
                 dot = QLabel("■"); dot.setFixedWidth(16); dot.setFixedHeight(16)
                 dot.setStyleSheet(f"background:{color};border-radius:3px;")
                 rl.addWidget(dot)
-                lbl = QLabel(text); lbl.setStyleSheet(f"color:{C['text']};font-size:11px;"); lbl.setWordWrap(True); rl.addWidget(lbl, 1)
+                lbl = QLabel(text)
+                lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
+                lbl.setWordWrap(True)
+                rl.addWidget(lbl, 1)
                 self.lay.addWidget(row)
         self.lay.addStretch()
 
@@ -605,9 +591,11 @@ class CardsTab(QWidget):
         self._selected_card = card; self._show_details(card)
 
     def _show_details(self, card):
+        # Clear header
         while self.header_lay.count():
             itm = self.header_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
+        # Clear transactions
         while self.details_lay.count():
             itm = self.details_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
@@ -641,7 +629,6 @@ class CardsTab(QWidget):
             c.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>{label}</span>"))
             c.addWidget(QLabel(f"<b style='color:{color};font-size:13px;'>{value}</b>"))
             r2.addLayout(c)
-        # Editable due date
         due_col = QVBoxLayout(); due_col.setSpacing(0)
         due_col.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>Due Date</span>"))
         self._due_edit = QDateEdit(); self._due_edit.setCalendarPopup(True); self._due_edit.setDisplayFormat("dd MMM yyyy")
@@ -658,86 +645,44 @@ class CardsTab(QWidget):
         self.header_lay.addWidget(hdr)
         self.header_container.show()
 
-        # ── ALL transactions grouped by cycles, then by date ──
-        txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True); txn_scroll.setFrameShape(QFrame.NoFrame)
+        # ── Transactions — ALL transactions grouped by date ──
+        txn_scroll = QScrollArea(); txn_scroll.setWidgetResizable(True)
+        txn_scroll.setFrameShape(QFrame.NoFrame)
         txn_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         txn_inner = QWidget(); txn_inner.setStyleSheet("background:transparent;")
-        txn_lay = QVBoxLayout(txn_inner); txn_lay.setSpacing(4); txn_lay.setContentsMargins(0, 0, 0, 0)
+        txn_lay = QVBoxLayout(txn_inner)
+        txn_lay.setSpacing(4); txn_lay.setContentsMargins(0, 0, 0, 0)
 
         all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
 
         if not all_txns:
-            nt = QLabel("No transactions found."); nt.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            nt = QLabel("No transactions found for this card.")
+            nt.setStyleSheet(f"color:{C['text3']};font-size:12px;padding:20px;")
+            nt.setAlignment(Qt.AlignCenter)
             txn_lay.addWidget(nt)
         else:
-            stmt_str = card.get("statement_date", "")
-            stmt_day = _parse_stmt_day(stmt_str)
+            # Sort newest first
+            all_txns.sort(key=lambda t: (t["tx_date"], t.get("created_at", "")), reverse=True)
 
-            if stmt_day:
-                all_txns.sort(key=lambda t: t["tx_date"], reverse=True)
-                min_date = date.fromisoformat(all_txns[-1]["tx_date"])
-                max_date = date.fromisoformat(all_txns[0]["tx_date"])
+            # Group by date
+            by_date = OrderedDict()
+            for tx in all_txns:
+                d = tx["tx_date"]
+                if d not in by_date:
+                    by_date[d] = []
+                by_date[d].append(tx)
 
-                # Generate statement dates covering the range
-                stmt_dates = []
-                cur = max_date.replace(day=min(stmt_day, 28))
-                if cur > max_date:
-                    cur = (cur.replace(day=1) - timedelta(days=1)).replace(day=min(stmt_day, 28))
-                while cur >= min_date - timedelta(days=31):
-                    stmt_dates.append(cur)
-                    prev = (cur.replace(day=1) - timedelta(days=1))
-                    cur = prev.replace(day=min(stmt_day, 28))
-                stmt_dates.reverse()
-
-                # Build cycles: (cycle_start, cycle_end)
-                cycles = []
-                for i in range(1, len(stmt_dates)):
-                    cycle_start = stmt_dates[i - 1] + timedelta(days=1)
-                    cycle_end = stmt_dates[i]
-                    cycles.append((cycle_start, cycle_end))
-                cycles.reverse()
-
-                # Group transactions into cycles, skip empty
-                for cycle_start, cycle_end in cycles:
-                    cs = cycle_start.isoformat()
-                    ce = cycle_end.isoformat()
-                    cycle_txns = [t for t in all_txns if cs <= t["tx_date"] <= ce]
-                    if not cycle_txns:
-                        continue  # Skip empty cycles
-
-                    # Cycle stats
-                    cycle_debits = sum(t["amount"] for t in cycle_txns if t["tx_type"] == "DEBIT")
-                    cycle_credits = sum(t["amount"] for t in cycle_txns if t["tx_type"] == "CREDIT")
-
-                    # Cycle header — simple, no editable due
-                    ch = QFrame(); ch.setStyleSheet(f"background:{C['surface2']};border:none;border-radius:8px;padding:8px 12px;")
-                    cl = QHBoxLayout(ch); cl.setContentsMargins(8, 6, 8, 6); cl.setSpacing(12)
-                    cl.addWidget(QLabel(f"<b>📅 {cs} → {ce}</b>"))
-                    cl.addStretch()
-                    cl.addWidget(QLabel(f"<span style='color:#EF4444;font-weight:700;'>Spent: {fmt_money(cycle_debits)}</span>"))
-                    if cycle_credits > 0:
-                        cl.addWidget(QLabel(f"<span style='color:#10B981;font-weight:700;'>Paid: {fmt_money(cycle_credits)}</span>"))
-                    txn_lay.addWidget(ch)
-
-                    # Group transactions by date within this cycle
-                    by_date = OrderedDict()
-                    for tx in cycle_txns:
-                        d = tx["tx_date"]
-                        if d not in by_date: by_date[d] = []
-                        by_date[d].append(tx)
-
-                    for d, day_txns in by_date.items():
-                        try:
-                            txn_lay.addWidget(_day_header(date.fromisoformat(d).strftime("%A, %d %b")))
-                        except:
-                            txn_lay.addWidget(_day_header(d))
-                        for tx in day_txns:
-                            txn_lay.addWidget(_tx_card(tx))
-            else:
-                for tx in sorted(all_txns, key=lambda t: t["tx_date"], reverse=True):
+            # Show all transactions grouped by date with day headers
+            for d_str, day_txns in by_date.items():
+                try:
+                    txn_lay.addWidget(_day_header(date.fromisoformat(d_str).strftime("%A, %d %b")))
+                except:
+                    txn_lay.addWidget(_day_header(d_str))
+                for tx in day_txns:
                     txn_lay.addWidget(_tx_card(tx))
 
-        txn_lay.addStretch(); txn_scroll.setWidget(txn_inner)
+        txn_lay.addStretch()
+        txn_scroll.setWidget(txn_inner)
         self.details_lay.addWidget(txn_scroll, 1)
         self.details_container.show()
 
