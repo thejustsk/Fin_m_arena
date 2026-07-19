@@ -712,22 +712,30 @@ class CardsTab(QWidget):
         all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
         cycles = _build_cycles(stmt_day, 12)
         cycle_data = _fifo_allocate(cycles, all_txns)
+        # Preserve existing due_dates from DB
+        existing = {c["cycle_start_date"]: c for c in self.cr.get_cycles(aid)}
         for cd in cycle_data:
-            try:
-                default_due = (cd["end"] + timedelta(days=grace)).isoformat()
-            except:
-                default_due = ""
+            cs_str = cd["start"].isoformat()
+            ce_str = cd["end"].isoformat()
+            # Use existing due_date if edited, otherwise calculate default
+            existing_due = existing.get(cs_str, {}).get("due_date", "")
+            if not existing_due:
+                try: existing_due = (cd["end"] + timedelta(days=grace)).isoformat()
+                except: existing_due = ""
             self.cr.upsert_cycle(
                 account_id=aid,
-                cycle_start_date=cd["start"].isoformat(),
-                statement_date=cd["end"].isoformat(),
+                cycle_start_date=cs_str,
+                statement_date=ce_str,
                 debits=cd["debits"],
                 paid=cd["paid"],
                 remaining=cd["remaining"],
-                due_date=default_due,
+                due_date=existing_due,
                 total_due=cd["remaining"],
                 minimum_due=round(cd["remaining"] * 0.05, 2) if cd["remaining"] > 0 else 0,
             )
+        # Force commit to ensure data is visible
+        try: self.db.get().commit()
+        except: pass
 
     def _on_card_clicked(self, card_id):
         card = self.cr.get(card_id)
