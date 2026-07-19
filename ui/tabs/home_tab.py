@@ -363,12 +363,13 @@ class HomeTab(QWidget):
                 cn = t.get("cat_name") or "Other"
                 cats[cn] = cats.get(cn, 0) + t["amount"]
 
-        daily_debit = {}
+        trend_debit = {}
         for t in txns:
             if t["tx_type"] == "DEBIT":
                 d = t["tx_date"]
-                daily_debit[d] = daily_debit.get(d, 0) + t["amount"]
-        all_dates = sorted(daily_debit.keys())
+                key = d[:7] if self._period == "year" else d
+                trend_debit[key] = trend_debit.get(key, 0) + t["amount"]
+        all_dates = sorted(trend_debit.keys())
 
         need_total = sum(t["amount"] for t in txns if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
         want_total = sum(t["amount"] for t in txns if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
@@ -387,8 +388,14 @@ class HomeTab(QWidget):
         html = HOME_CHART_TEMPLATE
         html = html.replace("__CAT_L__", json.dumps(list(cats.keys())))
         html = html.replace("__CAT_D__", json.dumps([round(v, 2) for v in cats.values()]))
-        html = html.replace("__TREND_L__", json.dumps([d[5:] for d in all_dates]))
-        html = html.replace("__TREND_D__", json.dumps([round(daily_debit.get(d, 0), 2) for d in all_dates]))
+        # Format trend labels based on period
+        month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        if self._period == "year":
+            trend_labels = [month_names[int(d[5:7])-1] for d in all_dates]
+        else:
+            trend_labels = [d[5:] for d in all_dates]
+        html = html.replace("__TREND_L__", json.dumps(trend_labels))
+        html = html.replace("__TREND_D__", json.dumps([round(trend_debit.get(d, 0), 2) for d in all_dates]))
         html = html.replace("__NEED__", str(round(need_total, 2)))
         html = html.replace("__WANT__", str(round(want_total + none_total, 2)))
         html = html.replace("__ACCT_L__", json.dumps(all_accts))

@@ -53,7 +53,7 @@ class BalancesTab(QWidget):
         nw_lay.setContentsMargins(24, 18, 24, 18)
         nw_lay.setSpacing(32)
 
-        # Net worth
+        # Net worth value
         nw_col = QVBoxLayout()
         nw_col.setSpacing(2)
         nw_col.addWidget(QLabel("<span style='color:rgba(255,255,255,0.6);font-size:10px;font-weight:700;letter-spacing:1.5px;'>NET WORTH</span>"))
@@ -68,10 +68,20 @@ class BalancesTab(QWidget):
         sep.setStyleSheet("background:rgba(255,255,255,0.2);")
         nw_lay.addWidget(sep)
 
-        # Breakdown by type
-        self.nw_breakdown = QHBoxLayout()
-        self.nw_breakdown.setSpacing(24)
-        nw_lay.addLayout(self.nw_breakdown, 1)
+        # Breakdown — 4 fixed label pairs (created once, updated via refs)
+        self._bd_labels = {}
+        for acct_type in ["CURRENT", "CREDIT_CARD", "WALLET", "CASH"]:
+            icon = _ACCT_TYPE_ICON.get(acct_type, "💰")
+            label = _ACCT_TYPE_LABEL.get(acct_type, acct_type)
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            lbl = QLabel(f"<span style='color:rgba(255,255,255,0.6);font-size:9px;font-weight:600;'>{icon} {label.upper()}</span>")
+            col.addWidget(lbl)
+            val = QLabel("₹0")
+            val.setStyleSheet("color:white;font-size:15px;font-weight:700;")
+            col.addWidget(val)
+            nw_lay.addLayout(col)
+            self._bd_labels[acct_type] = val
 
         root.addWidget(self.nw_card)
 
@@ -127,24 +137,11 @@ class BalancesTab(QWidget):
         nw = self.bal.net_worth()
         self.nw_val.setText(fmt_money(nw))
 
-        # ── Breakdown by type ──
-        while self.nw_breakdown.count():
-            itm = self.nw_breakdown.takeAt(0)
-            if itm.widget():
-                itm.widget().deleteLater()
-
+        # ── Breakdown by type — update existing labels ──
         type_totals = self.bal.by_type()
-        for acct_type in ["CURRENT", "CREDIT_CARD", "WALLET", "CASH"]:
+        for acct_type, val_lbl in self._bd_labels.items():
             val = type_totals.get(acct_type, 0)
-            col = QVBoxLayout()
-            col.setSpacing(2)
-            icon = _ACCT_TYPE_ICON.get(acct_type, "💰")
-            label = _ACCT_TYPE_LABEL.get(acct_type, acct_type)
-            col.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.6);font-size:9px;font-weight:600;'>{icon} {label.upper()}</span>"))
-            val_lbl = QLabel(fmt_money(val))
-            val_lbl.setStyleSheet("color:white;font-size:15px;font-weight:700;")
-            col.addWidget(val_lbl)
-            self.nw_breakdown.addLayout(col)
+            val_lbl.setText(fmt_money(val))
 
         # ── Account Balances ──
         self._clear_layout(self.acct_container)
@@ -193,6 +190,7 @@ class BalancesTab(QWidget):
                 hdr_lay.addWidget(h_total)
                 self.acct_container.addWidget(hdr)
 
+                # Individual account cards
                 if not single:
                     for r in accts:
                         bal = r.get("balance", 0)
@@ -223,7 +221,7 @@ class BalancesTab(QWidget):
 
         recent = self.tx.list_filters(
             date_from=(today - timedelta(days=7)).isoformat(),
-            date_to=today_iso, limit=15)
+            date_to=today_iso, limit=20)
         if recent:
             by_date = OrderedDict()
             for tx in sorted(recent, key=lambda t: t["tx_date"], reverse=True):
