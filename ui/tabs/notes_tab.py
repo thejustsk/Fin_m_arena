@@ -971,13 +971,14 @@ class NotesTab(QWidget):
                 canvas.setFillColor(colors.Color(1, 1, 1, 0.7))
                 canvas.drawString(30, ph - 16, f'Doc ID: {doc_id}')
                 canvas.drawRightString(pw - 30, ph - 16, f'Generated: {ts}')
-                # Watermark (very light)
-                canvas.setFillColor(colors.Color(0.9, 0.9, 0.9, 0.3))
-                canvas.setFont('Helvetica', 8)
+                # Watermark (visible diagonal)
+                canvas.setFillColor(colors.Color(0.88, 0.88, 0.88, 0.4))
+                canvas.setFont('Helvetica-Bold', 10)
                 canvas.saveState()
                 canvas.translate(pw / 2, ph / 2)
                 canvas.rotate(45)
-                canvas.drawString(-80, 0, wm)
+                canvas.drawString(-120, 0, wm)
+                canvas.drawString(-120, 30, wm)
                 canvas.restoreState()
                 canvas.restoreState()
 
@@ -1110,15 +1111,35 @@ class NotesTab(QWidget):
                 story.append(summary_table)
                 story.append(Spacer(1, 12))
 
-            # ── Metadata ──
+            # ── Security & Verification ──
             story.append(Spacer(1, 16))
-            story.append(Paragraph(f"<i>Created: {note.get('created_at','')[:16]}</i>",
+            sec_data = [
+                [Paragraph("<b>Document Security</b>", ParagraphStyle('sec_h', parent=S['Normal'], fontSize=10, textColor=colors.HexColor('#4F46E5'))), '', ''],
+                [Paragraph("<b>Doc ID</b>", WRAP_SM), Paragraph(f"<font color='#374151'>{doc_id}</font>", WRAP_SM), ''],
+                [Paragraph("<b>Content Hash</b>", WRAP_SM), Paragraph(f"<font color='#374151' face='Courier'>{c_hash}</font>", WRAP_SM), ''],
+                [Paragraph("<b>Watermark</b>", WRAP_SM), Paragraph(f"<font color='#374151'>{wm}</font>", WRAP_SM), ''],
+                [Paragraph("<b>Generated</b>", WRAP_SM), Paragraph(f"<font color='#374151'>{ts}</font>", WRAP_SM), ''],
+            ]
+            sec_table = Table(sec_data, colWidths=[90, 250, 100])
+            sec_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#EEF2FF')),
+                ('SPAN', (0, 0), (-1, 0)),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F9FAFB')),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#C7D2FE')),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#C7D2FE')),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(sec_table)
+
+            # ── Metadata ──
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(f"<i>Created: {note.get('created_at','')[:16]}  ·  Updated: {note.get('updated_at','')[:16] if note.get('updated_at') else '—'}</i>",
                                    ParagraphStyle('meta', parent=S['Normal'],
                                                   textColor=colors.HexColor('#9CA3AF'), fontSize=9)))
-            if note.get("updated_at"):
-                story.append(Paragraph(f"<i>Updated: {note.get('updated_at','')[:16]}</i>",
-                                       ParagraphStyle('meta2', parent=S['Normal'],
-                                                      textColor=colors.HexColor('#9CA3AF'), fontSize=9)))
 
             doc.build(story, onFirstPage=_header, onLaterPages=_header)
             self._show_pdf_done(filepath)
