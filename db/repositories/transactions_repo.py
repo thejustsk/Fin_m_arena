@@ -29,6 +29,19 @@ class TransactionsRepo:
         return _row(self.db.execute(
             "SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone())
 
+    def get_detailed(self, tx_id):
+        """Get single transaction with all JOINed fields (cat_name, method_name, account_name)."""
+        return _row(self.db.execute("""
+            SELECT t.*, a.display_name AS account_name, a.account_type,
+                c.display_name AS cat_name, c.color_hex AS cat_color,
+                pm.display_name AS method_name
+            FROM transactions t
+            LEFT JOIN accounts a ON a.account_id = t.account_id
+            LEFT JOIN categories c ON c.category_id = t.category
+            LEFT JOIN payment_methods pm ON pm.method_id = t.pay_method
+            WHERE t.id = ?
+        """, (tx_id,)).fetchone())
+
     def update(self, tx_id, **kw):
         sets = ", ".join(f"{k}=?" for k in kw)
         self.db.execute(f"UPDATE transactions SET {sets} WHERE id=?",
