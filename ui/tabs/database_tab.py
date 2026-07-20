@@ -1021,14 +1021,14 @@ class DatabaseTab(QWidget):
         # Load button
         lb = QPushButton("⟳ Load")
         lb.setObjectName("primary")
-        lb.setFixedSize(70, 34)
+        lb.setMinimumWidth(80); lb.setMinimumHeight(34)
         lb.setCursor(Qt.PointingHandCursor)
         lb.clicked.connect(self._load_filtered)
         row.addWidget(lb)
 
         # Add button
         ab = QPushButton("+ Add")
-        ab.setFixedSize(70, 34)
+        ab.setMinimumWidth(80); ab.setMinimumHeight(34)
         ab.setStyleSheet(f"QPushButton{{background:{C['surface']};color:{C['text2']};border:1px solid {C['border']};border-radius:8px;font-size:13px;font-weight:600;}}QPushButton:hover{{border-color:{C['accent']};color:{C['accent']};}}")
         ab.setCursor(Qt.PointingHandCursor)
         ab.clicked.connect(self._add_f)
