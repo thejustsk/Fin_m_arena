@@ -36,7 +36,10 @@ class CardsRepo:
 
     def get_by_account(self, account_id):
         r = self.db.execute(
-            "SELECT * FROM cards WHERE account_id=? AND is_active=1", (account_id,)
+            "SELECT c.*, a.credit_limit AS acct_limit, a.display_name AS acct_name, "
+            "a.is_active AS acct_active "
+            "FROM cards c JOIN accounts a ON a.account_id=c.account_id "
+            "WHERE c.account_id=?", (account_id,)
         ).fetchone()
         return dict(r) if r else None
 

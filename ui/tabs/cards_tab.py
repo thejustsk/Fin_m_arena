@@ -462,10 +462,12 @@ class AddCardDialog(QDialog):
         aid = self._card["account_id"]
         cur = self._card.get("is_active", 1)
         new_val = 0 if cur else 1
+        # Update BOTH card and account — no silent errors
         self.cr.update(cid, is_active=new_val)
-        # Also toggle the linked account
-        try: self.acct.update(aid, is_active=new_val)
-        except: pass
+        self.acct.update(aid, is_active=new_val)
+        # Sync ALL cards under this account
+        self.cr.db.execute("UPDATE cards SET is_active=? WHERE account_id=?", (new_val, aid))
+        self.cr.db.commit()
         state = "activated" if new_val else "deactivated"
         QMessageBox.information(self, "Done", f"Card {state}.")
         self.card_updated.emit(); self.accept()

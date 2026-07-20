@@ -19,6 +19,7 @@ from db.repositories import (
 from services.balance_service import BalanceService
 from services.security_service import SecurityService
 from services.audit_service import AuditService
+from services.email_service import EmailService
 
 
 # Module-level references — prevents garbage collection
@@ -46,6 +47,7 @@ def main():
         "balance": BalanceService(repos["accounts"]),
         "security": SecurityService(repos["security"]),
         "audit": AuditService(repos["audit"], repos["transactions"], db),
+        "email": EmailService(db),
     }
 
     from ui.theme import QSS

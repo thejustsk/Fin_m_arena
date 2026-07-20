@@ -75,15 +75,26 @@ class SettingsTab(QWidget):
 
     def _security_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
-        grp = QPushButton("Main Login")
-        grp.setStyleSheet(f"font-size:16px;font-weight:700;color:{C['accent']};background:transparent;border:none;text-align:left;")
-        l.addWidget(grp)
-        row1 = QHBoxLayout()
-        cpw = QPushButton("Change Password"); cpw.clicked.connect(self._change_pw); row1.addWidget(cpw)
-        row1.addStretch()
-        self.totp_lbl = QLabel(); row1.addWidget(self.totp_lbl)
-        t2fa = QPushButton("Toggle 2FA"); t2fa.clicked.connect(self._toggle_2fa); row1.addWidget(t2fa)
-        l.addLayout(row1)
+
+        # 2FA Status (read-only, mandatory)
+        tfa_frame = QFrame()
+        tfa_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        tf = QVBoxLayout(tfa_frame); tf.setContentsMargins(16,16,16,16); tf.setSpacing(10)
+        tfa_title = QLabel("🔐  Two-Factor Authentication")
+        tfa_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); tf.addWidget(tfa_title)
+        tfa_note = QLabel("2FA is mandatory and cannot be disabled.")
+        tfa_note.setStyleSheet(f"font-size:12px;color:{C['text3']};"); tf.addWidget(tfa_note)
+        self.totp_lbl = QLabel(); self.totp_lbl.setStyleSheet("font-size:13px;font-weight:600;"); tf.addWidget(self.totp_lbl)
+        l.addWidget(tfa_frame)
+
+        # Change Password
+        pw_frame = QFrame()
+        pw_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        pf = QVBoxLayout(pw_frame); pf.setContentsMargins(16,16,16,16); pf.setSpacing(10)
+        pw_title = QLabel("🔑  Change Password")
+        pw_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); pf.addWidget(pw_title)
+        cpw = QPushButton("Change Password"); cpw.clicked.connect(self._change_pw); pf.addWidget(cpw)
+        l.addWidget(pw_frame)
         l.addStretch()
         return w
 
@@ -254,18 +265,6 @@ class SettingsTab(QWidget):
             else:
                 QMessageBox.warning(self, "Error", "Passwords don't match.")
 
-    def _toggle_2fa(self):
-        if self.sec.is_2fa():
-            self.sec.repo.set_totp(None, False)
-            QMessageBox.information(self, "2FA", "2FA disabled.")
-        else:
-            if not HAS_TOTP:
-                QMessageBox.warning(self, "Missing", "pip install pyotp qrcode"); return
-            secret = self.sec.setup_2fa()
-            if secret:
-                QMessageBox.information(self, "2FA Enabled", f"Secret: {secret}\nAdd to your authenticator app.")
-        self.refresh()
-
     def _toggle_account(self, acct_id, current_active):
         new_active = 0 if current_active else 1
         self.acct.update(acct_id, is_active=new_active)
@@ -329,6 +328,7 @@ class SettingsTab(QWidget):
 
         self.totp_lbl.setText("✓ 2FA Enabled" if self.sec.is_2fa() else "✗ 2FA Disabled")
         self.totp_lbl.setStyleSheet(f"color:{C['green'] if self.sec.is_2fa() else C['text3']};font-weight:600;")
+
 
         # Load preference values
         if hasattr(self, 'pref_page_size'):
