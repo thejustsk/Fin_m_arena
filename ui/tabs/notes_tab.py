@@ -993,7 +993,6 @@ class NotesTab(QWidget):
                 canvas.drawRightString(pw - 36, 22, f'Page {doc.page}')
                 # QR code
                 qr = QrCodeWidget(f'FM-NOTE-{note_id[:8]}')
-                qr.size = 45
                 d = Drawing(45, 45); d.add(qr)
                 d.drawOn(canvas, pw - 80, 55)
                 canvas.restoreState()
@@ -1064,7 +1063,12 @@ class NotesTab(QWidget):
                         amt_color = colors.HexColor('#EF4444') if is_debit else colors.HexColor('#10B981')
                         cat_id = tx.get("category") or "other"
                         icon = cat_icons.get(cat_id, "\U0001f4cb")
-                        desc = tx.get("person_org") or tx.get("description") or ""
+                        person = tx.get("person_org") or ""
+                        tdesc = tx.get("description") or ""
+                        if person and tdesc: desc = f"{person} — {tdesc}"
+                        elif person: desc = person
+                        elif tdesc: desc = tdesc
+                        else: desc = "No description"
                         cat_name = tx.get("cat_name") or ""
                         method_name = tx.get("method_name") or ""
                         acct_name = tx.get("account_name") or ""
@@ -1141,7 +1145,10 @@ class NotesTab(QWidget):
                                    ParagraphStyle('meta', parent=S['Normal'],
                                                   textColor=colors.HexColor('#9CA3AF'), fontSize=9)))
 
-            doc.build(story, onFirstPage=_header, onLaterPages=_header)
+            def _page_template(canvas, doc):
+                _header(canvas, doc)
+                _footer(canvas, doc)
+            doc.build(story, onFirstPage=_page_template, onLaterPages=_page_template)
             self._show_pdf_done(filepath)
         except ImportError:
             QMessageBox.warning(self, "Missing", "Install reportlab: pip install reportlab")
