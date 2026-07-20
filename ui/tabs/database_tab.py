@@ -14,6 +14,8 @@ from ui.sidebar import fmt_money
 import json, uuid as _uuid, os, subprocess, sys
 
 _HAS_WEBENGINE = None  # Lazy check
+COMPLETE_PAGE_SIZE = 100
+SCROLL_TRIGGER_PX = 150  # start loading this many px before the bottom
 
 def _check_webengine():
     global _HAS_WEBENGINE
@@ -521,25 +523,93 @@ class DatabaseTab(QWidget):
     # ═══════════════════════════════════
     # COMPLETE VIEW
     # ═══════════════════════════════════
+
     def _build_complete(self):
         w = QWidget()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         inner = QWidget()
         self.comp_lay = QVBoxLayout(inner); self.comp_lay.setSpacing(4); self.comp_lay.setContentsMargins(0,4,0,0)
+        self.comp_lay.addStretch()  # permanent sentinel — always the last item
         scroll.setWidget(inner)
         lay = QVBoxLayout(w); lay.setContentsMargins(0,8,0,0); lay.addWidget(scroll)
+
+        self._comp_scroll = scroll
+        scroll.verticalScrollBar().valueChanged.connect(self._on_complete_scroll)
         return w
 
     def _load_complete(self):
-        while self.comp_lay.count():
+        # reset pagination state
+        while self.comp_lay.count() > 1:  # keep the stretch sentinel
             itm = self.comp_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
-        txns = self.tx_repo.list_filters(limit=5000)
-        if not txns:
+
+        self._comp_offset = 0
+        self._comp_has_more = True
+        self._comp_loading = False
+        self._comp_last_month_key = None
+        self._comp_last_day_key = None
+        # one cheap SQL pass to get every account's running balance, keyed by tx id
+        self._comp_bal_map = self._compute_all_running_balances()
+
+        self._load_more_complete()
+
+    def _on_complete_scroll(self, value):
+        sb = self._comp_scroll.verticalScrollBar()
+        if value >= sb.maximum() - SCROLL_TRIGGER_PX:
+            self._load_more_complete()
+
+    def _load_more_complete(self):
+        if self._comp_loading or not self._comp_has_more:
+            return
+        self._comp_loading = True
+        txns = self.tx_repo.list_filters(limit=COMPLETE_PAGE_SIZE, offset=self._comp_offset)
+        self._comp_has_more = len(txns) == COMPLETE_PAGE_SIZE
+        self._comp_offset += len(txns)
+
+        if not txns and self._comp_offset == 0:
             lbl = QLabel("No transactions yet.")
             lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;")
-            lbl.setAlignment(Qt.AlignCenter); self.comp_lay.addWidget(lbl); return
-        self._build_card_list(self.comp_lay, txns)
+            lbl.setAlignment(Qt.AlignCenter)
+            self.comp_lay.insertWidget(self.comp_lay.count() - 1, lbl)
+            self._comp_loading = False
+            return
+
+        insert_at = self.comp_lay.count() - 1  # just before the stretch sentinel
+        for tx in txns:
+            d = tx["tx_date"]; mk = d[:7]
+            if mk != self._comp_last_month_key:
+                try:
+                    y, m = map(int, mk.split("-"))
+                    hdr = _month_header(date(y, m, 1).strftime("%B %Y"))
+                except Exception:
+                    hdr = _month_header(mk)
+                self.comp_lay.insertWidget(insert_at, hdr); insert_at += 1
+                self._comp_last_month_key = mk
+                self._comp_last_day_key = None  # force a day header too
+            if d != self._comp_last_day_key:
+                try:
+                    hdr = _day_header(date.fromisoformat(d).strftime("%A, %d %b"))
+                except Exception:
+                    hdr = _day_header(d)
+                self.comp_lay.insertWidget(insert_at, hdr); insert_at += 1
+                self._comp_last_day_key = d
+
+            card = _tx_card(tx, self._comp_bal_map.get(tx["id"]))
+            self.comp_lay.insertWidget(insert_at, card); insert_at += 1
+
+        self._comp_loading = False
+
+    def _compute_all_running_balances(self):
+        """One cheap SQL pass (window function) instead of Python looping over 10k rows."""
+        rows = self.db.execute("""
+            SELECT t.id,
+                a.opening_balance
+                + SUM(CASE WHEN t.tx_type='CREDIT' THEN t.amount ELSE -t.amount END)
+                    OVER (PARTITION BY t.account_id ORDER BY t.tx_date, t.created_at) AS running_bal
+            FROM transactions t
+            JOIN accounts a ON a.account_id = t.account_id
+        """).fetchall()
+        return {r["id"]: r["running_bal"] for r in rows}
 
     # ═══════════════════════════════════
     # MONTHLY VIEW
