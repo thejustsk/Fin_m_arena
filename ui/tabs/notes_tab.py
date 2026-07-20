@@ -991,10 +991,7 @@ class NotesTab(QWidget):
                 canvas.setFont('Helvetica', 7)
                 canvas.drawString(36, 22, f'{doc_id}  |  Hash: {c_hash}  |  {wm}')
                 canvas.drawRightString(pw - 36, 22, f'Page {doc.page}')
-                # QR code
-                qr = QrCodeWidget(f'FM-NOTE-{note_id[:8]}')
-                d = Drawing(45, 45); d.add(qr)
-                d.drawOn(canvas, pw - 80, 55)
+                # QR code is in document body below security table, not in footer
                 canvas.restoreState()
 
             # ── Title ──
@@ -1138,6 +1135,22 @@ class NotesTab(QWidget):
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             story.append(sec_table)
+
+            # ── QR Code (below security table) ──
+            story.append(Spacer(1, 10))
+            qr_data = f"FM-NOTE|{doc_id}|{c_hash}|{wm}|{ts}"
+            qr = QrCodeWidget(qr_data)
+            qr_drawing = Drawing(80, 80)
+            qr_drawing.add(qr)
+            # Center the QR code
+            qr_table = Table([[qr_drawing]], colWidths=[pw - 72])
+            qr_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
+            ]))
+            story.append(qr_table)
+            story.append(Paragraph(f"<para alignment='center'><font color='#9CA3AF' size='9'>Scan to verify document</font></para>",
+                                   ParagraphStyle('qr_label', parent=S['Normal'], alignment=TA_CENTER)))
 
             # ── Metadata ──
             story.append(Spacer(1, 12))
