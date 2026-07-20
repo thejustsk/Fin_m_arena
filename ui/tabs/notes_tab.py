@@ -9,9 +9,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QLineEdit, QTextEdit, QFrame,
                               QScrollArea, QStackedWidget, QMessageBox,
                               QComboBox, QDateEdit, QSizePolicy, QLayout,
-                              QFileDialog, QDoubleSpinBox,
+                              QFileDialog, QRect, QSize, QDoubleSpinBox,
                               QListWidget, QListWidgetItem)
-from PyQt5.QtCore import Qt, QDate, QPoint, pyqtSignal, QRect, QSize
+from PyQt5.QtCore import Qt, QDate, QPoint, pyqtSignal
 from PyQt5.QtGui import QCursor, QColor
 
 from ui.theme import C
@@ -92,13 +92,14 @@ def _input_css():
 
 
 def _make_tag_chip(text, accent_color=None, removable=False, on_remove=None):
+    """Tag chip: solid accent bg with white text."""
     color = accent_color or _tag_color(text)
     label = f" #{text} " + ("✕" if removable else "")
     chip = QPushButton(label)
     chip.setStyleSheet(
-        f"QPushButton{{background:{_hex_to_rgba(color, 0.08)};color:{color};border:1.5px solid {color};"
+        f"QPushButton{{background:{color};color:white;border:none;"
         f"border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;}}"
-        f"QPushButton:hover{{background:{_hex_to_rgba(color, 0.15)};}}")
+        f"QPushButton:hover{{background:{color}CC;}}")
     chip.setCursor(QCursor(Qt.PointingHandCursor) if removable else Qt.ArrowCursor)
     chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     if removable and on_remove:
@@ -420,6 +421,7 @@ class NotesTab(QWidget):
             f"QListWidget::item:selected{{background:{C['accent_bg']};color:{C['accent']};}}"
             f"QListWidget::item:hover{{background:{C['accent_bg']};}}")
         self.tag_suggestions.itemClicked.connect(self._apply_tag_suggestion)
+        self.tag_input.installEventFilter(self)
         self.tag_suggestions.installEventFilter(self)
         self.tag_suggestions.hide()
         left_lay.addWidget(self.tag_suggestions)
@@ -544,14 +546,35 @@ class NotesTab(QWidget):
 
         return page
 
-    # Event filter for tag suggestions keyboard navigation
+    # Event filter: forward Up/Down from tag_input to suggestions, Enter to apply
     def eventFilter(self, obj, event):
+        if obj == self.tag_input and event.type() == event.KeyPress:
+            if self.tag_suggestions.isVisible() and self.tag_suggestions.count() > 0:
+                if event.key() == Qt.Key_Down:
+                    cur = self.tag_suggestions.currentRow()
+                    nxt = cur + 1 if cur < self.tag_suggestions.count() - 1 else 0
+                    self.tag_suggestions.setCurrentRow(nxt)
+                    return True
+                elif event.key() == Qt.Key_Up:
+                    cur = self.tag_suggestions.currentRow()
+                    prv = cur - 1 if cur > 0 else self.tag_suggestions.count() - 1
+                    self.tag_suggestions.setCurrentRow(prv)
+                    return True
+                elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    item = self.tag_suggestions.currentItem()
+                    if item:
+                        self._apply_tag_suggestion(item)
+                        return True
         if obj == self.tag_suggestions and event.type() == event.KeyPress:
             if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
                 item = self.tag_suggestions.currentItem()
                 if item:
                     self._apply_tag_suggestion(item)
                     return True
+            elif event.key() == Qt.Key_Escape:
+                self.tag_suggestions.hide()
+                self.tag_input.setFocus()
+                return True
         return super().eventFilter(obj, event)
 
     def _reset_composer(self):
@@ -954,7 +977,7 @@ class NotesTab(QWidget):
                 canvas.saveState()
                 canvas.translate(pw / 2, ph / 2)
                 canvas.rotate(45)
-                canvas.drawCenteredString(0, 0, wm)
+                canvas.drawString(-80, 0, wm)
                 canvas.restoreState()
                 canvas.restoreState()
 
@@ -1062,8 +1085,6 @@ class NotesTab(QWidget):
                             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                             ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
                             # Left accent border
-                            ('LINEAFTER', (0, 0), (0, 0), 0),
-                            ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#F9FAFB')),
                             ('LINEBEFORE', (0, 0), (0, -1), 3, amt_color),
                         ]))
                         story.append(KeepTogether([card_table, Spacer(1, 4)]))
