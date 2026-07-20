@@ -237,13 +237,23 @@ class BalancesTab(QWidget):
     def _show_account_txns(self, acct_data, acct_type):
         self._right_stack.setCurrentIndex(1)
         name = acct_data.get("display_name", "Account")
-        self._right_title.setText(f"🏦  {name}")
+        icon = _ACCT_TYPE_ICON.get(acct_type, "💰")
+        self._right_title.setText(f"{icon}  {name}")
         self._back_btn.show()
 
         self._clear_layout(self.acct_tx_lay)
 
         if acct_type == "CREDIT_CARD":
-            self._build_cc_detail(acct_data)
+            # Fetch card data for statement_date, grace_days, colors
+            card_data = dict(acct_data)
+            if self.cards:
+                try:
+                    card = self.cards.get_by_account(acct_data["account_id"])
+                    if card:
+                        card_data.update(card)
+                except:
+                    pass
+            self._build_cc_detail(card_data)
         else:
             self._build_acct_txns(acct_data)
 
@@ -312,30 +322,69 @@ class BalancesTab(QWidget):
         c2 = acct_data.get("card_color_2", "#0f0f0f")
         stmt_str = acct_data.get("statement_date", "")
         grace = acct_data.get("grace_days", 20)
+        stmt_date = acct_data.get("statement_date", "—") or "—"
+        util_color = "#EF4444" if util > 70 else ("#F59E0B" if util > 30 else "#10B981")
 
-        # ── Header card ──
-        hdr = QFrame(); hdr.setFixedHeight(90)
+        # Compute FIFO for Amount Due
+        all_txns_for_due = self.tx.list_filters(account_id=aid, limit=5000)
+        stmt_day = _parse_stmt_day(stmt_str)
+        _cycles_for_due = _build_cycles(stmt_day, 12) if stmt_day else []
+        _cycle_data_for_due = _fifo_allocate(_cycles_for_due, all_txns_for_due) if _cycles_for_due else []
+        amount_due = 0
+        today_str = date.today().isoformat()
+        for cd in _cycle_data_for_due:
+            if cd["end"].isoformat() < today_str:
+                amount_due += cd["remaining"]
+
+        # Due date from card
+        due_str = acct_data.get("due_date", "") or ""
+        if not due_str and amount_due > 0:
+            try:
+                from ui.tabs.cards_tab import _calc_due
+                due_str = _calc_due(stmt_str, grace)
+            except: pass
+        due_display = "—"
+        if due_str and "-" in due_str:
+            try: due_display = date.fromisoformat(due_str).strftime("%d %b %Y")
+            except: due_display = due_str
+
+        # ── Full header card (same as Cards tab) ──
+        hdr = QFrame(); hdr.setFixedHeight(110)
         hdr.setStyleSheet(
             f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
             f"stop:0 {c1},stop:1 {c2});border-radius:12px;}}"
             f"QLabel{{background:transparent;border:none;}}")
         hdr_lay = QVBoxLayout(hdr)
-        hdr_lay.setContentsMargins(20, 10, 20, 10); hdr_lay.setSpacing(4)
+        hdr_lay.setContentsMargins(20, 12, 20, 12); hdr_lay.setSpacing(6)
+
         r1 = QHBoxLayout()
         r1.addWidget(QLabel(
-            f"<b style='font-size:15px;color:white;'>{acct_data.get('display_name', 'Card')}</b>"))
+            f"<b style='font-size:16px;color:white;'>{acct_data.get('card_name', acct_data.get('display_name', 'Card'))}</b>"))
         r1.addStretch()
-        util_color = "#EF4444" if util > 70 else ("#F59E0B" if util > 30 else "#10B981")
-        r1.addWidget(QLabel(
-            f"<span style='color:{util_color};font-size:13px;font-weight:700;'>{fmt_money(balance)}</span>"))
+        net_label = acct_data.get("card_network", "")
+        cls_label = acct_data.get("card_class", "")
+        sub_text = f"{net_label} {cls_label}".strip()
+        if sub_text:
+            r1.addWidget(QLabel(
+                f"<span style='color:rgba(255,255,255,0.7);font-size:12px;'>{sub_text}</span>"))
         hdr_lay.addLayout(r1)
-        r2 = QHBoxLayout()
-        r2.addWidget(QLabel(
-            f"<span style='color:rgba(255,255,255,0.7);font-size:11px;'>Limit: {fmt_money(limit)}</span>"))
-        r2.addSpacing(16)
+
+        # 5 metric labels
         stmt_disp = _stmt_display(stmt_str) if stmt_str else "—"
-        r2.addWidget(QLabel(
-            f"<span style='color:rgba(255,255,255,0.7);font-size:11px;'>Statement: Every {stmt_disp}</span>"))
+        r2 = QHBoxLayout(); r2.setSpacing(24)
+        for lbl, val, color in [
+            ("Limit", fmt_money(limit), "rgba(255,255,255,0.7)"),
+            ("Statement", f"Every {stmt_disp}", "rgba(255,255,255,0.9)"),
+            ("Amount Due", fmt_money(amount_due), "#FCA5A5" if amount_due > 0 else "rgba(255,255,255,0.9)"),
+            ("Due Date", due_display, "#FCA5A5" if amount_due > 0 else "rgba(255,255,255,0.9)"),
+            ("Current Outstanding", fmt_money(balance), util_color),
+        ]:
+            c = QVBoxLayout(); c.setSpacing(0)
+            c.addWidget(QLabel(
+                f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>{lbl}</span>"))
+            c.addWidget(QLabel(
+                f"<b style='color:{color};font-size:13px;'>{val}</b>"))
+            r2.addLayout(c)
         r2.addStretch()
         hdr_lay.addLayout(r2)
         self.acct_tx_lay.addWidget(hdr)
