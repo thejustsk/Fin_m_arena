@@ -9,9 +9,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QLineEdit, QTextEdit, QFrame,
                               QScrollArea, QStackedWidget, QMessageBox,
                               QComboBox, QDateEdit, QSizePolicy, QLayout,
-                              QFileDialog, QRect, QSize, QDoubleSpinBox,
+                              QFileDialog, QDoubleSpinBox,
                               QListWidget, QListWidgetItem)
-from PyQt5.QtCore import Qt, QDate, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QDate, QPoint, pyqtSignal, QRect, QSize
 from PyQt5.QtGui import QCursor, QColor
 
 from ui.theme import C
