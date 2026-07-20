@@ -10,17 +10,17 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QScrollArea, QStackedWidget, QMessageBox,
                               QComboBox, QDateEdit, QSizePolicy, QLayout,
                               QFileDialog, QDoubleSpinBox,
-                              QStackedWidget as QSW)
+                              QListWidget, QListWidgetItem)
 from PyQt5.QtCore import Qt, QDate, QPoint, pyqtSignal, QRect, QSize
 from PyQt5.QtGui import QCursor
 
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.tabs.database_tab import _tx_card, _day_header, FILTER_FIELDS, FlowLayout as DBFlowLayout
+from ui.tabs.database_tab import _tx_card, _day_header, FILTER_FIELDS
 
 
 # ═══════════════════════════════════════════════
-# FLOW LAYOUT (local copy to avoid import issues)
+# FLOW LAYOUT
 # ═══════════════════════════════════════════════
 class FlowLayout(QLayout):
     def __init__(self, parent=None, hSpacing=6, vSpacing=4):
@@ -101,7 +101,7 @@ def _make_tag_chip(text, accent_color=None, removable=False, on_remove=None):
 
 
 # ═══════════════════════════════════════════════
-# NOTE CARD — full transaction details
+# NOTE CARD — full border, tinted bg, grouped txns
 # ═══════════════════════════════════════════════
 class NoteCard(QFrame):
     clicked = pyqtSignal(str)
@@ -119,10 +119,17 @@ class NoteCard(QFrame):
 
     def _build(self):
         a = self._accent
+        # Full border with accent color + tinted background
         self.setStyleSheet(f"""
-            QFrame {{ background:{C['surface']}; border:1px solid {C['border2']};
-                       border-left:4px solid {a}; border-radius:12px; }}
-            QFrame:hover {{ border-left-color:{a}; }}
+            QFrame {{
+                background: {a}10;
+                border: 1.5px solid {a}50;
+                border-radius: 12px;
+            }}
+            QFrame:hover {{
+                border-color: {a}90;
+                background: {a}18;
+            }}
             QLabel {{ background:transparent; border:none; }}
         """)
         self.setCursor(QCursor(Qt.PointingHandCursor))
@@ -162,7 +169,6 @@ class NoteCard(QFrame):
         exp_lay.setContentsMargins(0, 4, 0, 0)
         exp_lay.setSpacing(8)
 
-        # Content
         content_text = self.note.get("content") or ""
         if content_text:
             content_lbl = QLabel(content_text)
@@ -172,21 +178,19 @@ class NoteCard(QFrame):
             content_lbl.setMinimumHeight(50)
             exp_lay.addWidget(content_lbl)
 
-        # Linked transactions — FULL details with get_detailed + grouped by date
+        # Linked transactions — grouped by date
         if ids and self.tx_repo:
             link_title = QLabel(f"\U0001f517 Linked Transactions ({len(ids)})")
             link_title.setStyleSheet(f"color:{C['text2']};font-size:12px;font-weight:700;")
             exp_lay.addWidget(link_title)
 
-            # Use get_detailed for FULL transaction info
             txns = []
             for tid in ids:
                 if hasattr(self.tx_repo, 'get_detailed'):
                     tx = self.tx_repo.get_detailed(tid)
                 else:
                     tx = self.tx_repo.get(tid)
-                if tx:
-                    txns.append(tx)
+                if tx: txns.append(tx)
 
             if txns:
                 by_date = OrderedDict()
@@ -224,16 +228,13 @@ class NoteCard(QFrame):
         lay.addWidget(self._expand_area)
 
     def mousePressEvent(self, event):
-        self.clicked.emit(self.note["id"])
-        event.accept()
+        self.clicked.emit(self.note["id"]); event.accept()
 
     def expand(self):
-        self.expanded = True
-        self._expand_area.show()
+        self.expanded = True; self._expand_area.show()
 
     def collapse(self):
-        self.expanded = False
-        self._expand_area.hide()
+        self.expanded = False; self._expand_area.hide()
 
 
 # ═══════════════════════════════════════════════
@@ -251,7 +252,7 @@ class NotesTab(QWidget):
         self.linked_ids = set()
         self._loading_tx = False
         self._composer_tags = []
-        self._fv = []  # filter values (same as DB filtered view)
+        self._fv = []
         self._build()
         self.refresh()
 
@@ -326,8 +327,7 @@ class NotesTab(QWidget):
             empty = QLabel("No notes yet. Click \"+ New Note\" to create one.")
             empty.setStyleSheet(f"color:{C['text3']};font-size:13px;padding:24px;")
             empty.setAlignment(Qt.AlignCenter)
-            self.notes_lay.addWidget(empty)
-            return
+            self.notes_lay.addWidget(empty); return
         for n in notes:
             card = NoteCard(n, tx_repo=self.tx)
             card.clicked.connect(self._toggle_card)
@@ -369,7 +369,7 @@ class NotesTab(QWidget):
         self.compose_header.setText("\u270f\ufe0f  Edit Note")
         self._goto(1)
 
-    # ─────────────── PAGE 2: Compose ───────────────
+    # ─────────────── PAGE 2: Compose (two-column) ───────────────
     def _build_compose_page(self):
         page = QWidget()
         lay = QVBoxLayout(page); lay.setSpacing(12)
@@ -378,137 +378,57 @@ class NotesTab(QWidget):
         self.compose_header.setStyleSheet(f"font-size:18px;font-weight:800;color:{C['accent']};")
         lay.addWidget(self.compose_header)
 
+        # Two-column layout: Left = note content, Right = link transactions
+        cols = QHBoxLayout(); cols.setSpacing(16)
+
+        # ── LEFT: Note content ──
+        left = QWidget()
+        left.setStyleSheet("background:transparent;")
+        left_lay = QVBoxLayout(left)
+        left_lay.setContentsMargins(0, 0, 0, 0); left_lay.setSpacing(10)
+
         self.compose_title = QLineEdit()
         self.compose_title.setPlaceholderText("Title")
         self.compose_title.setMinimumHeight(38)
         self.compose_title.setStyleSheet(_input_css())
-        lay.addWidget(self.compose_title)
+        left_lay.addWidget(self.compose_title)
 
-        # Tags
+        # Tags — fixed: no more bug
         tags_label = QLabel("Tags")
         tags_label.setStyleSheet(f"color:{C['text2']};font-size:12px;font-weight:600;")
-        lay.addWidget(tags_label)
+        left_lay.addWidget(tags_label)
         self._tag_chip_container = QWidget()
         self._tag_chip_container.setStyleSheet("background:transparent;border:none;")
         self._tag_chip_lay = FlowLayout(self._tag_chip_container, hSpacing=4, vSpacing=4)
-        lay.addWidget(self._tag_chip_container)
+        left_lay.addWidget(self._tag_chip_container)
+
         tag_input_row = QHBoxLayout(); tag_input_row.setSpacing(6)
         self.tag_input = QLineEdit()
-        self.tag_input.setPlaceholderText("Type a tag and press Enter\u2026")
+        self.tag_input.setPlaceholderText("Type tag + Enter, or pick below\u2026")
         self.tag_input.setMinimumHeight(34)
         self.tag_input.setStyleSheet(_input_css())
         self.tag_input.returnPressed.connect(self._add_tag_from_input)
         self.tag_input.textChanged.connect(self._update_tag_suggestions)
         tag_input_row.addWidget(self.tag_input, 1)
-        self.tag_suggestions = QComboBox()
-        self.tag_suggestions.setMinimumHeight(34)
-        self.tag_suggestions.setMinimumWidth(280)
-        self.tag_suggestions.setStyleSheet(_input_css())
-        self.tag_suggestions.activated.connect(self._apply_tag_suggestion)
-        self.tag_suggestions.hide()
-        tag_input_row.addWidget(self.tag_suggestions)
-        lay.addLayout(tag_input_row)
+        left_lay.addLayout(tag_input_row)
 
+        # Tag suggestions — QListWidget (more reliable than QComboBox)
+        self.tag_suggestions = QListWidget()
+        self.tag_suggestions.setMaximumHeight(100)
+        self.tag_suggestions.setStyleSheet(
+            f"QListWidget{{background:{C['surface']};border:1px solid {C['border']};border-radius:8px;font-size:12px;}}"
+            f"QListWidget::item{{padding:4px 8px;}}"
+            f"QListWidget::item:hover{{background:{C['accent_bg']};}}")
+        self.tag_suggestions.itemClicked.connect(self._apply_tag_suggestion)
+        self.tag_suggestions.hide()
+        left_lay.addWidget(self.tag_suggestions)
+
+        # Content
         self.compose_content = QTextEdit()
         self.compose_content.setPlaceholderText("Write your note here\u2026")
-        self.compose_content.setMinimumHeight(120)
+        self.compose_content.setMinimumHeight(160)
         self.compose_content.setStyleSheet(_input_css())
-        lay.addWidget(self.compose_content)
-
-        # ── Link Transactions — EXACT DB filtered view filter ──
-        link_frame = QFrame()
-        link_frame.setStyleSheet(f"QFrame{{background:#fff;border:1px solid #E5E7EB;border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
-        link_lay = QVBoxLayout(link_frame)
-        link_lay.setContentsMargins(16, 12, 16, 12); link_lay.setSpacing(8)
-
-        link_header = QLabel("\U0001f517  Link Transactions (optional)")
-        link_header.setStyleSheet(f"font-weight:700;color:{C['text2']};font-size:13px;")
-        link_lay.addWidget(link_header)
-
-        # ── Filter bar (exact DB filtered view style + function) ──
-        bar = QFrame()
-        bar.setStyleSheet("QFrame{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:8px 12px;}")
-        filt_row = QHBoxLayout(bar)
-        filt_row.setContentsMargins(4, 4, 4, 4); filt_row.setSpacing(6)
-
-        # Date range
-        filt_row.addWidget(QLabel("From"))
-        self.tx_from = QDateEdit(); self.tx_from.setCalendarPopup(True)
-        self.tx_from.setDate(QDate.currentDate().addMonths(-1))
-        self.tx_from.setMinimumHeight(34); self.tx_from.setMaximumWidth(120)
-        filt_row.addWidget(self.tx_from)
-        filt_row.addWidget(QLabel("To"))
-        self.tx_to = QDateEdit(); self.tx_to.setCalendarPopup(True)
-        self.tx_to.setDate(QDate.currentDate())
-        self.tx_to.setMinimumHeight(34); self.tx_to.setMaximumWidth(120)
-        filt_row.addWidget(self.tx_to)
-
-        # Divider
-        div = QFrame(); div.setFixedHeight(24); div.setFixedWidth(1)
-        div.setStyleSheet(f"background:{C['border']};")
-        filt_row.addWidget(div)
-
-        # Filter field selector (exact DB filtered view)
-        filt_row.addWidget(QLabel("Filter"))
-        self.fc = QComboBox()
-        for f in FILTER_FIELDS: self.fc.addItem(f["label"], f["key"])
-        self.fc.setMinimumHeight(34); self.fc.setMaximumWidth(130)
-        filt_row.addWidget(self.fc)
-
-        # Filter value (dynamic — combo/text/number, same as DB filtered view)
-        self.fstk = QStackedWidget()
-        self.ft_combo = QComboBox(); self.ft_combo.setMinimumHeight(34)
-        self.ft_text = QLineEdit(); self.ft_text.setMinimumHeight(34)
-        self.ft_text.setStyleSheet(_input_css())
-        self.ft_num = QDoubleSpinBox(); self.ft_num.setPrefix("\u20b9 ")
-        self.ft_num.setRange(0, 99999999); self.ft_num.setMinimumHeight(34)
-        self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
-        filt_row.addWidget(self.fstk, 1)
-
-        # Add button
-        ab = QPushButton("+ Add"); ab.setStyleSheet(_btn_primary())
-        ab.setFixedSize(70, 34); ab.setCursor(QCursor(Qt.PointingHandCursor))
-        ab.clicked.connect(self._add_f)
-        filt_row.addWidget(ab)
-        link_lay.addWidget(bar)
-
-        # Chips row (exact DB filtered view)
-        self._chips_container = QWidget()
-        self._chips_container.setStyleSheet("background:transparent;border:none;")
-        self._chips_grid = QVBoxLayout(self._chips_container)
-        self._chips_grid.setContentsMargins(4, 2, 4, 2); self._chips_grid.setSpacing(2)
-        link_lay.addWidget(self._chips_container)
-
-        # Stats + Clear
-        bottom_row = QHBoxLayout()
-        self._filter_stats = QLabel("")
-        self._filter_stats.setStyleSheet(f"color:{C['text3']};font-size:11px;")
-        bottom_row.addWidget(self._filter_stats)
-        bottom_row.addStretch()
-        clear_btn = QPushButton("Clear All"); clear_btn.setObjectName("ghost")
-        clear_btn.setFixedHeight(26); clear_btn.clicked.connect(self._clear_f)
-        bottom_row.addWidget(clear_btn)
-        link_lay.addLayout(bottom_row)
-
-        # Transaction list — grouped by date + full _tx_card
-        self.tx_scroll = QScrollArea()
-        self.tx_scroll.setWidgetResizable(True); self.tx_scroll.setFrameShape(QFrame.NoFrame)
-        self.tx_scroll.setMaximumHeight(300)
-        self.tx_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        tx_inner = QWidget(); tx_inner.setStyleSheet("background:transparent;")
-        self.tx_list_lay = QVBoxLayout(tx_inner)
-        self.tx_list_lay.setSpacing(4); self.tx_list_lay.setContentsMargins(0, 0, 0, 0)
-        self.tx_scroll.setWidget(tx_inner)
-        link_lay.addWidget(self.tx_scroll)
-
-        self.linked_summary_lbl = QLabel("No transactions linked.")
-        self.linked_summary_lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-        link_lay.addWidget(self.linked_summary_lbl)
-
-        lay.addWidget(link_frame, 1)
-
-        # Init filter field
-        self.fc.currentIndexChanged.connect(self._on_field); self._on_field(0)
+        left_lay.addWidget(self.compose_content, 1)
 
         # Buttons
         btn_row = QHBoxLayout(); btn_row.addStretch()
@@ -517,20 +437,112 @@ class NotesTab(QWidget):
         save_btn = QPushButton("\U0001f4be  Save Note"); save_btn.setStyleSheet(_btn_primary())
         save_btn.setCursor(QCursor(Qt.PointingHandCursor))
         save_btn.clicked.connect(self._save_note); btn_row.addWidget(save_btn)
-        lay.addLayout(btn_row)
+        left_lay.addLayout(btn_row)
+
+        cols.addWidget(left, 1)
+
+        # ── RIGHT: Link Transactions (with full DB filter) ──
+        right = QFrame()
+        right.setStyleSheet(f"QFrame{{background:#fff;border:1px solid #E5E7EB;border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        right_lay = QVBoxLayout(right)
+        right_lay.setContentsMargins(14, 12, 14, 12); right_lay.setSpacing(8)
+
+        link_header = QLabel("\U0001f517  Link Transactions")
+        link_header.setStyleSheet(f"font-weight:700;color:{C['text2']};font-size:13px;")
+        right_lay.addWidget(link_header)
+
+        # Filter bar
+        bar = QFrame()
+        bar.setStyleSheet("QFrame{background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:6px 10px;}")
+        filt = QVBoxLayout(bar)
+        filt.setContentsMargins(4, 4, 4, 4); filt.setSpacing(6)
+
+        # Row 1: Date range
+        r1 = QHBoxLayout(); r1.setSpacing(6)
+        r1.addWidget(QLabel("From"))
+        self.tx_from = QDateEdit(); self.tx_from.setCalendarPopup(True)
+        self.tx_from.setDate(QDate.currentDate().addMonths(-1))
+        self.tx_from.setMinimumHeight(32); self.tx_from.setMaximumWidth(110)
+        r1.addWidget(self.tx_from)
+        r1.addWidget(QLabel("To"))
+        self.tx_to = QDateEdit(); self.tx_to.setCalendarPopup(True)
+        self.tx_to.setDate(QDate.currentDate())
+        self.tx_to.setMinimumHeight(32); self.tx_to.setMaximumWidth(110)
+        r1.addWidget(self.tx_to)
+        filt.addLayout(r1)
+
+        # Row 2: Filter field + value + add button
+        r2 = QHBoxLayout(); r2.setSpacing(6)
+        self.fc = QComboBox()
+        for f in FILTER_FIELDS: self.fc.addItem(f["label"], f["key"])
+        self.fc.setMinimumHeight(32); self.fc.setMaximumWidth(120)
+        r2.addWidget(self.fc)
+        self.fstk = QStackedWidget()
+        self.ft_combo = QComboBox(); self.ft_combo.setMinimumHeight(32)
+        self.ft_text = QLineEdit(); self.ft_text.setMinimumHeight(32)
+        self.ft_text.setStyleSheet(_input_css())
+        self.ft_num = QDoubleSpinBox(); self.ft_num.setPrefix("\u20b9 ")
+        self.ft_num.setRange(0, 99999999); self.ft_num.setMinimumHeight(32)
+        self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
+        r2.addWidget(self.fstk, 1)
+        ab = QPushButton("+"); ab.setStyleSheet(_btn_primary())
+        ab.setFixedSize(32, 32); ab.setCursor(QCursor(Qt.PointingHandCursor))
+        ab.clicked.connect(self._add_f); r2.addWidget(ab)
+        filt.addLayout(r2)
+
+        # Row 3: Load button + stats
+        r3 = QHBoxLayout(); r3.setSpacing(6)
+        self._filter_stats = QLabel("")
+        self._filter_stats.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+        r3.addWidget(self._filter_stats)
+        r3.addStretch()
+        clear_btn = QPushButton("Clear"); clear_btn.setStyleSheet(_btn_ghost())
+        clear_btn.setFixedHeight(28); clear_btn.clicked.connect(self._clear_f)
+        r3.addWidget(clear_btn)
+        load_btn = QPushButton("\u27f3 Load"); load_btn.setStyleSheet(_btn_primary())
+        load_btn.setMinimumHeight(28); load_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        load_btn.clicked.connect(self._load_tx_picker); r3.addWidget(load_btn)
+        filt.addLayout(r3)
+
+        right_lay.addWidget(bar)
+
+        # Chips
+        self._chips_container = QWidget()
+        self._chips_container.setStyleSheet("background:transparent;border:none;")
+        self._chips_grid = QVBoxLayout(self._chips_container)
+        self._chips_grid.setContentsMargins(0, 2, 0, 2); self._chips_grid.setSpacing(2)
+        right_lay.addWidget(self._chips_container)
+
+        # Transaction list
+        self.tx_scroll = QScrollArea()
+        self.tx_scroll.setWidgetResizable(True); self.tx_scroll.setFrameShape(QFrame.NoFrame)
+        self.tx_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        tx_inner = QWidget(); tx_inner.setStyleSheet("background:transparent;")
+        self.tx_list_lay = QVBoxLayout(tx_inner)
+        self.tx_list_lay.setSpacing(4); self.tx_list_lay.setContentsMargins(0, 0, 0, 0)
+        self.tx_scroll.setWidget(tx_inner)
+        right_lay.addWidget(self.tx_scroll, 1)
+
+        self.linked_summary_lbl = QLabel("No transactions linked.")
+        self.linked_summary_lbl.setStyleSheet(f"color:{C['text3']};font-size:11px;")
+        right_lay.addWidget(self.linked_summary_lbl)
+
+        cols.addWidget(right, 1)
+        lay.addLayout(cols, 1)
+
+        # Init filter field
+        self.fc.currentIndexChanged.connect(self._on_field); self._on_field(0)
 
         return page
 
     def _reset_composer(self):
-        self.edit_note_id = None; self.linked_ids = set(); self._composer_tags = []
-        self._fv = []
+        self.edit_note_id = None; self.linked_ids = set(); self._composer_tags = []; self._fv = []
         self.compose_header.setText("\U0001f4dd  New Note")
         self.compose_title.clear(); self.tag_input.clear(); self.compose_content.clear()
         self.tag_suggestions.hide(); self._rebuild_tag_chips()
-        self._clear_tx_list(); self._update_linked_summary()
-        self._rebuild_chips()
+        self._clear_tx_list(); self._update_linked_summary(); self._rebuild_chips()
 
-    # ── Tags ──
+    # ── Tags (fixed) ──
     def _add_tag_from_input(self):
         tag = self.tag_input.text().strip().lower().replace(" ", "_")
         if not tag or tag in self._composer_tags:
@@ -545,21 +557,28 @@ class NotesTab(QWidget):
 
     def _update_tag_suggestions(self, text):
         current = text.strip().lower()
-        if len(current) < 1: self.tag_suggestions.hide(); return
+        if len(current) < 1:
+            self.tag_suggestions.hide(); return
         matches = [t for t in self.lu.list_tags() if current in t["display_name"].lower()]
-        self.tag_suggestions.blockSignals(True); self.tag_suggestions.clear()
-        for t in matches[:6]: self.tag_suggestions.addItem(t["display_name"], t["display_name"])
+        self.tag_suggestions.clear()
+        for t in matches[:6]:
+            item = QListWidgetItem(t["display_name"])
+            item.setData(Qt.UserRole, t["display_name"])
+            self.tag_suggestions.addItem(item)
         if current and not any(t["display_name"].lower() == current for t in matches):
-            self.tag_suggestions.addItem(f"\uff0b Create \"{current}\"", current)
-        self.tag_suggestions.blockSignals(False)
-        self.tab_suggestions.setVisible(self.tag_suggestions.count() > 0) if hasattr(self, 'tab_suggestions') else self.tag_suggestions.setVisible(self.tag_suggestions.count() > 0)
+            item = QListWidgetItem(f"\uff0b Create \"{current}\"")
+            item.setData(Qt.UserRole, current)
+            self.tag_suggestions.addItem(item)
+        self.tag_suggestions.setVisible(self.tag_suggestions.count() > 0)
 
-    def _apply_tag_suggestion(self, idx):
-        data = self.tag_suggestions.currentData()
+    def _apply_tag_suggestion(self, item):
+        data = item.data(Qt.UserRole)
         if not data: return
         tag = data.strip().lower().replace(" ", "_")
-        if tag and tag not in self._composer_tags: self._composer_tags.append(tag)
-        self.tag_input.clear(); self.tag_suggestions.hide(); self._rebuild_tag_chips()
+        if tag and tag not in self._composer_tags:
+            self._composer_tags.append(tag)
+        self.tag_input.clear(); self.tag_suggestions.hide()
+        self._rebuild_tag_chips()
 
     def _remove_tag(self, tag):
         if tag in self._composer_tags:
@@ -573,43 +592,34 @@ class NotesTab(QWidget):
             chip = _make_tag_chip(tag, removable=True, on_remove=lambda t=tag: self._remove_tag(t))
             self._tag_chip_lay.addWidget(chip)
 
-    # ── Transaction filter — EXACT DB filtered view logic ──
+    # ── Transaction filter (DB filtered view logic) ──
     def _on_field(self, idx):
-        """Populate value widget based on selected filter field (same as DB tab)."""
         key = self.fc.currentData()
         field = next((f for f in FILTER_FIELDS if f["key"] == key), None)
         if not field: return
         if field["type"] == "combo":
-            self.fstk.setCurrentIndex(0)
-            self.ft_combo.clear()
+            self.fstk.setCurrentIndex(0); self.ft_combo.clear()
             existing = set()
             for fe in self._fv:
                 if fe["key"] == key: existing = set(fe["vals"]); break
             if "source" in field:
-                src = field["source"]
-                items = []
-                if src == "accounts":
-                    items = [(a["display_name"], a["account_id"]) for a in self.acct.list_active()]
-                elif src == "categories":
-                    items = [(c["display_name"], c["category_id"]) for c in self.lu.list_categories()]
-                elif src == "methods":
-                    items = [(m["display_name"], m["method_id"]) for m in self.lu.list_methods()]
-                elif src == "pf_categories":
-                    items = [(pf["display_name"], pf["pf_id"]) for pf in self.lu.list_pf_categories()]
+                src = field["source"]; items = []
+                if src == "accounts": items = [(a["display_name"], a["account_id"]) for a in self.acct.list_active()]
+                elif src == "categories": items = [(c["display_name"], c["category_id"]) for c in self.lu.list_categories()]
+                elif src == "methods": items = [(m["display_name"], m["method_id"]) for m in self.lu.list_methods()]
+                elif src == "pf_categories": items = [(pf["display_name"], pf["pf_id"]) for pf in self.lu.list_pf_categories()]
                 for text, data in items:
                     if data not in existing: self.ft_combo.addItem(text, data)
             elif "values" in field:
                 for v in field["values"]:
                     if v not in existing: self.ft_combo.addItem(v, v)
         elif field["type"] == "text":
-            self.fstk.setCurrentIndex(1)
-            self.ft_text.clear()
+            self.fstk.setCurrentIndex(1); self.ft_text.clear()
             self.ft_text.setPlaceholderText(f"Enter {field['label'].lower()}\u2026")
         else:
             self.fstk.setCurrentIndex(2); self.ft_num.setValue(0)
 
     def _add_f(self):
-        """Add filter (same as DB tab)."""
         key = self.fc.currentData()
         field = next((f for f in FILTER_FIELDS if f["key"] == key), None)
         if not field: return
@@ -632,18 +642,13 @@ class NotesTab(QWidget):
             if v <= 0: return
             self._fv = [fe for fe in self._fv if fe["key"] != key]
             self._fv.append({"key": key, "label": field["label"], "vals": [v], "disp": [fmt_money(v)]})
-        self._rebuild_chips()
-        self._on_field(self.fc.currentIndex())
-        self._load_tx_picker()
+        self._rebuild_chips(); self._on_field(self.fc.currentIndex()); self._load_tx_picker()
 
     def _clear_f(self):
-        self._fv = []
-        self._rebuild_chips()
-        self._on_field(self.fc.currentIndex())
-        self._load_tx_picker()
+        self._fv = []; self._rebuild_chips()
+        self._on_field(self.fc.currentIndex()); self._load_tx_picker()
 
     def _rebuild_chips(self):
-        """Rebuild filter chips (same as DB tab)."""
         while self._chips_grid.count():
             itm = self._chips_grid.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
@@ -675,12 +680,9 @@ class NotesTab(QWidget):
                 except ValueError: pass
                 if not fe["vals"]: self._fv = [f for f in self._fv if f["key"] != key]
                 break
-        self._rebuild_chips()
-        self._on_field(self.fc.currentIndex())
-        self._load_tx_picker()
+        self._rebuild_chips(); self._on_field(self.fc.currentIndex()); self._load_tx_picker()
 
     def _apply_filters(self, txns):
-        """Apply all active filters to transaction list (same as DB tab)."""
         for fe in self._fv:
             key, vals = fe["key"], fe["vals"]
             if key == "account": txns = [t for t in txns if t.get("account_id") in vals]
@@ -709,29 +711,22 @@ class NotesTab(QWidget):
             if itm.widget(): itm.widget().deleteLater()
 
     def _load_tx_picker(self):
-        """Load transactions with full filter support + grouped by date."""
         self._clear_tx_list()
-
         d_from = self.tx_from.date().toString("yyyy-MM-dd")
         d_to = self.tx_to.date().toString("yyyy-MM-dd")
-
-        # Fetch all in date range, then apply client-side filters (same as DB tab)
         txns = self.tx.list_filters(limit=5000, date_from=d_from, date_to=d_to)
         txns = self._apply_filters(txns)
 
-        # Stats
         cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT")
         db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT")
-        self._filter_stats.setText(f"{len(txns)} txns | Cr:{fmt_money(cr)} | Db:{fmt_money(db)} | Net:{fmt_money(cr - db)}")
+        self._filter_stats.setText(f"{len(txns)} txns | Cr:{fmt_money(cr)} | Db:{fmt_money(db)}")
 
         if not txns:
             lbl = QLabel("No matching transactions.")
             lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
             lbl.setAlignment(Qt.AlignCenter)
-            self.tx_list_lay.addWidget(lbl)
-            return
+            self.tx_list_lay.addWidget(lbl); return
 
-        # Group by date with _day_header + _tx_card (same as DB view)
         by_date = OrderedDict()
         for tx in sorted(txns, key=lambda t: t["tx_date"], reverse=True):
             d = tx["tx_date"]
@@ -745,7 +740,6 @@ class NotesTab(QWidget):
             except:
                 self.tx_list_lay.addWidget(_day_header(d_str))
             for tx in day_txns:
-                # Wrap _tx_card with checkbox
                 wrapper = QFrame()
                 wrapper.setStyleSheet("QFrame{background:transparent;border:none;}")
                 wl = QHBoxLayout(wrapper)
@@ -753,18 +747,17 @@ class NotesTab(QWidget):
 
                 is_linked = tx["id"] in self.linked_ids
                 chk = QPushButton("\u2713" if is_linked else "\u25CB")
-                chk.setFixedSize(30, 30)
+                chk.setFixedSize(28, 28)
                 chk.setStyleSheet(
                     f"QPushButton{{background:{C['accent'] if is_linked else C['surface']};"
                     f"color:{'white' if is_linked else C['text3']};"
                     f"border:2px solid {C['accent'] if is_linked else C['border']};"
-                    f"border-radius:15px;font-size:14px;font-weight:700;}}"
+                    f"border-radius:14px;font-size:12px;font-weight:700;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                 chk.setCursor(QCursor(Qt.PointingHandCursor))
                 tid = tx["id"]
                 chk.clicked.connect(lambda _, t=tid: self._toggle_link(t))
                 wl.addWidget(chk)
-
                 card = _tx_card(tx)
                 wl.addWidget(card, 1)
                 self.tx_list_lay.addWidget(wrapper)
@@ -772,8 +765,7 @@ class NotesTab(QWidget):
     def _toggle_link(self, tid):
         if tid in self.linked_ids: self.linked_ids.discard(tid)
         else: self.linked_ids.add(tid)
-        self._update_linked_summary()
-        self._load_tx_picker()
+        self._update_linked_summary(); self._load_tx_picker()
 
     def _update_linked_summary(self):
         if not self.linked_ids:
@@ -783,7 +775,7 @@ class NotesTab(QWidget):
             t = self.tx.get(tid)
             if t: net += t["amount"] if t["tx_type"] == "CREDIT" else -t["amount"]
         self.linked_summary_lbl.setText(
-            f"Linked: {len(self.linked_ids)} transaction(s) \u00b7 Net: {fmt_money(net)}")
+            f"Linked: {len(self.linked_ids)} txns \u00b7 Net: {fmt_money(net)}")
 
     def _save_note(self):
         title = self.compose_title.text().strip()
@@ -870,7 +862,7 @@ class NotesTab(QWidget):
         if reply == QMessageBox.Yes:
             self.nr.perm_delete(uid); self._load_trash()
 
-    # ─────────────── PRINT (full DB tab style PDF) ───────────────
+    # ─────────────── PRINT (full DB tab style) ───────────────
     def _print_single_note(self, note_id):
         note = self.nr.get(note_id)
         if not note: return
@@ -883,10 +875,10 @@ class NotesTab(QWidget):
             from reportlab.lib.pagesizes import A4
             from reportlab.lib import colors
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+            from reportlab.lib.enums import TA_RIGHT
             from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
-                                             Paragraph, Spacer, KeepTogether)
-            from reportlab.graphics.shapes import Drawing, Rect, String
+                                             Paragraph, Spacer)
+            from reportlab.graphics.shapes import Drawing
             from reportlab.graphics.barcode.qr import QrCodeWidget
 
             pw, ph = A4
@@ -900,7 +892,6 @@ class NotesTab(QWidget):
                                     leftMargin=36, rightMargin=36)
             story = []
             S = getSampleStyleSheet()
-
             WRAP = ParagraphStyle('wrap', parent=S['Normal'], fontSize=10, leading=13)
             WRAP_SM = ParagraphStyle('wrap_sm', parent=S['Normal'], fontSize=9, leading=11)
             WRAP_SM_R = ParagraphStyle('wrap_sm_r', parent=S['Normal'], fontSize=9, leading=11, alignment=TA_RIGHT)
@@ -945,8 +936,7 @@ class NotesTab(QWidget):
             if tags:
                 story.append(Paragraph(f"<b>Tags:</b> {tags}",
                                        ParagraphStyle('tags', parent=S['Normal'],
-                                                      textColor=colors.HexColor('#4F46E5'),
-                                                      fontSize=11)))
+                                                      textColor=colors.HexColor('#4F46E5'), fontSize=11)))
                 story.append(Spacer(1, 12))
 
             # Content
@@ -958,20 +948,14 @@ class NotesTab(QWidget):
                     story.append(Paragraph(line or "&nbsp;", WRAP))
                 story.append(Spacer(1, 16))
 
-            # Linked transactions — full details table (using get_detailed)
+            # Linked transactions — full details table
             ids = _linked_ids(note)
             if ids:
                 story.append(Paragraph(f"<b>Linked Transactions ({len(ids)})</b>", S['Heading3']))
                 story.append(Spacer(1, 6))
-
-                # Header row
                 tx_data = [["Date", "Description", "Category", "Method", "Account", "Type", "Amount"]]
-
                 for tid in ids:
-                    if hasattr(self.tx, 'get_detailed'):
-                        tx = self.tx.get_detailed(tid)
-                    else:
-                        tx = self.tx.get(tid)
+                    tx = self.tx.get_detailed(tid) if hasattr(self.tx, 'get_detailed') else self.tx.get(tid)
                     if tx:
                         tx_type = tx.get("tx_type", "")
                         prefix = "\u2212" if tx_type == "DEBIT" else "+"
@@ -985,7 +969,6 @@ class NotesTab(QWidget):
                             tx_type,
                             Paragraph(f"{prefix}{fmt_money(tx['amount'])}", WRAP_SM_R),
                         ])
-
                 col_widths = [58, 130, 65, 65, 75, 40, 72]
                 t = Table(tx_data, colWidths=col_widths, repeatRows=1)
                 t.setStyle(TableStyle([
@@ -1009,10 +992,10 @@ class NotesTab(QWidget):
                 total_debit = sum(tx["amount"] for tid in ids if (tx := (self.tx.get_detailed(tid) if hasattr(self.tx, 'get_detailed') else self.tx.get(tid))) and tx.get("tx_type") == "DEBIT")
                 total_credit = sum(tx["amount"] for tid in ids if (tx := (self.tx.get_detailed(tid) if hasattr(self.tx, 'get_detailed') else self.tx.get(tid))) and tx.get("tx_type") == "CREDIT")
                 story.append(Spacer(1, 8))
-                summary_text = f"Total Debits: {fmt_money(total_debit)}  |  Total Credits: {fmt_money(total_credit)}  |  Net: {fmt_money(total_credit - total_debit)}"
-                story.append(Paragraph(f"<b>{summary_text}</b>",
-                                       ParagraphStyle('summary', parent=S['Normal'],
-                                                      fontSize=10, textColor=colors.HexColor('#374151'))))
+                story.append(Paragraph(
+                    f"<b>Total Debits: {fmt_money(total_debit)}  |  Total Credits: {fmt_money(total_credit)}  |  Net: {fmt_money(total_credit - total_debit)}</b>",
+                    ParagraphStyle('summary', parent=S['Normal'], fontSize=10,
+                                   textColor=colors.HexColor('#374151'))))
                 story.append(Spacer(1, 12))
 
             # Metadata
