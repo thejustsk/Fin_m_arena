@@ -262,6 +262,8 @@ def run_migrations(db):
 
     # 7. Safe ALTER TABLE — add columns if missing (existing DBs)
         c.execute("INSERT OR IGNORE INTO preferences VALUES('min_txn_alert', '499')")
+        c.execute("INSERT OR IGNORE INTO preferences VALUES('complete_page_size', '150')")
+        c.execute("INSERT OR IGNORE INTO preferences VALUES('scroll_trigger_px', '400')")
 
         _safe_cols = [
         ("cards", "credit_limit", "REAL DEFAULT 0"),

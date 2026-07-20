@@ -13,9 +13,17 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 import json, uuid as _uuid, os, subprocess, sys
 
+COMPLETE_PAGE_SIZE = 150  # default, overridden by preferences table
+SCROLL_TRIGGER_PX = 400   # default, overridden by preferences table
+
+def _get_pref(db, key, default):
+    try:
+        r = db.execute("SELECT value FROM preferences WHERE key=?", (key,)).fetchone()
+        if r and r["value"]: return int(r["value"])
+    except: pass
+    return default
+
 _HAS_WEBENGINE = None  # Lazy check
-COMPLETE_PAGE_SIZE = 100
-SCROLL_TRIGGER_PX = 150  # start loading this many px before the bottom
 
 def _check_webengine():
     global _HAS_WEBENGINE
@@ -523,49 +531,47 @@ class DatabaseTab(QWidget):
     # ═══════════════════════════════════
     # COMPLETE VIEW
     # ═══════════════════════════════════
-
     def _build_complete(self):
         w = QWidget()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         inner = QWidget()
         self.comp_lay = QVBoxLayout(inner); self.comp_lay.setSpacing(4); self.comp_lay.setContentsMargins(0,4,0,0)
-        self.comp_lay.addStretch()  # permanent sentinel — always the last item
+        self.comp_lay.addStretch()  # permanent sentinel
         scroll.setWidget(inner)
         lay = QVBoxLayout(w); lay.setContentsMargins(0,8,0,0); lay.addWidget(scroll)
-
         self._comp_scroll = scroll
         scroll.verticalScrollBar().valueChanged.connect(self._on_complete_scroll)
         return w
 
     def _load_complete(self):
-        # reset pagination state
-        while self.comp_lay.count() > 1:  # keep the stretch sentinel
+        # Reset pagination state
+        while self.comp_lay.count() > 1:
             itm = self.comp_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
-
         self._comp_offset = 0
         self._comp_has_more = True
         self._comp_loading = False
         self._comp_last_month_key = None
         self._comp_last_day_key = None
-        # one cheap SQL pass to get every account's running balance, keyed by tx id
+        self._comp_page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
+        self._comp_scroll_trigger = _get_pref(self.db, "scroll_trigger_px", SCROLL_TRIGGER_PX)
         self._comp_bal_map = self._compute_all_running_balances()
-
         self._load_more_complete()
 
     def _on_complete_scroll(self, value):
         sb = self._comp_scroll.verticalScrollBar()
-        if value >= sb.maximum() - SCROLL_TRIGGER_PX:
+        trigger = getattr(self, '_comp_scroll_trigger', SCROLL_TRIGGER_PX)
+        if value >= sb.maximum() - trigger:
             self._load_more_complete()
 
     def _load_more_complete(self):
         if self._comp_loading or not self._comp_has_more:
             return
         self._comp_loading = True
-        txns = self.tx_repo.list_filters(limit=COMPLETE_PAGE_SIZE, offset=self._comp_offset)
-        self._comp_has_more = len(txns) == COMPLETE_PAGE_SIZE
+        page_size = getattr(self, '_comp_page_size', COMPLETE_PAGE_SIZE)
+        txns = self.tx_repo.list_filters(limit=page_size, offset=self._comp_offset)
+        self._comp_has_more = len(txns) == page_size
         self._comp_offset += len(txns)
-
         if not txns and self._comp_offset == 0:
             lbl = QLabel("No transactions yet.")
             lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;")
@@ -573,8 +579,7 @@ class DatabaseTab(QWidget):
             self.comp_lay.insertWidget(self.comp_lay.count() - 1, lbl)
             self._comp_loading = False
             return
-
-        insert_at = self.comp_lay.count() - 1  # just before the stretch sentinel
+        insert_at = self.comp_lay.count() - 1  # just before sentinel
         for tx in txns:
             d = tx["tx_date"]; mk = d[:7]
             if mk != self._comp_last_month_key:
@@ -585,7 +590,7 @@ class DatabaseTab(QWidget):
                     hdr = _month_header(mk)
                 self.comp_lay.insertWidget(insert_at, hdr); insert_at += 1
                 self._comp_last_month_key = mk
-                self._comp_last_day_key = None  # force a day header too
+                self._comp_last_day_key = None
             if d != self._comp_last_day_key:
                 try:
                     hdr = _day_header(date.fromisoformat(d).strftime("%A, %d %b"))
@@ -593,19 +598,17 @@ class DatabaseTab(QWidget):
                     hdr = _day_header(d)
                 self.comp_lay.insertWidget(insert_at, hdr); insert_at += 1
                 self._comp_last_day_key = d
-
             card = _tx_card(tx, self._comp_bal_map.get(tx["id"]))
             self.comp_lay.insertWidget(insert_at, card); insert_at += 1
-
         self._comp_loading = False
 
     def _compute_all_running_balances(self):
-        """One cheap SQL pass (window function) instead of Python looping over 10k rows."""
+        """One SQL window function pass for all running balances."""
         rows = self.db.execute("""
             SELECT t.id,
-                a.opening_balance
-                + SUM(CASE WHEN t.tx_type='CREDIT' THEN t.amount ELSE -t.amount END)
-                    OVER (PARTITION BY t.account_id ORDER BY t.tx_date, t.created_at) AS running_bal
+                   a.opening_balance
+                   + SUM(CASE WHEN t.tx_type='CREDIT' THEN t.amount ELSE -t.amount END)
+                     OVER (PARTITION BY t.account_id ORDER BY t.tx_date, t.created_at) AS running_bal
             FROM transactions t
             JOIN accounts a ON a.account_id = t.account_id
         """).fetchall()

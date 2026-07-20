@@ -88,13 +88,78 @@ class SettingsTab(QWidget):
         return w
 
     def _prefs_tab(self):
-        w = QWidget(); l = QFormLayout(w)
-        l.addRow("Theme:", QLabel("Light (locked)"))
-        l.addRow("Currency:", QLabel("₹ Indian"))
-        bb = QPushButton("Backup Now")
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
+
+        # ── Display Settings ──
+        grp1 = QFrame()
+        grp1.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        f1 = QFormLayout(grp1); f1.setContentsMargins(16,16,16,16); f1.setSpacing(10)
+        f1.addRow("Theme:", QLabel("Light (locked)"))
+        f1.addRow("Currency:", QLabel("₹ Indian"))
+        l.addWidget(grp1)
+
+        # ── Pagination Settings ──
+        grp2 = QFrame()
+        grp2.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        f2 = QFormLayout(grp2); f2.setContentsMargins(16,16,16,16); f2.setSpacing(10)
+        title2 = QLabel("📊  Pagination")
+        title2.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        f2.addRow(title2)
+
+        self.pref_page_size = QSpinBox(); self.pref_page_size.setRange(50, 1000); self.pref_page_size.setSingleStep(50)
+        self.pref_page_size.setToolTip("Number of transactions loaded per batch")
+        f2.addRow("Page Size:", self.pref_page_size)
+
+        self.pref_scroll_trigger = QSpinBox(); self.pref_scroll_trigger.setRange(100, 2000); self.pref_scroll_trigger.setSingleStep(100)
+        self.pref_scroll_trigger.setToolTip("Load more when this many pixels from the bottom")
+        f2.addRow("Scroll Trigger (px):", self.pref_scroll_trigger)
+        l.addWidget(grp2)
+
+        # ── Alert Settings ──
+        grp3 = QFrame()
+        grp3.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        f3 = QFormLayout(grp3); f3.setContentsMargins(16,16,16,16); f3.setSpacing(10)
+        title3 = QLabel("🔔  Alerts")
+        title3.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        f3.addRow(title3)
+
+        self.pref_txn_alert = QSpinBox(); self.pref_txn_alert.setRange(100, 100000); self.pref_txn_alert.setSingleStep(100)
+        self.pref_txn_alert.setPrefix("₹ "); self.pref_txn_alert.setToolTip("Minimum amount for high-value transaction alerts")
+        f3.addRow("High-Value Alert:", self.pref_txn_alert)
+        l.addWidget(grp3)
+
+        # ── Save + Backup ──
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("💾  Save Settings"); save_btn.setObjectName("primary")
+        save_btn.setMinimumHeight(38); save_btn.clicked.connect(self._save_prefs)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch()
+        bb = QPushButton("📦  Backup Now"); bb.setMinimumHeight(38)
         bb.clicked.connect(lambda: (self.db.backup(), QMessageBox.information(self, "Done", "Backup created.")))
-        l.addRow("Backup:", bb)
+        btn_row.addWidget(bb)
+        l.addLayout(btn_row)
+        l.addStretch()
         return w
+
+    def _save_prefs(self):
+        try:
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('complete_page_size', ?)",
+                            (str(self.pref_page_size.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('scroll_trigger_px', ?)",
+                            (str(self.pref_scroll_trigger.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('min_txn_alert', ?)",
+                            (str(self.pref_txn_alert.value()),))
+            self.db.commit()
+            QMessageBox.information(self, "Saved", "Settings saved successfully.\nRestart the app for pagination changes to take effect.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to save: {e}")
+
+    def _get_pref(self, key, default):
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key=?", (key,)).fetchone()
+            if r and r["value"]: return int(r["value"])
+        except: pass
+        return default
 
     # ── Add Account (CURRENT / CASH / WALLET only) ──
     def _add_account(self):
@@ -264,6 +329,12 @@ class SettingsTab(QWidget):
 
         self.totp_lbl.setText("✓ 2FA Enabled" if self.sec.is_2fa() else "✗ 2FA Disabled")
         self.totp_lbl.setStyleSheet(f"color:{C['green'] if self.sec.is_2fa() else C['text3']};font-weight:600;")
+
+        # Load preference values
+        if hasattr(self, 'pref_page_size'):
+            self.pref_page_size.setValue(self._get_pref('complete_page_size', 150))
+            self.pref_scroll_trigger.setValue(self._get_pref('scroll_trigger_px', 400))
+            self.pref_txn_alert.setValue(self._get_pref('min_txn_alert', 499))
 
 
 def QInputDialog_getText(parent, title, label, echo=QLineEdit.Normal):

@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.tabs.database_tab import _tx_card, _day_header, _month_header
+from ui.tabs.database_tab import _tx_card, _day_header, _month_header, _get_pref, COMPLETE_PAGE_SIZE, SCROLL_TRIGGER_PX
 from ui.tabs.cards_tab import _build_cycles, _fifo_allocate, _parse_stmt_day, _cycle_name, _stmt_display
 
 
@@ -258,57 +258,94 @@ class BalancesTab(QWidget):
             self._build_acct_txns(acct_data)
 
     # ─────────────────────────────────────────
-    # NON-CC: Month/Day grouped transactions
+    # NON-CC: Paginated Month/Day grouped transactions
     # ─────────────────────────────────────────
     def _build_acct_txns(self, acct_data):
+        """Paginated transaction list for non-CC accounts."""
         aid = acct_data["account_id"]
-        txns = self.tx.list_filters(account_id=aid, limit=5000)
 
-        if not txns:
-            lbl = QLabel("No transactions for this account.")
-            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-            lbl.setAlignment(Qt.AlignCenter)
-            self.acct_tx_lay.addWidget(lbl)
-            self.acct_tx_lay.addStretch()
-            return
-
-        # Running balances
-        bal_map = {}
+        # Compute running balances for ALL transactions (one pass)
+        self._acct_bal_map = {}
         running = acct_data.get("opening_balance", 0)
-        for tx in sorted(txns, key=lambda t: (t["tx_date"], t.get("created_at", ""))):
+        all_txns_sorted = self.tx.list_filters(account_id=aid, limit=100000)
+        for tx in sorted(all_txns_sorted, key=lambda t: (t["tx_date"], t.get("created_at", ""))):
             if tx["tx_type"] == "CREDIT":
                 running += tx["amount"]
             else:
                 running -= tx["amount"]
-            bal_map[tx["id"]] = running
+            self._acct_bal_map[tx["id"]] = running
 
-        # Group by month → day
-        months = OrderedDict()
-        for tx in sorted(txns, key=lambda t: t["tx_date"], reverse=True):
+        # Pagination state
+        self._acct_offset = 0
+        self._acct_has_more = True
+        self._acct_loading = False
+        self._acct_last_month = None
+        self._acct_last_day = None
+        self._acct_aid = aid
+        self._acct_page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
+        self._acct_scroll_trigger = _get_pref(self.db, "scroll_trigger_px", SCROLL_TRIGGER_PX)
+
+        # Sentinel stretch
+        self._acct_sentinel = QWidget()
+        self._acct_sentinel.setFixedHeight(0)
+        self.acct_tx_lay.addWidget(self._acct_sentinel)
+
+        # Connect scroll for infinite loading
+        scroll = self._right_stack.widget(1)
+        if isinstance(scroll, QScrollArea):
+            scroll.verticalScrollBar().valueChanged.connect(self._on_acct_scroll)
+            self._acct_scrollbar = scroll.verticalScrollBar()
+
+        self._load_more_acct_txns()
+
+    def _on_acct_scroll(self, value):
+        sb = self._acct_scrollbar
+        trigger = getattr(self, '_acct_scroll_trigger', SCROLL_TRIGGER_PX)
+        if value >= sb.maximum() - trigger:
+            self._load_more_acct_txns()
+
+    def _load_more_acct_txns(self):
+        if self._acct_loading or not self._acct_has_more:
+            return
+        self._acct_loading = True
+        page_size = getattr(self, '_acct_page_size', COMPLETE_PAGE_SIZE)
+        txns = self.tx.list_filters(account_id=self._acct_aid, limit=page_size, offset=self._acct_offset)
+        self._acct_has_more = len(txns) == page_size
+        self._acct_offset += len(txns)
+
+        if not txns and self._acct_offset == page_size:
+            lbl = QLabel("No transactions for this account.")
+            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            insert_at = max(0, self.acct_tx_lay.count() - 1)
+            self.acct_tx_lay.insertWidget(insert_at, lbl)
+            self._acct_loading = False
+            return
+
+        insert_at = max(0, self.acct_tx_lay.count() - 1)
+        for tx in txns:
             mk = tx["tx_date"][:7]
             dk = tx["tx_date"]
-            if mk not in months:
-                months[mk] = OrderedDict()
-            if dk not in months[mk]:
-                months[mk][dk] = []
-            months[mk][dk].append(tx)
-
-        for mk, days in months.items():
-            try:
-                y, m = map(int, mk.split("-"))
-                self.acct_tx_lay.addWidget(_month_header(date(y, m, 1).strftime("%B %Y")))
-            except:
-                self.acct_tx_lay.addWidget(_month_header(mk))
-            for dk, day_txns in days.items():
+            if mk != self._acct_last_month:
                 try:
-                    self.acct_tx_lay.addWidget(_day_header(
-                        date.fromisoformat(dk).strftime("%A, %d %b")))
+                    y, m = map(int, mk.split("-"))
+                    hdr = _month_header(date(y, m, 1).strftime("%B %Y"))
                 except:
-                    self.acct_tx_lay.addWidget(_day_header(dk))
-                for tx in day_txns:
-                    self.acct_tx_lay.addWidget(_tx_card(tx, bal_map.get(tx["id"])))
+                    hdr = _month_header(mk)
+                self.acct_tx_lay.insertWidget(insert_at, hdr); insert_at += 1
+                self._acct_last_month = mk
+                self._acct_last_day = None
+            if dk != self._acct_last_day:
+                try:
+                    hdr = _day_header(date.fromisoformat(dk).strftime("%A, %d %b"))
+                except:
+                    hdr = _day_header(dk)
+                self.acct_tx_lay.insertWidget(insert_at, hdr); insert_at += 1
+                self._acct_last_day = dk
+            card = _tx_card(tx, self._acct_bal_map.get(tx["id"]))
+            self.acct_tx_lay.insertWidget(insert_at, card); insert_at += 1
 
-        self.acct_tx_lay.addStretch()
+        self._acct_loading = False
 
     # ─────────────────────────────────────────
     # CC: Cycle headers + transactions (like Cards tab, no settlement/edit)
