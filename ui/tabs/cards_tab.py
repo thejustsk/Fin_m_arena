@@ -787,7 +787,7 @@ class CardsTab(QWidget):
             "WHERE c.is_active=0 ORDER BY c.sort_order").fetchall()]
         active_idx = 0 if self._sub_btns[0].styleSheet() == _tab_btn_active() else 1
         cards = ac if active_idx == 0 else ic
-        # Save cycles for all active cards on tab entry
+        # Save cycles for all active cards (needed for reminders + sidebar)
         for card in ac:
             self._save_cycles(card)
         self.carousel.load_cards(cards, self._utils(cards))
@@ -800,8 +800,16 @@ class CardsTab(QWidget):
         grace = card.get("grace_days", 20)
         if not stmt_day:
             return
-        all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
-        cycles = _build_cycles(stmt_day, 12)
+        all_txns = self.tx_repo.list_filters(account_id=aid, limit=50000)
+        # Build enough cycles to cover ALL transactions
+        if all_txns:
+            oldest_tx = min(t["tx_date"] for t in all_txns)
+            oldest_dt = date.fromisoformat(oldest_tx)
+            months_back = (date.today().year - oldest_dt.year) * 12 + (date.today().month - oldest_dt.month) + 2
+            num_cycles = max(12, months_back)
+            cycles = _build_cycles(stmt_day, num_cycles)
+        else:
+            cycles = _build_cycles(stmt_day, 12)
         cycle_data = _fifo_allocate(cycles, all_txns)
         # Preserve existing due_dates from DB
         existing = {c["cycle_start_date"]: c for c in self.cr.get_cycles(aid)}
@@ -871,11 +879,28 @@ class CardsTab(QWidget):
 
         # Two-balance: Statement Balance + Current Balance
         r2 = QHBoxLayout(); r2.setSpacing(24)
-        # Load transactions and compute FIFO
-        self._current_all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
+        # Load transactions
+        self._current_all_txns = self.tx_repo.list_filters(account_id=aid, limit=50000)
         stmt_day = _parse_stmt_day(card.get("statement_date", ""))
-        cycles = _build_cycles(stmt_day, 12)
-        self._current_cycle_data = _fifo_allocate(cycles, self._current_all_txns)
+        # Build enough cycles to cover ALL transactions
+        if stmt_day and self._current_all_txns:
+            oldest_tx = min(t["tx_date"] for t in self._current_all_txns)
+            oldest_dt = date.fromisoformat(oldest_tx)
+            months_back = (date.today().year - oldest_dt.year) * 12 + (date.today().month - oldest_dt.month) + 2
+            num_cycles = max(12, months_back)
+            all_cycles = _build_cycles(stmt_day, num_cycles)
+        else:
+            all_cycles = _build_cycles(stmt_day, 12) if stmt_day else []
+
+        # Load saved cycles from DB
+        try:
+            saved_cycles = self.cr.get_cycles(aid)
+        except:
+            saved_cycles = []
+        saved_map = {c["cycle_start_date"]: c for c in saved_cycles}
+
+        # ── Compute FIFO for ALL cycles (correct labels) ──
+        self._current_cycle_data = _fifo_allocate(all_cycles, self._current_all_txns) if all_cycles else []
 
         # Amount Due = sum of remaining from ALL previous cycles (excluding current)
         amount_due = 0
@@ -914,15 +939,15 @@ class CardsTab(QWidget):
             c.addWidget(QLabel(f"<span style='color:rgba(255,255,255,0.5);font-size:9px;'>{label}</span>"))
             c.addWidget(QLabel(f"<b style='color:{color};font-size:13px;'>{value}</b>"))
             r2.addLayout(c)
-        r2.addStretch(); hdr_lay.addLayout(r2)
-        # Edit button — bottom-right of header
+        r2.addStretch()
+        # Edit button — inline with metrics, right-aligned
         edit_btn = QPushButton("✏️  Edit Card")
         edit_btn.setStyleSheet("QPushButton{background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:4px 14px;font-size:11px;font-weight:700;}QPushButton:hover{background:rgba(255,255,255,0.35);}")
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.setFixedHeight(28)
         edit_btn.clicked.connect(lambda: self._edit_card(card))
-        r3 = QHBoxLayout(); r3.addStretch(); r3.addWidget(edit_btn)
-        hdr_lay.addLayout(r3)
+        r2.addWidget(edit_btn)
+        hdr_lay.addLayout(r2)
         self.header_lay.addWidget(hdr)
         self.header_container.show()
 
@@ -940,12 +965,7 @@ class CardsTab(QWidget):
 
         all_txns = self._current_all_txns
         cycle_data = self._current_cycle_data
-
-        # Load saved cycles from DB for due date lookups
-        try:
-            saved_cycles = self.cr.get_cycles(aid)
-        except:
-            saved_cycles = []
+        # saved_cycles already loaded above in hybrid section
 
         if not all_txns:
             nt = QLabel("No transactions found for this card.")
@@ -1010,12 +1030,13 @@ class CardsTab(QWidget):
                 due_edit.setFixedHeight(28); due_edit.setMinimumWidth(130)
                 due_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
                 due_edit.setStyleSheet(f"QDateEdit{{border:1px solid {C['border']};border-radius:4px;padding:2px 6px;font-size:11px;background:white;color:{C['text']};}}")
-                # Get saved due_date from DB, or calculate default
-                saved_due = ""
-                for sc in saved_cycles:
-                    if sc.get("cycle_start_date","") == cd["start"].isoformat():
-                        saved_due = sc.get("due_date","") or ""
-                        break
+                # Get due_date: use from cycle data (hybrid), then DB lookup, then default
+                saved_due = cd.get("due_date", "") or ""
+                if not saved_due:
+                    for sc in saved_cycles:
+                        if sc.get("cycle_start_date","") == cd["start"].isoformat():
+                            saved_due = sc.get("due_date","") or ""
+                            break
                 if not saved_due:
                     try: saved_due = (cd["end"] + timedelta(days=grace)).isoformat()
                     except: pass
@@ -1064,20 +1085,12 @@ class CardsTab(QWidget):
         aid = card["account_id"]
         balance = abs(self.bal.get_balance(aid))
 
-        # Amount Due = sum of remaining from all previous cycles (not current)
-        stmt_day = _parse_stmt_day(card.get("statement_date", ""))
+        # Reuse cycle data already computed in _show_details (no extra DB query)
         amount_due = 0
-        if stmt_day:
-            try:
-                all_txns = self.tx_repo.list_filters(account_id=aid, limit=5000)
-                cycles = _build_cycles(stmt_day, 12)
-                cycle_data = _fifo_allocate(cycles, all_txns)
-                today_str = date.today().isoformat()
-                for cd in cycle_data:
-                    if cd["end"].isoformat() < today_str:
-                        amount_due += cd["remaining"]
-            except:
-                pass
+        today_str = date.today().isoformat()
+        for cd in getattr(self, '_current_cycle_data', []):
+            if cd["end"].isoformat() < today_str:
+                amount_due += cd["remaining"]
 
         self.sf_opt.blockSignals(True); self.sf_opt.clear()
         self.sf_opt.addItem(f"Amount Due — {fmt_money(amount_due)}", amount_due)
@@ -1136,6 +1149,7 @@ class CardsTab(QWidget):
         dlg = AddCardDialog(self.cr, self.acct, card=card, parent=self)
         dlg.card_updated.connect(self.refresh)
         dlg.exec_()
+
 
     def refresh(self):
         self._selected_card = None; self.details_container.hide(); self.header_container.hide(); self.settle_footer.hide()
