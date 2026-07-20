@@ -1,6 +1,7 @@
 """Balances tab — Account balances, net worth, recent transactions, account drill-down."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QFrame, QScrollArea, QStackedWidget, QPushButton)
+                              QFrame, QScrollArea, QStackedWidget, QPushButton,
+                              QSizePolicy)
 from PyQt5.QtCore import Qt
 from datetime import date, timedelta
 from collections import OrderedDict
@@ -285,10 +286,8 @@ class BalancesTab(QWidget):
         self._acct_page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
         self._acct_scroll_trigger = _get_pref(self.db, "scroll_trigger_px", SCROLL_TRIGGER_PX)
 
-        # Sentinel stretch
-        self._acct_sentinel = QWidget()
-        self._acct_sentinel.setFixedHeight(0)
-        self.acct_tx_lay.addWidget(self._acct_sentinel)
+        # Bottom stretch keeps cards pinned to top
+        self.acct_tx_lay.addStretch()
 
         # Connect scroll for infinite loading
         scroll = self._right_stack.widget(1)
@@ -343,6 +342,7 @@ class BalancesTab(QWidget):
                 self.acct_tx_lay.insertWidget(insert_at, hdr); insert_at += 1
                 self._acct_last_day = dk
             card = _tx_card(tx, self._acct_bal_map.get(tx["id"]))
+            card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             self.acct_tx_lay.insertWidget(insert_at, card); insert_at += 1
 
         self._acct_loading = False
@@ -506,6 +506,7 @@ class BalancesTab(QWidget):
                     except:
                         due_disp = saved_due
                     cl.addWidget(QLabel(f"<span style='color:{C['text3']};font-size:11px;'>Due: {due_disp}</span>"))
+                ch.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
                 self.acct_tx_lay.addWidget(ch)
 
                 # Transactions within cycle
@@ -522,14 +523,18 @@ class BalancesTab(QWidget):
                     except:
                         self.acct_tx_lay.addWidget(_day_header(d_str))
                     for tx in day_txns:
-                        self.acct_tx_lay.addWidget(_tx_card(tx))
+                        c = _tx_card(tx)
+                        c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                        self.acct_tx_lay.addWidget(c)
 
             if unassigned:
                 lbl = QLabel("<b>Earlier Transactions</b>")
                 lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;font-weight:700;padding:8px 0 4px 0;background:transparent;border:none;")
                 self.acct_tx_lay.addWidget(lbl)
                 for tx in sorted(unassigned, key=lambda t: t["tx_date"], reverse=True):
-                    self.acct_tx_lay.addWidget(_tx_card(tx))
+                    c = _tx_card(tx)
+                    c.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                    self.acct_tx_lay.addWidget(c)
 
         self.acct_tx_lay.addStretch()
 
