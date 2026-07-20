@@ -15,7 +15,7 @@ def watermark_text():
 
 def export_monthly_pdf(filepath, month_name, year,
                        summary, acct_data, acct_bal_map, all_accts, transactions,
-                       chart_img_bytes=None):
+                       chart_img_bytes=None, report_type="monthly"):
     """
     Parameters (all raw numbers, no pre-formatting):
         summary       : dict with keys credits, debits, net, transfers (floats)
@@ -23,6 +23,7 @@ def export_monthly_pdf(filepath, month_name, year,
         acct_bal_map  : dict  account_id -> {"start": float, "end": float}
         all_accts     : dict  account_id -> account row dict
         transactions  : list  of transaction dicts (from repo)
+        report_type   : "monthly" or "filtered"
     """
     try:
         from reportlab.lib.pagesizes import A4
@@ -66,7 +67,10 @@ def export_monthly_pdf(filepath, month_name, year,
             canvas.drawString(30, ph - 28, 'Finance Manager')
             canvas.setFont('Helvetica', 9)
             # Truncate right header to prevent bleeding
-            hdr_right = f'{month_name} {year} Statement'
+            if report_type == "filtered":
+                hdr_right = f'Filtered: {month_name}'
+            else:
+                hdr_right = f'{month_name} {year} Statement'
             if len(hdr_right) > 60:
                 hdr_right = hdr_right[:57] + '...'
             canvas.drawRightString(pw - 30, ph - 28, hdr_right)
@@ -132,7 +136,8 @@ def export_monthly_pdf(filepath, month_name, year,
         # SECTION 1: MONTHLY SUMMARY
         # ════════════════════════════════════════
         story.append(Spacer(1, 10))
-        story.append(section_hdr(f"Monthly Summary — {month_name} {year}"))
+        section_title = f"Summary — {month_name}" if report_type == "filtered" else f"Monthly Summary — {month_name} {year}"
+        story.append(section_hdr(section_title))
         story.append(Spacer(1, 14))
 
         cr = summary.get("credits", 0)
@@ -236,7 +241,8 @@ def export_monthly_pdf(filepath, month_name, year,
         # ════════════════════════════════════════
         story.append(PageBreak())
         story.append(Spacer(1, 10))
-        story.append(section_hdr(f"Data Visualization — {month_name} {year}", "#059669"))
+        viz_title = f"Data Visualization — {month_name}" if report_type == "filtered" else f"Data Visualization — {month_name} {year}"
+        story.append(section_hdr(viz_title, "#059669"))
         story.append(Spacer(1, 12))
 
         cats = {}
@@ -303,7 +309,8 @@ def export_monthly_pdf(filepath, month_name, year,
         # ════════════════════════════════════════
         story.append(PageBreak())
         story.append(Spacer(1, 10))
-        story.append(section_hdr(f"Transaction Details — {month_name} {year}", "#F59E0B"))
+        tx_section_title = f"Transaction Details — {month_name}" if report_type == "filtered" else f"Transaction Details — {month_name} {year}"
+        story.append(section_hdr(tx_section_title, "#F59E0B"))
         story.append(Spacer(1, 8))
         story.append(Paragraph(f'<font size="10" color="#6B7280">{len(transactions)} transactions</font>', S['Normal']))
         story.append(Spacer(1, 8))
@@ -315,16 +322,12 @@ def export_monthly_pdf(filepath, month_name, year,
             if d not in by_date: by_date[d] = []
             by_date[d].append(tx)
 
-        cat_colors_map = {
-            "food_dining": "#F59E0B", "transport": "#3B82F6", "shopping": "#EC4899",
-            "bills_utilities": "#8B5CF6", "rent": "#A855F7", "salary": "#10B981",
-            "investment": "#6366F1", "health": "#EF4444", "education": "#06B6D4",
-            "entertainment": "#F472B6", "transfer": "#6B7280", "other": "#9CA3AF",
+        cat_icons = {
+            "food_dining": "\U0001f354", "transport": "\U0001f697", "shopping": "\U0001f6cd\ufe0f",
+            "bills_utilities": "\U0001f4a1", "rent": "\U0001f3e0", "salary": "\U0001f4b0",
+            "investment": "\U0001f4c8", "health": "\U0001f3e5", "education": "\U0001f4da",
+            "entertainment": "\U0001f3ac", "transfer": "\U0001f504", "other": "\U0001f4cb",
         }
-
-        # Column widths: text gets 60%, amount gets 40% — with Paragraph wrapping
-        tx_cw_text = usable * 0.60
-        tx_cw_amt = usable * 0.40
 
         for tx_date, txns_day in by_date.items():
             try:
@@ -334,6 +337,7 @@ def export_monthly_pdf(filepath, month_name, year,
             except:
                 day_label = tx_date
 
+            # Date header
             dh = Table([[Paragraph(f'<b><font color="white" size="10">{day_label}</font></b>', S['Normal'])]],
                        colWidths=[usable])
             dh.setStyle(TableStyle([
@@ -348,45 +352,55 @@ def export_monthly_pdf(filepath, month_name, year,
                 tx_type = tx.get("tx_type", "")
                 kind = tx.get("transaction_kind", "REGULAR")
                 amount = tx.get("amount", 0)
-                cat_id = tx.get("category") or "other"
-                cat_color = cat_colors_map.get(cat_id, "#9CA3AF")
 
                 if kind == "TRANSFER":
-                    tc = "#6B7280"
+                    amt_color = colors.HexColor('#6B7280')
                     prefix = "\u2212" if tx_type == "DEBIT" else "+"
-                    type_text = f"Transfer ({tx_type})"
+                    type_label = f"Transfer ({tx_type})"
                 elif tx_type == "DEBIT":
-                    tc = "#EF4444"; prefix = "\u2212"
-                    type_text = "DEBIT"
+                    amt_color = colors.HexColor('#EF4444')
+                    prefix = "\u2212"
+                    type_label = "DEBIT"
                 else:
-                    tc = "#059669"; prefix = "+"
-                    type_text = "CREDIT"
+                    amt_color = colors.HexColor('#059669')
+                    prefix = "+"
+                    type_label = "CREDIT"
 
-                acct = tx.get("account_name") or tx.get("account_id", "")
-                cat = tx.get("cat_name") or "\u2014"
-                method = tx.get("method_name") or tx.get("pay_method", "")
+                cat_id = tx.get("category") or "other"
+                icon = cat_icons.get(cat_id, "\U0001f4cb")
                 person = tx.get("person_org") or ""
                 desc = tx.get("description") or ""
+                if person and desc: main_text = f"{person} \u2014 {desc}"
+                elif person: main_text = person
+                elif desc: main_text = desc
+                else: main_text = "No description"
 
-                main_text = f"<b>{person}</b> \u2014 {desc}" if person and desc else (person or desc or "<i>No description</i>")
-                sub_text = f"{cat} \u00b7 {method} \u00b7 {acct}"
+                cat_name = tx.get("cat_name") or "\u2014"
+                method_name = tx.get("method_name") or "\u2014"
+                acct_name = tx.get("account_name") or "\u2014"
 
-                # Use Paragraph for wrapping — prevents cell overflow
-                card_data = [
-                    [Paragraph(f'<font size="11">{main_text}</font>', WRAP),
-                     Paragraph(f'<b><font size="14" color="{tc}">{prefix}{fmt(amount)}</font></b>', WRAP_SM_R)],
-                    [Paragraph(f'<font size="9" color="#6B7280">{sub_text}</font>', WRAP_SM),
-                     Paragraph(f'<font size="9" color="{tc}"><b>{type_text}</b></font>', WRAP_SM_R)],
-                ]
-                card = Table(card_data, colWidths=[tx_cw_text, tx_cw_amt])
+                # Card-style: left description + right amount
+                card_data = [[
+                    Paragraph(
+                        f'<font size="11"><b>{icon}  {main_text}</b></font><br/>'
+                        f'<font size="9" color="#6B7280">{cat_name}  \u00b7  {method_name}  \u00b7  {acct_name}</font>',
+                        WRAP),
+                    Paragraph(
+                        f'<font size="13"><b>{prefix}{fmt(amount)}</b></font><br/>'
+                        f'<font size="9" color="#6B7280"><b>{type_label}</b></font>',
+                        WRAP_SM_R),
+                ]]
+                card = Table(card_data, colWidths=[usable - 120, 110])
                 card.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
                     ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
-                    ('LINEAFTER', (0, 0), (0, -1), 4, colors.HexColor(cat_color)),
-                    ('PADDING', (0, 0), (-1, -1), 10),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 12),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-                    ('ROUNDEDCORNERS', [8, 8, 8, 8]),
+                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ('LINEBEFORE', (0, 0), (0, -1), 3, amt_color),
                 ]))
                 story.append(KeepTogether([card, Spacer(1, 4)]))
 
@@ -404,7 +418,7 @@ def export_monthly_pdf(filepath, month_name, year,
             qr_data = (
                 f"Finance Manager Statement\n"
                 f"Doc ID: {doc_id}\n"
-                f"Period: {month_name} {year}\n"
+                f"Period: {month_name}\n" if report_type == "filtered" else f"Period: {month_name} {year}\n"
                 f"Transactions: {len(transactions)}\n"
                 f"Total Credits: {summary.get('credits', 0):,.2f}\n"
                 f"Total Debits: {summary.get('debits', 0):,.2f}\n"
@@ -433,7 +447,7 @@ def export_monthly_pdf(filepath, month_name, year,
             ['Content Hash (SHA-256)', c_hash],
             ['Generated', ts],
             ['Transactions', str(len(transactions))],
-            ['Period', f'{month_name} {year}'],
+            ['Period', f'{month_name}'] if report_type == 'filtered' else ['Period', f'{month_name} {year}'],
         ]
         vtbl = Table(verify_data, colWidths=[3*inch, 4*inch])
         vtbl.setStyle(TableStyle([

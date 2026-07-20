@@ -1018,10 +1018,19 @@ class DatabaseTab(QWidget):
         self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
         row.addWidget(self.fstk, 1)
 
+        # Load button
+        lb = QPushButton("⟳ Load")
+        lb.setObjectName("primary")
+        lb.setFixedSize(70, 34)
+        lb.setCursor(Qt.PointingHandCursor)
+        lb.clicked.connect(self._load_filtered)
+        row.addWidget(lb)
+
         # Add button
         ab = QPushButton("+ Add")
-        ab.setObjectName("primary")
         ab.setFixedSize(70, 34)
+        ab.setStyleSheet(f"QPushButton{{background:{C['surface']};color:{C['text2']};border:1px solid {C['border']};border-radius:8px;font-size:13px;font-weight:600;}}QPushButton:hover{{border-color:{C['accent']};color:{C['accent']};}}")
+        ab.setCursor(Qt.PointingHandCursor)
         ab.clicked.connect(self._add_f)
         row.addWidget(ab)
 
@@ -1350,7 +1359,8 @@ class DatabaseTab(QWidget):
         from services.report_service import export_monthly_pdf
         doc_id = export_monthly_pdf(
             filepath, f"Filtered ({period})", filter_str,
-            summary, acct_data, acct_bal_map, all_accts, txns)
+            summary, acct_data, acct_bal_map, all_accts, txns,
+            report_type="filtered")
         if doc_id:
             self._show_pdf_done(filepath, doc_id)
         else:
