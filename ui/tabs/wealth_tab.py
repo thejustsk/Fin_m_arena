@@ -140,7 +140,7 @@ def _wealth_card(title, subtitle, amount_text, badge_text, badge_color,
     s.setWordWrap(True)
     mid.addWidget(s, 1)
     a = QLabel(amount_text)
-    a.setStyleSheet(f"font-size:15px;font-weight:800;color:{C['text']};")
+    a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
     mid.addWidget(a)
     lay.addLayout(mid)
     if progress_pct is not None:
@@ -158,6 +158,7 @@ def _wealth_card(title, subtitle, amount_text, badge_text, badge_color,
         lay.addWidget(bar_bg)
     if extra_line:
         e = QLabel(extra_line)
+        e.setTextFormat(Qt.RichText)
         e.setStyleSheet(f"font-size:11px;color:{C['text3']};")
         lay.addWidget(e)
     if on_click:
@@ -557,6 +558,7 @@ class LoansGivePage(_FunctionPage):
         self.lg_loan_desc.setPlaceholderText("Optional note")
         give_btn = QPushButton("\U0001f91d  Give Loan")
         give_btn.setObjectName("primary")
+        give_btn.setAutoDefault(True)
         give_btn.clicked.connect(self._give_loan)
         f1.addRow("Borrower *", _entity_row(self.lg_loan_borrower, self._add_borrower_dlg))
         f1.addRow("Loan Amount *", self.lg_loan_amount)
@@ -589,6 +591,7 @@ class LoansGivePage(_FunctionPage):
         self.lg_rep_desc.setPlaceholderText("Optional note")
         rep_btn = QPushButton("\U0001f4b0  Log Repayment")
         rep_btn.setObjectName("primary")
+        rep_btn.setAutoDefault(True)
         rep_btn.clicked.connect(self._log_repayment)
         f2.addRow("Loan *", self.lg_rep_loan)
         f2.addRow("", self.lg_rep_pending_lbl)
@@ -638,9 +641,12 @@ class LoansGivePage(_FunctionPage):
         loan = self.repos["loans"].get_loan(lid)
         if not loan:
             return
-        paid = self.repos["loans"].total_repaid(lid)
-        pending = loan["loan_amount"] - paid
-        self.lg_rep_pending_lbl.setText(f"Pending: {fmt_money(pending)} of {fmt_money(loan['loan_amount'])}")
+        a = self._analysis(loan)
+        self.lg_rep_pending_lbl.setText(
+            f"Outstanding: {fmt_money(a['current_value'])}  {MDOT}  "
+            f"Principal: {fmt_money(loan['loan_amount'])}  {MDOT}  "
+            f"Paid: {fmt_money(a['total_paid'])}"
+        )
 
     def _give_loan(self):
         bid = self.lg_loan_borrower.get_data()
@@ -678,6 +684,15 @@ class LoansGivePage(_FunctionPage):
             QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
             return
         loan = self.repos["loans"].get_loan(lid)
+        if not loan:
+            return
+        a = self._analysis(loan)
+        if amount > a["current_value"] + 0.01:
+            QMessageBox.warning(self, "Amount Exceeds Outstanding",
+                f"Entered: {fmt_money(amount)}\n"
+                f"Outstanding: {fmt_money(a['current_value'])}\n"
+                f"Please enter a valid amount.")
+            return
         account_id = self.lg_rep_account.currentData()
         method = self.lg_rep_method.currentData()
         txn_id = _log_ledger_txn(
@@ -771,12 +786,18 @@ class LoansGivePage(_FunctionPage):
             mth = l.get("interest_method") or "SIMPLE"
             mth_tag = "SI" if mth == "SIMPLE" else "CI"
             rate_tag = f"{l.get('interest_rate') or 0}% {mth_tag}" if (l.get("interest_rate") or 0) > 0 else "Interest-Free"
+            extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
+                     f"{fmt_money(a['current_value'])}</span>  "
+                     f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
+                     f"<span style='font-size:11px;color:{C['text3']};'>"
+                     f"Interest: {fmt_money(a['total_interest_accrued'])}  {MDOT}  "
+                     f"Paid: {fmt_money(a['total_paid'])}</span>")
             card = _wealth_card(
                 title=l["borrower_name"],
                 subtitle=f"Given {l['start_date']} {MDOT} Due {l['due_date'] or EM_DASH} {MDOT} {rate_tag}",
-                amount_text=fmt_money(a["current_value"]) + " outstanding", badge_text=l["status"],
-                badge_color=color, progress_pct=pct,
-                extra_line=f"Loan: {fmt_money(l['loan_amount'])} {MDOT} Interest: {fmt_money(a['total_interest_accrued'])} {MDOT} Paid: {fmt_money(a['total_paid'])}",
+                amount_text=fmt_money(l["loan_amount"]) + "  Principal",
+                badge_text=l["status"], badge_color=color,
+                progress_pct=pct, extra_line=extra,
                 on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
             self._list_lay.addWidget(card)
@@ -872,6 +893,7 @@ class LoansTakePage(_FunctionPage):
                 w.valueChanged.connect(self._update_emi)
         take_btn = QPushButton("\U0001f3db\ufe0f  Take Loan")
         take_btn.setObjectName("primary")
+        take_btn.setAutoDefault(True)
         take_btn.clicked.connect(self._take_loan)
         f1.addRow("Lender *", _entity_row(self.lt_loan_lender, self._add_lender_dlg))
         f1.addRow("Interest Method", self.lt_loan_method_type)
@@ -912,6 +934,7 @@ class LoansTakePage(_FunctionPage):
         self.lt_rep_desc.setPlaceholderText("Optional note")
         pay_btn = QPushButton("\U0001f4b8  Log EMI Payment")
         pay_btn.setObjectName("primary")
+        pay_btn.setAutoDefault(True)
         pay_btn.clicked.connect(self._log_emi)
         f2.addRow("Loan *", self.lt_rep_loan)
         f2.addRow("", self.lt_rep_info_lbl)
@@ -1060,6 +1083,15 @@ class LoansTakePage(_FunctionPage):
             QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
             return
         loan = self.repos["borrowed"].get_loan(lid)
+        if not loan:
+            return
+        a = self._analysis(loan)
+        if amount > a["current_value"] + 0.01:
+            QMessageBox.warning(self, "Amount Exceeds Outstanding",
+                f"Entered: {fmt_money(amount)}\n"
+                f"Outstanding: {fmt_money(a['current_value'])}\n"
+                f"Please enter a valid amount.")
+            return
         account_id = self.lt_rep_account.currentData()
         method = self.lt_rep_method.currentData()
         desc_extra = self.lt_rep_type.currentText()
@@ -1098,7 +1130,7 @@ class LoansTakePage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         loans = list(self._list_data)
-        active = [l for l in loans if l["status"] not in ("CLOSED", "REPAID")]
+        active = [l for l in loans if l["status"] != "CLOSED"]
         total_outstanding = 0
         for l in active:
             a = self._analysis(l)
@@ -1139,14 +1171,19 @@ class LoansTakePage(_FunctionPage):
             ci_extra = f" {freq_short}" if mth == "COMPOUND" else ""
             sub = (f"Rate {l['interest_rate']}% {mth_tag}{ci_extra} {MDOT} "
                    f"EMI {fmt_money(a['original_emi'])} {MDOT} Due {l['due_date'] or EM_DASH}")
-            amount_text = fmt_money(a["current_value"]) + " outstanding"
-            extra = (f"Updated EMI: {fmt_money(a['updated_emi'])} {MDOT} "
-                     f"Paid: {fmt_money(a['total_paid'])} {MDOT} "
-                     f"Principal: {fmt_money(l['principal_amount'])}")
+            pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
+            extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
+                     f"{fmt_money(a['current_value'])}</span>  "
+                     f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
+                     f"<span style='font-size:11px;color:{C['text3']};'>"
+                     f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
+                     f"Paid: {fmt_money(a['total_paid'])}  {MDOT}  "
+                     f"Interest: {fmt_money(a['total_interest_accrued'])}</span>")
             card = _wealth_card(
                 title=l["lender_name"], subtitle=sub,
-                amount_text=amount_text, badge_text=l["status"],
-                badge_color=color, extra_line=extra,
+                amount_text=fmt_money(l["principal_amount"]) + "  Principal",
+                badge_text=l["status"], badge_color=color,
+                progress_pct=pct, extra_line=extra,
                 on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
             self._list_lay.addWidget(card)
@@ -1158,12 +1195,51 @@ class LoansTakePage(_FunctionPage):
         repayments = self.repos["borrowed"].get_repayments(loan_id)
         months = self._loan_months(loan)
         freq = loan.get("interest_type") or "ANNUAL"
-        amort = LoanService.amortize(loan["principal_amount"], loan["interest_rate"] or 0, months, freq)
+        mthd = loan.get("interest_method") or "COMPOUND"
         a = self._analysis(loan)
+
+        # ── build amortization with actual payments ──────────────
+        principal = loan["principal_amount"]
+        rate = loan["interest_rate"] or 0
+        if mthd == "SIMPLE":
+            # simple interest: flat interest per month on original principal
+            emi_val = LoanService.simple_emi(principal, rate, months)
+            int_per_month = round(principal * rate / 100 / 12, 2) if rate > 0 else 0
+            bal = principal
+            schedule = []
+            for m in range(1, months + 1):
+                prin_part = round(emi_val - int_per_month, 2)
+                bal = max(bal - prin_part, 0)
+                schedule.append({"month": m, "emi": emi_val, "principal": prin_part,
+                                 "interest": int_per_month, "balance": round(bal, 2)})
+        else:
+            schedule = LoanService.amortize(principal, rate, months, freq)
+
+        start = date.fromisoformat(loan["start_date"])
+        r = LoanService._monthly_rate(rate, freq) if mthd == "COMPOUND" else 0
+        si_int = round(principal * rate / 100 / 12, 2) if mthd == "SIMPLE" and rate > 0 else 0
+        actual_bal = principal
+        rows = []
+        for entry in schedule:
+            mn = entry["month"]
+            m_start = _add_months(start, mn - 1)
+            m_end = _add_months(start, mn)
+            ms, me = m_start.isoformat(), m_end.isoformat()
+            month_paid = sum(p["amount_paid"] for p in repayments if ms <= p["payment_date"] < me)
+            # interest: compound uses reducing balance, simple uses flat
+            interest = actual_bal * r if mthd == "COMPOUND" else si_int
+            actual_bal = max(actual_bal + interest - month_paid, 0)
+            status = "Paid" if month_paid >= entry["emi"] - 0.5 else ("Partial" if month_paid > 0 else "Pending")
+            rows.append({
+                "month": mn, "date": m_start.strftime("%b %y"),
+                "p_emi": entry["emi"], "a_paid": month_paid,
+                "p_bal": entry["balance"], "a_bal": round(actual_bal, 2),
+                "status": status,
+            })
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Loan from {loan['lender_name']}")
-        dlg.setMinimumWidth(580)
+        dlg.setMinimumWidth(720)
         lay = QVBoxLayout(dlg)
 
         # header
@@ -1174,8 +1250,7 @@ class LoansTakePage(_FunctionPage):
         hdr.addWidget(_badge(loan["status"], status_color("liability", loan["status"])))
         lay.addLayout(hdr)
 
-        # info grid
-        mth_label = "Simple" if (loan.get("interest_method") or "COMPOUND") == "SIMPLE" else f"Compound ({freq})"
+        mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
         info = QLabel(
             f"Principal: {fmt_money(loan['principal_amount'])}  {MDOT}  "
             f"Rate: {loan['interest_rate']}%  {mth_label}  {MDOT}  "
@@ -1187,7 +1262,6 @@ class LoansTakePage(_FunctionPage):
         info.setWordWrap(True)
         lay.addWidget(info)
 
-        # analysis row
         a_lbl = QLabel(
             f"Current Value: {fmt_money(a['current_value'])}  {MDOT}  "
             f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
@@ -1206,9 +1280,28 @@ class LoansTakePage(_FunctionPage):
             d.setWordWrap(True)
             lay.addWidget(d)
 
-        # tabs: repayments + amortization
+        # tabs
         tabs = QTabWidget()
-        # repayments table
+        # Tab 1: amortization with actuals
+        atable = QTableWidget()
+        atable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        atable.verticalHeader().setVisible(False)
+        atable.setColumnCount(7)
+        atable.setHorizontalHeaderLabels(["Month", "Date", "Planned EMI", "Actual Paid", "Status", "Planned Bal", "Actual Bal"])
+        atable.setRowCount(len(rows))
+        for i, rw in enumerate(rows):
+            atable.setItem(i, 0, QTableWidgetItem(str(rw["month"])))
+            atable.setItem(i, 1, QTableWidgetItem(rw["date"]))
+            atable.setItem(i, 2, QTableWidgetItem(fmt_money(rw["p_emi"])))
+            atable.setItem(i, 3, QTableWidgetItem(fmt_money(rw["a_paid"])))
+            st_item = QTableWidgetItem(rw["status"])
+            st_item.setForeground(Qt.green if rw["status"] == "Paid" else (Qt.yellow if rw["status"] == "Partial" else Qt.gray))
+            atable.setItem(i, 4, st_item)
+            atable.setItem(i, 5, QTableWidgetItem(fmt_money(rw["p_bal"])))
+            atable.setItem(i, 6, QTableWidgetItem(fmt_money(rw["a_bal"])))
+        atable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        tabs.addTab(atable, "Amortization + Actuals")
+        # Tab 2: repayment log
         rtable = QTableWidget()
         rtable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         rtable.verticalHeader().setVisible(False)
@@ -1216,34 +1309,25 @@ class LoansTakePage(_FunctionPage):
         rtable.setHorizontalHeaderLabels(["Date", "Amount", "Description"])
         rtable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         rtable.setRowCount(len(repayments))
-        for i, r in enumerate(repayments):
-            rtable.setItem(i, 0, QTableWidgetItem(r.get("payment_date", "")))
-            rtable.setItem(i, 1, QTableWidgetItem(fmt_money(r["amount_paid"])))
-            rtable.setItem(i, 2, QTableWidgetItem(r.get("description") or ""))
+        for i, rp in enumerate(repayments):
+            rtable.setItem(i, 0, QTableWidgetItem(rp.get("payment_date", "")))
+            rtable.setItem(i, 1, QTableWidgetItem(fmt_money(rp["amount_paid"])))
+            rtable.setItem(i, 2, QTableWidgetItem(rp.get("description") or ""))
         if not repayments:
             rtable.setRowCount(1)
             rtable.setItem(0, 0, QTableWidgetItem("No repayments logged yet."))
             rtable.setSpan(0, 0, 1, 3)
         tabs.addTab(rtable, "Repayment Log")
-        # amortization
-        atable = QTableWidget()
-        atable.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        atable.verticalHeader().setVisible(False)
-        atable.setColumnCount(5)
-        atable.setHorizontalHeaderLabels(["Month", "EMI", "Principal", "Interest", "Balance"])
-        atable.setRowCount(len(amort))
-        for i, row in enumerate(amort):
-            atable.setItem(i, 0, QTableWidgetItem(str(row["month"])))
-            atable.setItem(i, 1, QTableWidgetItem(fmt_money(row["emi"])))
-            atable.setItem(i, 2, QTableWidgetItem(fmt_money(row["principal"])))
-            atable.setItem(i, 3, QTableWidgetItem(fmt_money(row["interest"])))
-            atable.setItem(i, 4, QTableWidgetItem(fmt_money(row["balance"])))
-        tabs.addTab(atable, "Amortization Schedule")
         lay.addWidget(tabs, 1)
 
         # buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        if loan["status"] == "OVERDUE":
+            plan_btn = QPushButton("\U0001f4c5  Plan Closure")
+            plan_btn.setToolTip("Calculate updated EMI for a target closure date")
+            plan_btn.clicked.connect(lambda: self._plan_closure_dlg(loan, a))
+            btn_row.addWidget(plan_btn)
         if loan["status"] == "REPAID":
             close_btn = QPushButton("\u2705 Mark as Closed")
             close_btn.setObjectName("primary")
@@ -1253,6 +1337,63 @@ class LoansTakePage(_FunctionPage):
         ok.clicked.connect(dlg.accept)
         btn_row.addWidget(ok)
         lay.addLayout(btn_row)
+        dlg.exec_()
+
+    def _plan_closure_dlg(self, loan, a):
+        """Dialog to plan closure for overdue loan."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Plan Loan Closure")
+        dlg.setMinimumWidth(420)
+        lay = QVBoxLayout(dlg)
+
+        info = QLabel(
+            f"Outstanding: {fmt_money(a['current_value'])}\n"
+            f"Original EMI: {fmt_money(a['original_emi'])}  {MDOT}  "
+            f"Elapsed: {a['months_elapsed']} months  {MDOT}  "
+            f"Paid: {fmt_money(a['total_paid'])}"
+        )
+        info.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        form = QFormLayout()
+        closure_date = QDateEdit(QDate.currentDate().addMonths(6))
+        closure_date.setCalendarPopup(True)
+        form.addRow("Target Closure Date", closure_date)
+        lay.addLayout(form)
+
+        result_lbl = QLabel("")
+        result_lbl.setStyleSheet(f"color:{C['accent']};font-weight:800;font-size:14px;")
+        result_lbl.setWordWrap(True)
+        lay.addWidget(result_lbl)
+
+        def calc():
+            target = closure_date.date().toPyDate()
+            today = date.today()
+            rem_months = max(1, round((target - today).days / 30.44))
+            rate = loan["interest_rate"] or 0
+            fq = loan.get("interest_type") or "ANNUAL"
+            md = loan.get("interest_method") or "COMPOUND"
+            cv = a["current_value"]
+            if md == "SIMPLE":
+                new_emi = round(cv / rem_months, 2) if rem_months else 0
+            else:
+                new_emi = LoanService.compound_emi(cv, rate, rem_months, fq)
+            total = round(new_emi * rem_months, 2)
+            result_lbl.setText(
+                f"Updated EMI: {fmt_money(new_emi)}/month\n"
+                f"Remaining Months: {rem_months}\n"
+                f"Total to Repay: {fmt_money(total)}\n"
+                f"Interest Component: {fmt_money(max(total - cv, 0))}"
+            )
+
+        closure_date.dateChanged.connect(calc)
+        calc()
+        lay.addWidget(QLabel("Adjust the date above to see updated EMI."))
+
+        ok = QPushButton("Close")
+        ok.clicked.connect(dlg.accept)
+        lay.addWidget(ok)
         dlg.exec_()
 
     def _mark_closed(self, loan_id, dlg=None):
@@ -1396,6 +1537,7 @@ class FDGivePage(_FunctionPage):
         self.fd_maturity.dateChanged.connect(self._update_maturity)
         create_btn = QPushButton("\U0001f3e6  Create Fixed Deposit")
         create_btn.setObjectName("primary")
+        create_btn.setAutoDefault(True)
         create_btn.clicked.connect(self._create_fd)
         f.addRow("Bank Account *", self.fd_account)
         f.addRow("Principal *", self.fd_principal)
@@ -1658,6 +1800,7 @@ class FDOthersPage(_FunctionPage):
         self.fo_dep_desc.setPlaceholderText("Optional note")
         take_btn = QPushButton("\U0001f9fe  Record Deposit")
         take_btn.setObjectName("primary")
+        take_btn.setAutoDefault(True)
         take_btn.clicked.connect(self._create_deposit)
         f1.addRow("Depositor *", _entity_row(self.fo_dep_depositor, self._add_depositor_dlg))
         f1.addRow("Amount *", self.fo_dep_amount)
@@ -1691,6 +1834,7 @@ class FDOthersPage(_FunctionPage):
         self.fo_rep_desc.setPlaceholderText("Optional note")
         rep_btn = QPushButton("\U0001f4b8  Log Repayment")
         rep_btn.setObjectName("primary")
+        rep_btn.setAutoDefault(True)
         rep_btn.clicked.connect(self._log_repayment)
         f2.addRow("Deposit *", self.fo_rep_deposit)
         f2.addRow("", self.fo_rep_pending_lbl)
@@ -1932,6 +2076,7 @@ class MFPage(_FunctionPage):
         self.mf_buy_method = _method_combo(self.repos["lookups"])
         buy_btn = QPushButton("\U0001f4c8  Log Purchase")
         buy_btn.setObjectName("primary")
+        buy_btn.setAutoDefault(True)
         buy_btn.clicked.connect(self._log_purchase)
         f1.addRow("Scheme *", _entity_row(self.mf_buy_scheme, self._add_scheme_dlg))
         f1.addRow("Type", self.mf_buy_type)
@@ -1972,6 +2117,7 @@ class MFPage(_FunctionPage):
         self.mf_sell_method = _method_combo(self.repos["lookups"])
         sell_btn = QPushButton("\U0001f4b5  Log Redemption")
         sell_btn.setObjectName("primary")
+        sell_btn.setAutoDefault(True)
         sell_btn.clicked.connect(self._log_redemption)
         f2.addRow("Scheme *", self.mf_sell_scheme)
         f2.addRow("", self.mf_holdings_lbl)
