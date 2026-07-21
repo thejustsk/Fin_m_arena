@@ -287,6 +287,15 @@ def run_migrations(db):
         ("loans", "interest_rate", "REAL DEFAULT 0"),
         ("loans", "interest_method", "TEXT DEFAULT 'SIMPLE'"),
         ("deposits_from_others", "interest_method", "TEXT DEFAULT 'SIMPLE'"),
+        ("deposits_from_others", "interest_type", "TEXT DEFAULT 'ANNUAL'"),
+        ("fixed_deposits", "interest_method", "TEXT DEFAULT 'COMPOUND'"),
+        ("fixed_deposits", "interest_type", "TEXT DEFAULT 'QUARTERLY'"),
+        ("borrowed_loans", "emi_type", "TEXT DEFAULT 'EMI'"),
+        ("borrowed_loans", "amort_enabled", "INTEGER DEFAULT 1"),
+        ("borrowed_loans", "interest_start_date", "TEXT"),
+        ("borrowed_loans", "target_closure_date", "TEXT"),
+        ("borrowed_loans", "amort_start_date", "TEXT"),
+        ("borrowed_loans", "amort_tenure", "INTEGER"),
     ]
     for table, col, typedef in _safe_cols:
         try:

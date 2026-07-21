@@ -465,3 +465,252 @@ def export_monthly_pdf(filepath, month_name, year,
 
     except ImportError:
         return None
+
+
+def export_detail_pdf(filepath, title, status, info_pairs, analysis_pairs, sections=None):
+    """Generic detail PDF with security features (QR, hash, watermark)."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_RIGHT
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                         Paragraph, Spacer, PageBreak, KeepTogether)
+
+        pw, ph = A4
+        usable = pw - 72
+        doc_id = generate_doc_id()
+        ts = datetime.now().strftime('%d %b %Y at %I:%M %p')
+        raw = "".join(str(v) for _, v in info_pairs) + doc_id + ts
+        c_hash = content_hash(raw)
+        wm = watermark_text()
+        doc = SimpleDocTemplate(filepath, pagesize=A4, topMargin=65, bottomMargin=70,
+                                leftMargin=36, rightMargin=36)
+        story = []
+        S = getSampleStyleSheet()
+
+        def ps(n, **kw):
+            return ParagraphStyle(n, parent=S['Normal'], **kw)
+
+        WRAP = ps('dw', fontSize=10, leading=13)
+        WRAP_SM_R = ps('dsmr', fontSize=9, leading=11, alignment=TA_RIGHT)
+        ST_COLORS = {'ACTIVE': '#4F46E5', 'OVERDUE': '#DC2626', 'PARTIALLY_PAID': '#D97706',
+                     'REPAID': '#059669', 'CLOSED': '#059669', 'MATURED': '#059669',
+                     'WITHDRAWN': '#6B7280', 'CLEARED': '#059669'}
+
+        def _header(canvas, doc):
+            canvas.saveState()
+            canvas.setFillColor(colors.HexColor('#4F46E5'))
+            canvas.rect(0, ph - 50, pw, 50, fill=True, stroke=False)
+            canvas.setFillColor(colors.white)
+            canvas.setFont('Helvetica-Bold', 15)
+            canvas.drawString(30, ph - 28, 'Finance Manager')
+            canvas.setFont('Helvetica', 9)
+            r = title[:57] + '...' if len(title) > 60 else title
+            canvas.drawRightString(pw - 30, ph - 28, r)
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(colors.Color(1, 1, 1, 0.7))
+            canvas.drawString(30, ph - 14, f'Doc ID: {doc_id}')
+            canvas.drawRightString(pw - 30, ph - 14, f'Generated: {ts}')
+            canvas.restoreState()
+
+        def _footer(canvas, doc):
+            canvas.saveState()
+            canvas.setFont('Helvetica', 36)
+            canvas.setFillAlpha(0.06)
+            canvas.setFillColor(colors.HexColor('#9CA3AF'))
+            canvas.translate(pw / 2, ph / 2)
+            canvas.rotate(45)
+            canvas.drawCentredString(0, 0, wm)
+            canvas.restoreState()
+            canvas.saveState()
+            canvas.setFillAlpha(1.0)
+            canvas.setStrokeColor(colors.HexColor('#E5E7EB'))
+            canvas.line(36, 52, pw - 36, 52)
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(colors.HexColor('#9CA3AF'))
+            canvas.drawCentredString(pw / 2, 38, f'Page {doc.page}')
+            canvas.drawString(36, 38, f'Hash: {c_hash}')
+            canvas.drawRightString(pw - 36, 38, f'Doc ID: {doc_id}')
+            canvas.setFont('Helvetica', 6)
+            canvas.setFillColor(colors.HexColor('#D1D5DB'))
+            canvas.drawCentredString(pw / 2, 24, 'Confidential \u2014 Finance Manager v3.0')
+            canvas.restoreState()
+
+        def _on_page(canvas, doc):
+            _header(canvas, doc)
+            _footer(canvas, doc)
+
+        def shdr(text, color="#4F46E5"):
+            t = Table([[Paragraph(f'<b><font color="white" size="13">{text}</font></b>', S['Normal'])]],
+                      colWidths=[usable])
+            t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor(color)),
+                                    ('PADDING', (0, 0), (-1, -1), 12), ('ROUNDEDCORNERS', [8, 8, 8, 8])]))
+            return t
+
+        def fmt(v):
+            return f"{v:,.2f}" if v is not None else "0.00"
+
+        # Title + status badge
+        story.append(Spacer(1, 10))
+        sc = ST_COLORS.get((status or '').upper(), '#6B7280')
+        tr = Table([[
+            Paragraph(f'<b><font size="16" color="#111827">{title}</font></b>', S['Normal']),
+            Paragraph(f'<font color="white" size="11"><b>{status}</b></font>', S['Normal']),
+        ]], colWidths=[usable - 120, 120])
+        tr.setStyle(TableStyle([('BACKGROUND', (1, 0), (1, 0), colors.HexColor(sc)),
+                                 ('ALIGN', (1, 0), (1, 0), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                 ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+                                 ('BOTTOMPADDING', (0, 0), (-1, -1), 8), ('TOPPADDING', (0, 0), (-1, -1), 8)]))
+        story.append(tr)
+        story.append(Spacer(1, 14))
+
+        # Info card
+        if info_pairs:
+            idata = [[Paragraph(f'<font size="9" color="#6B7280">{l}</font>', S['Normal']),
+                       Paragraph(f'<b><font size="11" color="#111827">{v}</font></b>', S['Normal'])]
+                      for l, v in info_pairs]
+            it = Table(idata, colWidths=[usable * 0.35, usable * 0.65])
+            it.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+                                     ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
+                                     ('LINEBEFORE', (0, 0), (0, -1), 4, colors.HexColor('#4F46E5')),
+                                     ('PADDING', (0, 0), (-1, -1), 10), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                                     ('ROUNDEDCORNERS', [8, 8, 8, 8])]))
+            story.append(it)
+            story.append(Spacer(1, 14))
+
+        # Analysis KPIs
+        if analysis_pairs:
+            cell_w = usable / 5
+            kpi_rows = []
+            for ri in range(0, len(analysis_pairs), 5):
+                cells = []
+                for ci in range(5):
+                    idx = ri + ci
+                    if idx < len(analysis_pairs):
+                        lbl, val = analysis_pairs[idx]
+                        cells.append(Paragraph(
+                            f'<font size="7" color="#6B7280">{lbl}</font><br/>'
+                            f'<b><font size="11" color="#4F46E5">{val}</font></b>', S['Normal']))
+                    else:
+                        cells.append(Paragraph('', S['Normal']))
+                kpi_rows.append(cells)
+            kpi = Table(kpi_rows, colWidths=[cell_w] * 5, rowHeights=[45] * len(kpi_rows))
+            kpi.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.3, colors.HexColor('#F3F4F6')),
+                ('PADDING', (0, 0), (-1, -1), 10),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(kpi)
+            story.append(Spacer(1, 16))
+
+        # Data sections
+        for sec in (sections or []):
+            story.append(shdr(sec.get("title", ""), sec.get("color", "#4F46E5")))
+            story.append(Spacer(1, 8))
+            sd = sec.get("data", [])
+            st = sec.get("type", "repayment")
+            ACT = {'Paid': '#059669', 'Extra Paid': '#4F46E5', 'Partially Paid': '#D97706',
+                    'Missed': '#DC2626', 'Upcoming': '#6B7280'}
+
+            if st == "repayment":
+                for r in sd:
+                    cd = [[Paragraph(f'<font size="11"><b>{r.get("date","")}</b></font><br/><font size="9" color="#6B7280">{r.get("description","")}</font>', WRAP),
+                           Paragraph(f'<font size="13"><b>{fmt(r.get("amount",0))}</b></font>', WRAP_SM_R)]]
+                    c = Table(cd, colWidths=[usable - 120, 110])
+                    c.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F9FAFB')),
+                                            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+                                            ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                                            ('LEFTPADDING', (0,0), (-1,-1), 12), ('RIGHTPADDING', (0,0), (-1,-1), 12),
+                                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (1,0), (1,0), 'RIGHT'),
+                                            ('LINEBEFORE', (0,0), (0,-1), 3, colors.HexColor('#4F46E5'))]))
+                    story.append(KeepTogether([c, Spacer(1, 4)]))
+
+            elif st == "amort":
+                for r in sd:
+                    cd = [[Paragraph(f'<b><font size="11">Month {r.get("month","")}</font></b>', WRAP), Paragraph('', WRAP)],
+                          [Paragraph(f'<font size="9" color="#6B7280">EMI</font><br/><b>{fmt(r.get("emi",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Principal</font><br/><b>{fmt(r.get("principal",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Interest</font><br/><b>{fmt(r.get("interest",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Balance</font><br/><b>{fmt(r.get("balance",0))}</b>', WRAP)]]
+                    c = Table(cd, colWidths=[usable * 0.25] * 4)
+                    c.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F9FAFB')),
+                                            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+                                            ('SPAN', (0,0), (-1,0)),
+                                            ('TOPPADDING', (0,0), (-1,-1), 6), ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                                            ('LEFTPADDING', (0,0), (-1,-1), 10), ('RIGHTPADDING', (0,0), (-1,-1), 10),
+                                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+                    story.append(KeepTogether([c, Spacer(1, 3)]))
+
+            elif st == "amort_actuals":
+                for r in sd:
+                    sst = r.get("status", "Upcoming")
+                    sc2 = ACT.get(sst, '#6B7280')
+                    cd = [[Paragraph(f'<b><font size="11">Month {r.get("month","")} \u00b7 {r.get("date","")}</font></b>', WRAP),
+                           Paragraph(f'<font color="white" size="10"><b>{sst}</b></font>', WRAP_SM_R)],
+                          [Paragraph(f'<font size="9" color="#6B7280">Planned EMI</font><br/><b>{fmt(r.get("p_emi",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Actual Paid</font><br/><b>{fmt(r.get("a_paid",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Planned Bal</font><br/><b>{fmt(r.get("p_bal",0))}</b>', WRAP),
+                           Paragraph(f'<font size="9" color="#6B7280">Actual Bal</font><br/><b>{fmt(r.get("a_bal",0))}</b>', WRAP)]]
+                    c = Table(cd, colWidths=[usable * 0.25] * 4)
+                    c.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F9FAFB')),
+                                            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+                                            ('SPAN', (0,0), (1,0)),
+                                            ('BACKGROUND', (1,0), (1,0), colors.HexColor(sc2)),
+                                            ('ALIGN', (1,0), (1,0), 'CENTER'),
+                                            ('TOPPADDING', (0,0), (-1,-1), 6), ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                                            ('LEFTPADDING', (0,0), (-1,-1), 10), ('RIGHTPADDING', (0,0), (-1,-1), 10),
+                                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+                    story.append(KeepTogether([c, Spacer(1, 3)]))
+
+            elif st == "mf_txn":
+                for r in sd:
+                    cd = [[Paragraph(f'<font size="11"><b>{r.get("type","")} \u00b7 {r.get("date","")}</b></font><br/><font size="9" color="#6B7280">NAV: {r.get("nav",0):,.4f}  \u00b7  Units: {r.get("units",0):,.4f}</font>', WRAP),
+                           Paragraph(f'<font size="13"><b>{fmt(r.get("amount",0))}</b></font>', WRAP_SM_R)]]
+                    c = Table(cd, colWidths=[usable - 120, 110])
+                    c.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F9FAFB')),
+                                            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+                                            ('TOPPADDING', (0,0), (-1,-1), 8), ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                                            ('LEFTPADDING', (0,0), (-1,-1), 12), ('RIGHTPADDING', (0,0), (-1,-1), 12),
+                                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (1,0), (1,0), 'RIGHT'),
+                                            ('LINEBEFORE', (0,0), (0,-1), 3, colors.HexColor('#4F46E5'))]))
+                    story.append(KeepTogether([c, Spacer(1, 4)]))
+            story.append(Spacer(1, 10))
+
+        # Verification page
+        story.append(PageBreak())
+        story.append(Spacer(1, 10))
+        story.append(shdr("Document Verification"))
+        story.append(Spacer(1, 20))
+        try:
+            import qrcode as qr_mod
+            qr_data = f"Finance Manager Detail\nDoc ID: {doc_id}\nTitle: {title}\nStatus: {status}\nHash: {c_hash}\nGenerated: {ts}"
+            qr_obj = qr_mod.QRCode(version=4, box_size=6, border=2, error_correction=qr_mod.constants.ERROR_CORRECT_M)
+            qr_obj.add_data(qr_data); qr_obj.make(fit=True)
+            img = qr_obj.make_image(fill_color="black", back_color="white")
+            buf = io.BytesIO(); img.save(buf, format="PNG"); buf.seek(0)
+            from reportlab.platypus import Image as RLImage
+            qi = RLImage(buf, width=200, height=200)
+            qt = Table([[qi]], colWidths=[usable])
+            qt.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+            story.append(qt)
+            story.append(Spacer(1, 16))
+        except Exception:
+            story.append(Spacer(1, 16))
+        vd = [['Document ID', doc_id], ['Content Hash (SHA-256)', c_hash],
+              ['Generated', ts], ['Title', title], ['Status', status or '']]
+        vt = Table(vd, colWidths=[3 * inch, 4 * inch])
+        vt.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F8FAFC')),
+                                  ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+                                  ('INNERGRID', (0,0), (-1,-1), 0.3, colors.HexColor('#E5E7EB')),
+                                  ('PADDING', (0,0), (-1,-1), 12),
+                                  ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+                                  ('FONTSIZE', (0,0), (-1,-1), 11)]))
+        story.append(vt)
+        doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
+        return doc_id
+    except ImportError:
+        return None

@@ -1,14 +1,17 @@
-"""FD service — maturity calc (quarterly compounding)."""
+"""FD service — maturity calc with configurable compounding."""
 from datetime import datetime
 
 
 class FDService:
     @staticmethod
-    def maturity(principal, rate_pct, start_str, mat_str):
+    def maturity(principal, rate_pct, start_str, mat_str, frequency="QUARTERLY"):
         s = datetime.strptime(start_str, "%Y-%m-%d")
         m = datetime.strptime(mat_str, "%Y-%m-%d")
         years = (m - s).days / 365.25
-        return round(principal * ((1 + rate_pct / 400) ** (4 * years)), 2)
+        periods_per_year = {"ANNUAL": 1, "SEMI_ANNUAL": 2, "QUARTERLY": 4}.get(frequency, 4)
+        r = rate_pct / (100 * periods_per_year)
+        n = periods_per_year * years
+        return round(principal * ((1 + r) ** n), 2)
 
     @staticmethod
     def progress(start_str, mat_str):

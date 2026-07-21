@@ -169,3 +169,50 @@ class LoanService:
             "months_remaining": remaining,
             "total_interest_accrued": round(interest_till_now, 2),
         }
+
+    # ── non-EMI analysis (variable repayment, no fixed schedule) ────
+    @staticmethod
+    def non_emi_analysis(principal, rate_pct, total_paid, start_date,
+                         as_of_date=None, method="SIMPLE"):
+        if as_of_date is None:
+            as_of_date = _date.today()
+        if isinstance(start_date, str):
+            start_date = _date.fromisoformat(start_date)
+        if isinstance(as_of_date, str):
+            as_of_date = _date.fromisoformat(as_of_date)
+        elapsed = (as_of_date.year - start_date.year) * 12 + (as_of_date.month - start_date.month)
+        elapsed = max(0, elapsed)
+        if method == "SIMPLE":
+            interest = round(principal * rate_pct / 100 * elapsed / 12, 2)
+        else:
+            r = (1 + rate_pct / 100) ** (elapsed / 12) - 1
+            interest = round(principal * r, 2)
+        current_value = max(principal + interest - total_paid, 0)
+        return {
+            "current_value": round(current_value, 2), "original_emi": 0, "updated_emi": 0,
+            "full_payoff": round(current_value, 2), "total_expected": round(principal + interest, 2),
+            "total_paid": round(total_paid, 2), "total_interest_accrued": interest,
+            "months_elapsed": elapsed, "months_remaining": 0,
+        }
+
+    # ── plan amortization for a given outstanding ────────────────────
+    @staticmethod
+    def plan_amortization(outstanding, rate_pct, months, frequency="ANNUAL", method="COMPOUND"):
+        if method == "SIMPLE":
+            return LoanService._simple_schedule(outstanding, rate_pct, months)
+        return LoanService.amortize(outstanding, rate_pct, months, frequency)
+
+    @staticmethod
+    def _simple_schedule(outstanding, rate_pct, months):
+        if months <= 0:
+            return []
+        int_per_month = round(outstanding * rate_pct / 100 / 12, 2) if rate_pct > 0 else 0
+        emi = round((outstanding + int_per_month * months) / months, 2)
+        bal = outstanding
+        rows = []
+        for m in range(1, months + 1):
+            prin = round(emi - int_per_month, 2)
+            bal = max(bal - prin, 0)
+            rows.append({"month": m, "emi": emi, "principal": prin,
+                         "interest": int_per_month, "balance": round(bal, 2)})
+        return rows
