@@ -291,6 +291,157 @@ def _entity_row(combo, add_callback):
     return row
 
 
+# ── Card-rendering helpers (replace tables in detail dialogs) ─────────
+_CARD_SS = (f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+            f"border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
+
+
+def _card_scroll(card_widgets, empty_msg="No data yet."):
+    """Wrap a list of QFrame cards in a scroll area."""
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    inner = QWidget()
+    lay = QVBoxLayout(inner)
+    lay.setSpacing(6)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setAlignment(Qt.AlignTop)
+    if not card_widgets:
+        lbl = QLabel(empty_msg)
+        lbl.setStyleSheet(f"color:{C['text3']};padding:16px;font-size:12px;")
+        lbl.setAlignment(Qt.AlignCenter)
+        lay.addWidget(lbl)
+    else:
+        for w in card_widgets:
+            lay.addWidget(w)
+    scroll.setWidget(inner)
+    return scroll
+
+
+def _kv_pairs(pairs):
+    """HBox of label:value mini-columns."""
+    row = QHBoxLayout()
+    row.setSpacing(20)
+    for label, value in pairs:
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        l = QLabel(str(label))
+        l.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;text-transform:uppercase;letter-spacing:0.3px;")
+        v = QLabel(str(value))
+        v.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        col.addWidget(l)
+        col.addWidget(v)
+        row.addLayout(col)
+    row.addStretch()
+    return row
+
+
+def _repayment_cards(repayments, amount_key, date_key, empty_msg="No repayments logged yet."):
+    """Render repayment list as cards."""
+    cards = []
+    for r in repayments:
+        card = QFrame()
+        card.setStyleSheet(_CARD_SS)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 8, 12, 8)
+        cl.setSpacing(4)
+        hdr = QHBoxLayout()
+        d = QLabel(r.get(date_key, ""))
+        d.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        a = QLabel(fmt_money(r[amount_key]))
+        a.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['accent']};")
+        a.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        hdr.addWidget(d)
+        hdr.addStretch()
+        hdr.addWidget(a)
+        cl.addLayout(hdr)
+        desc = r.get("description") or ""
+        if desc:
+            dl = QLabel(desc)
+            dl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;")
+            dl.setWordWrap(True)
+            cl.addWidget(dl)
+        cards.append(card)
+    return _card_scroll(cards, empty_msg)
+
+
+def _amort_cards(schedule):
+    """Render amortization schedule as cards."""
+    cards = []
+    for row in schedule:
+        card = QFrame()
+        card.setStyleSheet(_CARD_SS)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 8, 12, 8)
+        cl.setSpacing(4)
+        hdr = QLabel(f"Month {row['month']}")
+        hdr.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        cl.addWidget(hdr)
+        cl.addLayout(_kv_pairs([
+            ("EMI", fmt_money(row["emi"])),
+            ("Principal", fmt_money(row["principal"])),
+            ("Interest", fmt_money(row["interest"])),
+            ("Balance", fmt_money(row["balance"])),
+        ]))
+        cards.append(card)
+    return _card_scroll(cards)
+
+
+def _amort_actuals_cards(rows):
+    """Render amortization + actual payments as cards."""
+    cards = []
+    for rw in rows:
+        card = QFrame()
+        card.setStyleSheet(_CARD_SS)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 8, 12, 8)
+        cl.setSpacing(4)
+        hdr = QHBoxLayout()
+        title = QLabel(f"Month {rw['month']} {MDOT} {rw['date']}")
+        title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        hdr.addWidget(title)
+        hdr.addStretch()
+        sc = {"Paid": C["green"], "Partial": C["amber"], "Pending": C["text3"]}
+        hdr.addWidget(_badge(rw["status"], sc.get(rw["status"], C["text3"])))
+        cl.addLayout(hdr)
+        cl.addLayout(_kv_pairs([
+            ("Planned EMI", fmt_money(rw["p_emi"])),
+            ("Actual Paid", fmt_money(rw["a_paid"])),
+        ]))
+        cl.addLayout(_kv_pairs([
+            ("Planned Bal", fmt_money(rw["p_bal"])),
+            ("Actual Bal", fmt_money(rw["a_bal"])),
+        ]))
+        cards.append(card)
+    return _card_scroll(cards)
+
+
+def _mf_txn_cards(txns):
+    """Render MF transaction list as cards."""
+    cards = []
+    for tx in txns:
+        card = QFrame()
+        card.setStyleSheet(_CARD_SS)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 8, 12, 8)
+        cl.setSpacing(4)
+        hdr = QHBoxLayout()
+        title = QLabel(f"{tx['txn_type']} {MDOT} {tx['txn_date']}")
+        title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        hdr.addWidget(title)
+        hdr.addStretch()
+        amt = QLabel(fmt_money(tx["amount"]))
+        amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['accent']};")
+        hdr.addWidget(amt)
+        cl.addLayout(hdr)
+        cl.addLayout(_kv_pairs([
+            ("NAV", f"{tx['nav']:,.4f}"),
+            ("Units", f"{tx['units']:,.4f}"),
+        ]))
+        cards.append(card)
+    return _card_scroll(cards)
+
+
 # ── NAV fetch dialog (MF) ──────────────────────────────────────────────────
 class NavFetchDialog(QDialog):
     def __init__(self, initial_query="", parent=None):
@@ -1283,41 +1434,9 @@ class LoansTakePage(_FunctionPage):
         # tabs
         tabs = QTabWidget()
         # Tab 1: amortization with actuals
-        atable = QTableWidget()
-        atable.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        atable.verticalHeader().setVisible(False)
-        atable.setColumnCount(7)
-        atable.setHorizontalHeaderLabels(["Month", "Date", "Planned EMI", "Actual Paid", "Status", "Planned Bal", "Actual Bal"])
-        atable.setRowCount(len(rows))
-        for i, rw in enumerate(rows):
-            atable.setItem(i, 0, QTableWidgetItem(str(rw["month"])))
-            atable.setItem(i, 1, QTableWidgetItem(rw["date"]))
-            atable.setItem(i, 2, QTableWidgetItem(fmt_money(rw["p_emi"])))
-            atable.setItem(i, 3, QTableWidgetItem(fmt_money(rw["a_paid"])))
-            st_item = QTableWidgetItem(rw["status"])
-            st_item.setForeground(Qt.green if rw["status"] == "Paid" else (Qt.yellow if rw["status"] == "Partial" else Qt.gray))
-            atable.setItem(i, 4, st_item)
-            atable.setItem(i, 5, QTableWidgetItem(fmt_money(rw["p_bal"])))
-            atable.setItem(i, 6, QTableWidgetItem(fmt_money(rw["a_bal"])))
-        atable.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        tabs.addTab(atable, "Amortization + Actuals")
+        tabs.addTab(_amort_actuals_cards(rows), "Amortization + Actuals")
         # Tab 2: repayment log
-        rtable = QTableWidget()
-        rtable.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        rtable.verticalHeader().setVisible(False)
-        rtable.setColumnCount(3)
-        rtable.setHorizontalHeaderLabels(["Date", "Amount", "Description"])
-        rtable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        rtable.setRowCount(len(repayments))
-        for i, rp in enumerate(repayments):
-            rtable.setItem(i, 0, QTableWidgetItem(rp.get("payment_date", "")))
-            rtable.setItem(i, 1, QTableWidgetItem(fmt_money(rp["amount_paid"])))
-            rtable.setItem(i, 2, QTableWidgetItem(rp.get("description") or ""))
-        if not repayments:
-            rtable.setRowCount(1)
-            rtable.setItem(0, 0, QTableWidgetItem("No repayments logged yet."))
-            rtable.setSpan(0, 0, 1, 3)
-        tabs.addTab(rtable, "Repayment Log")
+        tabs.addTab(_repayment_cards(repayments, "amount_paid", "payment_date"), "Repayment Log")
         lay.addWidget(tabs, 1)
 
         # buttons
@@ -1450,14 +1569,14 @@ class LoanDetailDialog(QDialog):
         lay.addWidget(summary)
         if amortization:
             tabs = QTabWidget()
-            tabs.addTab(self._repayments_table(repayments, amount_key, date_key), "Repayment Log")
-            tabs.addTab(self._amortization_table(amortization), "Amortization Schedule")
+            tabs.addTab(_repayment_cards(repayments, amount_key, date_key), "Repayment Log")
+            tabs.addTab(_amort_cards(amortization), "Amortization Schedule")
             lay.addWidget(tabs, 1)
         else:
-            lay.addWidget(self._repayments_table(repayments, amount_key, date_key), 1)
+            lay.addWidget(_repayment_cards(repayments, amount_key, date_key), 1)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        if on_mark_closed and status not in ("CLOSED", "CLEARED"):
+        if on_mark_closed and status == "REPAID":
             close_btn = QPushButton("\u2705 Mark as Closed")
             close_btn.setObjectName("primary")
             close_btn.clicked.connect(lambda: (on_mark_closed(), self.accept()))
@@ -1467,38 +1586,6 @@ class LoanDetailDialog(QDialog):
         btn_row.addWidget(ok)
         lay.addLayout(btn_row)
 
-    def _repayments_table(self, repayments, amount_key, date_key):
-        table = QTableWidget()
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.verticalHeader().setVisible(False)
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Date", "Amount", "Description"])
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        table.setRowCount(len(repayments))
-        for i, r in enumerate(repayments):
-            table.setItem(i, 0, QTableWidgetItem(r.get(date_key, "")))
-            table.setItem(i, 1, QTableWidgetItem(fmt_money(r[amount_key])))
-            table.setItem(i, 2, QTableWidgetItem(r.get("description") or ""))
-        if not repayments:
-            table.setRowCount(1)
-            table.setItem(0, 0, QTableWidgetItem("No repayments logged yet."))
-            table.setSpan(0, 0, 1, 3)
-        return table
-
-    def _amortization_table(self, schedule):
-        table = QTableWidget()
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.verticalHeader().setVisible(False)
-        table.setColumnCount(5)
-        table.setHorizontalHeaderLabels(["Month", "EMI", "Principal", "Interest", "Balance"])
-        table.setRowCount(len(schedule))
-        for i, row in enumerate(schedule):
-            table.setItem(i, 0, QTableWidgetItem(str(row["month"])))
-            table.setItem(i, 1, QTableWidgetItem(fmt_money(row["emi"])))
-            table.setItem(i, 2, QTableWidgetItem(fmt_money(row["principal"])))
-            table.setItem(i, 3, QTableWidgetItem(fmt_money(row["interest"])))
-            table.setItem(i, 4, QTableWidgetItem(fmt_money(row["balance"])))
-        return table
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1631,12 +1718,17 @@ class FDGivePage(_FunctionPage):
         for fd in fds:
             pct = FDService.progress(fd["start_date"], fd["maturity_date"])
             color = status_color("asset", fd["status"])
+            extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
+                     f"{fmt_money(fd['maturity_amount'] or fd['principal_amount'])}</span>  "
+                     f"<span style='font-size:11px;color:{C['text3']};'>Maturity Value</span><br>"
+                     f"<span style='font-size:11px;color:{C['text3']};'>"
+                     f"{pct:.0f}% elapsed</span>")
             card = _wealth_card(
                 title=fd["account_name"] or "Fixed Deposit",
                 subtitle=f"{fd['interest_rate']}% {MDOT} {fd['start_date']} \u2192 {fd['maturity_date']}",
-                amount_text=fmt_money(fd["maturity_amount"] or fd["principal_amount"]),
+                amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
                 badge_text=fd["status"], badge_color=color, progress_pct=pct,
-                extra_line=f"Principal: {fmt_money(fd['principal_amount'])} {MDOT} {pct:.0f}% elapsed",
+                extra_line=extra,
                 on_click=lambda fid=fd["fd_id"]: self._open_detail(fid)
             )
             self._list_lay.addWidget(card)
@@ -1871,7 +1963,7 @@ class FDOthersPage(_FunctionPage):
             self.fo_dep_depositor.add_item(d["name"], d["depositor_id"])
         self.fo_rep_deposit.clear_items()
         for d in self.repos["deposits"].list_deposits():
-            if d["status"] != "CLOSED":
+            if d["status"] not in ("CLOSED", "REPAID"):
                 self.fo_rep_deposit.add_item(
                     f"{d['depositor_name']} \u2014 {fmt_money(d['principal_amount'])} ({d['status']})",
                     d["deposit_id"]
@@ -1886,9 +1978,12 @@ class FDOthersPage(_FunctionPage):
         dep = self.repos["deposits"].get_deposit(did)
         if not dep:
             return
-        paid = self.repos["deposits"].total_repaid(did)
-        pending = dep["principal_amount"] - paid
-        self.fo_rep_pending_lbl.setText(f"Pending: {fmt_money(pending)} of {fmt_money(dep['principal_amount'])}")
+        a = self._analysis(dep)
+        self.fo_rep_pending_lbl.setText(
+            f"Outstanding: {fmt_money(a['current_value'])}  {MDOT}  "
+            f"Principal: {fmt_money(dep['principal_amount'])}  {MDOT}  "
+            f"Paid: {fmt_money(a['total_paid'])}"
+        )
 
     def _create_deposit(self):
         did = self.fo_dep_depositor.get_data()
@@ -1927,6 +2022,15 @@ class FDOthersPage(_FunctionPage):
             QMessageBox.warning(self, "Missing Info", "Select a deposit and enter an amount.")
             return
         dep = self.repos["deposits"].get_deposit(did)
+        if not dep:
+            return
+        a = self._analysis(dep)
+        if amount > a["current_value"] + 0.01:
+            QMessageBox.warning(self, "Amount Exceeds Outstanding",
+                f"Entered: {fmt_money(amount)}\n"
+                f"Outstanding: {fmt_money(a['current_value'])}\n"
+                f"Please enter a valid amount.")
+            return
         account_id = self.fo_rep_account.currentData()
         method = self.fo_rep_method.currentData()
         txn_id = _log_ledger_txn(
@@ -1943,9 +2047,15 @@ class FDOthersPage(_FunctionPage):
         )
         self.fo_rep_amount.setValue(0)
         self.fo_rep_desc.clear()
+        self._check_repaid(did)
         self._refresh_entry_dropdowns()
         self.load_list()
-        QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
+        dep = self.repos["deposits"].get_deposit(did)
+        if dep and dep["status"] == "REPAID":
+            QMessageBox.information(self, "Deposit Fully Returned",
+                "This deposit has been fully returned.\nStatus: REPAID \u2014 waiting for closure confirmation.")
+        else:
+            QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
     # ── List ──
     def load_list(self):
@@ -1959,12 +2069,12 @@ class FDOthersPage(_FunctionPage):
         _clear_layout(self._list_lay)
         deps = list(self._list_data)
         active = [d for d in deps if d["status"] != "CLOSED"]
-        total_held = sum(
-            max(d["principal_amount"] - self.repos["deposits"].total_repaid(d["deposit_id"]), 0)
-            for d in active
-        )
+        total_outstanding = 0
+        for d in active:
+            a = self._analysis(d)
+            total_outstanding += a["current_value"]
         _fill_stats_row(self._stats_row, [
-            _metric_card("Total Held", fmt_money(total_held), C["accent"]),
+            _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
             _metric_card("Active Deposits", str(len(active))),
             _metric_card("Total Deposits", str(len(deps))),
         ])
@@ -1972,8 +2082,9 @@ class FDOthersPage(_FunctionPage):
         if search:
             deps = [d for d in deps if search in d["depositor_name"].lower()]
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
+        rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2, "REPAID": 3, "CLOSED": 4}
         if mode == "Status":
-            deps.sort(key=lambda d: 0 if d["status"] != "CLOSED" else 1)
+            deps.sort(key=lambda d: rank.get(d["status"], 9))
         elif mode == "Depositor":
             deps.sort(key=lambda d: d["depositor_name"].lower())
         elif mode == "Amount":
@@ -1989,18 +2100,23 @@ class FDOthersPage(_FunctionPage):
             self._list_lay.addWidget(empty)
             return
         for d in deps:
-            paid = self.repos["deposits"].total_repaid(d["deposit_id"])
-            pending = d["principal_amount"] - paid
+            a = self._analysis(d)
+            pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
             interest_free = not d["interest_rate"]
-            color = C["text3"] if d["status"] == "CLOSED" else C["accent"]
+            color = status_color("loan", d["status"])
             badge_text = "Interest-Free" if interest_free else f"{d['interest_rate']}%"
-            badge_col = C["text3"] if interest_free and d["status"] != "CLOSED" else color
+            extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
+                     f"{fmt_money(a['current_value'])}</span>  "
+                     f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
+                     f"<span style='font-size:11px;color:{C['text3']};'>"
+                     f"Interest: {fmt_money(a['total_interest_accrued'])}  {MDOT}  "
+                     f"Paid: {fmt_money(a['total_paid'])}</span>")
             card = _wealth_card(
                 title=d["depositor_name"],
                 subtitle=f"Deposited {d['deposit_date']} {MDOT} Return {d['expected_return_date'] or EM_DASH}",
-                amount_text=fmt_money(pending) + " held", badge_text=badge_text,
-                badge_color=badge_col,
-                extra_line=f"Principal: {fmt_money(d['principal_amount'])} {MDOT} Returned: {fmt_money(paid)} {MDOT} {d['status']}",
+                amount_text=fmt_money(d["principal_amount"]) + "  Principal",
+                badge_text=badge_text, badge_color=color,
+                progress_pct=pct, extra_line=extra,
                 on_click=lambda did=d["deposit_id"]: self._open_detail(did)
             )
             self._list_lay.addWidget(card)
@@ -2026,6 +2142,38 @@ class FDOthersPage(_FunctionPage):
             self.load_list()
             return True
         return False
+
+    # ── analysis helper ──
+    def _dep_months(self, dep):
+        sd = date.fromisoformat(dep["deposit_date"])
+        dd = dep.get("expected_return_date")
+        if dd:
+            return max(1, round((date.fromisoformat(dd) - sd).days / 30.44))
+        return 12
+
+    def _analysis(self, dep):
+        total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
+        months = self._dep_months(dep)
+        method = dep.get("interest_method") or "SIMPLE"
+        rate = dep.get("interest_rate") or 0
+        if not rate:
+            cv = max(dep["principal_amount"] - total_paid, 0)
+            return {"current_value": cv, "original_emi": 0, "updated_emi": 0,
+                    "full_payoff": cv, "total_expected": dep["principal_amount"],
+                    "total_paid": total_paid, "total_interest_accrued": 0,
+                    "months_elapsed": 0, "months_remaining": 0}
+        return LoanService.loan_analysis(
+            dep["principal_amount"], rate, months, "ANNUAL",
+            total_paid, dep["deposit_date"], method=method
+        )
+
+    def _check_repaid(self, deposit_id):
+        dep = self.repos["deposits"].get_deposit(deposit_id)
+        if not dep or dep["status"] in ("CLOSED", "REPAID"):
+            return
+        a = self._analysis(dep)
+        if a["current_value"] <= 0 and a["total_paid"] > 0:
+            self.repos["deposits"].update_status(deposit_id, "REPAID")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2388,19 +2536,7 @@ class MFDetailDialog(QDialog):
         )
         info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
         lay.addWidget(info)
-        table = QTableWidget()
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.verticalHeader().setVisible(False)
-        table.setColumnCount(5)
-        table.setHorizontalHeaderLabels(["Date", "Type", "Amount", "NAV", "Units"])
-        table.setRowCount(len(txns))
-        for i, tx in enumerate(txns):
-            table.setItem(i, 0, QTableWidgetItem(tx["txn_date"]))
-            table.setItem(i, 1, QTableWidgetItem(tx["txn_type"]))
-            table.setItem(i, 2, QTableWidgetItem(fmt_money(tx["amount"])))
-            table.setItem(i, 3, QTableWidgetItem(f"{tx['nav']:,.4f}"))
-            table.setItem(i, 4, QTableWidgetItem(f"{tx['units']:,.4f}"))
-        lay.addWidget(table, 1)
+        lay.addWidget(_mf_txn_cards(txns), 1)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         ok = QPushButton("Close")
