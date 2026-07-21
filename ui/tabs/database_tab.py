@@ -249,59 +249,55 @@ def _stat_card(label, value, icon, accent):
 
 def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     card = QFrame()
-    card.setMinimumSize(260, 180)  # ← Fixed minimum size prevents overlap
+    card.setMinimumSize(240, 155)
     card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     type_color = ACCT_TYPE_COLORS.get(acct_type, "#6B7280")
+    icons = {"CURRENT": "\U0001f3e6", "WALLET": "\U0001f45b", "CASH": "\U0001f4b5", "CREDIT_CARD": "\U0001f4b3"}
+    icon = icons.get(acct_type, "\U0001f4b0")
+    net_color = '#10B981' if net >= 0 else '#EF4444'
+    net_sign = '' if net >= 0 else '- '
     card.setStyleSheet(f"""
-        QFrame {{ background:#fff; border:1px solid #E5E7EB; border-radius:12px; border-left:4px solid {type_color}; }}
+        QFrame {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {type_color}15,stop:1 #ffffff);
+                  border:1px solid #E5E7EB; border-radius:12px; border-top:3px solid {type_color}; }}
         QLabel {{ background:transparent; border:none; }}
     """)
-    lay = QVBoxLayout(card); lay.setContentsMargins(16,14,16,14); lay.setSpacing(6)
+    lay = QVBoxLayout(card); lay.setContentsMargins(16, 12, 16, 12); lay.setSpacing(6)
 
-    # Name + type badge
+    # Icon + Name + Badge
     top = QHBoxLayout()
-    nl = QLabel(f"<b>{name}</b>")
-    nl.setStyleSheet("color:#111827;font-size:14px;")
+    il = QLabel(icon); il.setStyleSheet("font-size:18px;")
+    top.addWidget(il)
+    nl = QLabel(f"<b>{name}</b>"); nl.setStyleSheet("color:#111827;font-size:13px;")
     top.addWidget(nl); top.addStretch()
     badge = QLabel(acct_type.replace("_", " ").title())
-    badge.setStyleSheet(f"color:{type_color};font-size:10px;font-weight:600;background:{type_color}12;border-radius:8px;padding:2px 8px;")
+    badge.setStyleSheet(f"color:{type_color};font-size:9px;font-weight:700;background:{type_color}15;border-radius:6px;padding:2px 8px;")
     top.addWidget(badge)
     lay.addLayout(top)
 
-    # Start / End balance
-    bal_row = QHBoxLayout()
-    sl = QLabel("Start"); sl.setStyleSheet(f"color:#6B7280;font-size:11px;")
-    bal_row.addWidget(sl)
-    sv = QLabel(fmt_money(start_bal)); sv.setStyleSheet(f"color:#374151;font-size:12px;font-weight:600;")
-    bal_row.addWidget(sv)
-    bal_row.addStretch()
-    el = QLabel("End"); el.setStyleSheet(f"color:#6B7280;font-size:11px;")
-    bal_row.addWidget(el)
-    ev = QLabel(fmt_money(end_bal))
-    ev.setStyleSheet(f"color:{'#10B981' if end_bal>=0 else '#EF4444'};font-size:12px;font-weight:700;")
-    bal_row.addWidget(ev)
-    lay.addLayout(bal_row)
+    # Net amount (prominent)
+    nv = QLabel(f"{net_sign}{fmt_money(abs(net))}")
+    nv.setStyleSheet(f"color:{net_color};font-size:18px;font-weight:900;")
+    lay.addWidget(nv)
 
     # Separator
-    sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet("background:#E5E7EB;")
+    sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet(f"background:{type_color}30;")
     lay.addWidget(sep)
 
-    # Credits / Debits / Net
-    for lbl, val, col in [("Credits", credit, "#10B981"), ("Debits", debit, "#EF4444")]:
-        row = QHBoxLayout()
-        rl = QLabel(lbl); rl.setStyleSheet(f"color:#6B7280;font-size:12px;")
-        row.addWidget(rl); row.addStretch()
-        v = QLabel(fmt_money(val)); v.setStyleSheet(f"color:{col};font-size:13px;font-weight:600;")
-        row.addWidget(v); lay.addLayout(row)
-
-    nr = QHBoxLayout()
-    nl2 = QLabel("Net"); nl2.setStyleSheet("color:#6B7280;font-size:12px;")
-    nr.addWidget(nl2); nr.addStretch()
-    nv = QLabel(fmt_money(net))
-    nv.setStyleSheet(f"color:{'#10B981' if net>=0 else '#EF4444'};font-size:15px;font-weight:800;")
-    nr.addWidget(nv); lay.addLayout(nr)
+    # Credits / Debits / Start / End in compact row
+    grid = QHBoxLayout(); grid.setSpacing(16)
+    for lbl, val, col in [("Credits", credit, "#059669"), ("Debits", debit, "#DC2626"),
+                           ("Start", start_bal, "#6B7280"), ("End", end_bal, net_color)]:
+        c = QVBoxLayout(); c.setSpacing(1)
+        ll = QLabel(lbl); ll.setStyleSheet(f"color:#9CA3AF;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
+        c.addWidget(ll)
+        vv = QLabel(fmt_money(val)); vv.setStyleSheet(f"color:{col};font-size:12px;font-weight:700;")
+        c.addWidget(vv)
+        grid.addLayout(c)
+    lay.addLayout(grid)
 
     return card
+
+
 
 
 # ═══════════════════════════════════════════════
