@@ -938,6 +938,12 @@ class LoansGivePage(_FunctionPage):
             _metric_card("Pending Loans", str(pending_count)),
             _metric_card("Total Loans", str(len(loans))),
         ])
+        # print pending button
+        print_btn = QPushButton("\U0001f5a8  Print Pending")
+        print_btn.setFocusPolicy(Qt.NoFocus)
+        print_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        print_btn.clicked.connect(self._print_pending)
+        self._stats_row.addWidget(print_btn)
         # search
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
@@ -985,6 +991,55 @@ class LoansGivePage(_FunctionPage):
             )
             self._list_lay.addWidget(card)
 
+    def _print_pending(self):
+        """Print all non-closed pendings for a selected borrower."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Print Pendings")
+        dlg.setMinimumWidth(400)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("Select borrower to print non-closed pendings:"))
+        combo = SearchableCombo(placeholder="Search borrower...")
+        for b in self.repos["loans"].list_borrowers():
+            combo.add_item(b["name"], b["borrower_id"])
+        lay.addWidget(combo)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("\U0001f5a8  Print")
+        ok_btn.setObjectName("primary")
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dlg.reject)
+        ok_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        lay.addLayout(btn_row)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        bid = combo.get_data()
+        if not bid:
+            return
+        borrower_name = combo.currentText()
+        # get all non-closed loans for this borrower
+        all_loans = self.repos["loans"].list_loans()
+        borrower_loans = [l for l in all_loans
+                          if l["borrower_id"] == bid and l["status"] not in ("CLOSED", "CLEARED")]
+        if not borrower_loans:
+            QMessageBox.information(self, "No Pendings", f"No pending items for {borrower_name}.")
+            return
+        info = [("Borrower", borrower_name), ("Date", TODAY()), ("Count", str(len(borrower_loans)))]
+        sections = []
+        for l in borrower_loans:
+            a = self._analysis(l)
+            rdata = [{"date": l["start_date"], "amount": a["current_value"],
+                      "description": f"Due: {l['due_date'] or EM_DASH} | {l['status']}"}]
+            sections.append({
+                "title": f"{fmt_money(a['current_value'])} outstanding",
+                "color": "#4F46E5", "type": "repayment", "data": rdata,
+            })
+        total = sum(self._analysis(l)["current_value"] for l in borrower_loans)
+        analysis = [("Total Outstanding", fmt_money(total)), ("Items", str(len(borrower_loans)))]
+        _export_detail_to_pdf(self, f"Pendings from {borrower_name}", "ACTIVE",
+                              info, analysis, sections)
+
     def _open_detail(self, loan_id):
         loan = self.repos["loans"].get_loan(loan_id)
         if not loan:
@@ -1029,9 +1084,10 @@ class LoansTakePage(_FunctionPage):
         emi_type = loan.get("emi_type") or "EMI"
         if emi_type == "NON_EMI":
             method = loan.get("interest_method") or "SIMPLE"
+            payments = self.repos["borrowed"].get_repayments(loan["loan_id"])
             return LoanService.non_emi_analysis(
                 loan["principal_amount"], loan["interest_rate"] or 0,
-                total_paid, loan["start_date"], method=method
+                total_paid, loan["start_date"], payments=payments, method=method
             )
         months = self._loan_months(loan)
         freq = loan.get("interest_type") or "ANNUAL"
@@ -1349,6 +1405,29 @@ class LoansTakePage(_FunctionPage):
             _metric_card("Active Loans", str(len(active))),
             _metric_card("Total Loans", str(len(loans))),
         ])
+        # ── loan alerts: upcoming EMIs + overdue ──
+        today_str = date.today().isoformat()
+        soon_str = _add_months(date.today(), 1).isoformat()
+        alerts = []
+        for l in active:
+            due = l.get("due_date")
+            a2 = self._analysis(l)
+            if l["status"] == "OVERDUE":
+                alerts.append(f"⚠️ {l['lender_name']} — OVERDUE — Outstanding: {fmt_money(a2['current_value'])}")
+            elif due and today_str <= due <= soon_str and a2.get("original_emi", 0) > 0:
+                alerts.append(f"🔔 {l['lender_name']} — EMI due {due} — {fmt_money(a2['original_emi'])}")
+        if alerts:
+            alert_box = QFrame()
+            alert_box.setStyleSheet(
+                f"QFrame{{background:{C['amber_bg']};border:1px solid {C['amber']};border-radius:8px;}}"
+                f"QLabel{{background:transparent;border:none;}}"
+            )
+            al = QVBoxLayout(alert_box)
+            al.setContentsMargins(12, 8, 12, 8)
+            al.setSpacing(2)
+            for a_txt in alerts:
+                al.addWidget(QLabel(a_txt))
+            self._list_lay.addWidget(alert_box)
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
             loans = [l for l in loans if search in l["lender_name"].lower()]
@@ -1402,92 +1481,15 @@ class LoansTakePage(_FunctionPage):
         if not loan:
             return
         repayments = self.repos["borrowed"].get_repayments(loan_id)
-        months = self._loan_months(loan)
-        freq = loan.get("interest_type") or "ANNUAL"
-        mthd = loan.get("interest_method") or "COMPOUND"
         a = self._analysis(loan)
-
         emi_type = loan.get("emi_type") or "EMI"
-        principal = loan["principal_amount"]
-        rate = loan["interest_rate"] or 0
-        rows = []
-
-        if emi_type == "EMI":
-            # ── EMI loans: build amortization with actual payments ──
-            if mthd == "SIMPLE":
-                # simple interest: flat interest per month on original principal
-                emi_val = LoanService.simple_emi(principal, rate, months)
-                int_per_month = round(principal * rate / 100 / 12, 2) if rate > 0 else 0
-                bal = principal
-                schedule = []
-                for m in range(1, months + 1):
-                    prin_part = round(emi_val - int_per_month, 2)
-                    bal = max(bal - prin_part, 0)
-                    schedule.append({"month": m, "emi": emi_val, "principal": prin_part,
-                                     "interest": int_per_month, "balance": round(bal, 2)})
-            else:
-                schedule = LoanService.amortize(principal, rate, months, freq)
-
-            start = date.fromisoformat(loan["start_date"])
-            r = LoanService._monthly_rate(rate, freq) if mthd == "COMPOUND" else 0
-            si_int = round(principal * rate / 100 / 12, 2) if mthd == "SIMPLE" and rate > 0 else 0
-
-            # ── balance-based status: compare actual vs expected running balance ──
-            expected_bal = principal
-            total_interest_accrued = 0.0
-            today = date.today()
-            rows = []
-            for entry in schedule:
-                mn = entry["month"]
-                m_start = _add_months(start, mn - 1)
-                m_end = _add_months(start, mn)
-                ms, me = m_start.isoformat(), m_end.isoformat()
-
-                # expected balance (if EMI paid on time)
-                exp_interest = expected_bal * r if mthd == "COMPOUND" else si_int
-                expected_bal = max(expected_bal + exp_interest - entry["emi"], 0)
-
-                # actual interest this month on real balance
-                paid_before_month = sum(p["amount_paid"] for p in repayments if p["payment_date"] < ms)
-                running_actual = max(principal + total_interest_accrued - paid_before_month, 0)
-                if mthd == "COMPOUND":
-                    act_int = running_actual * r
-                else:
-                    act_int = si_int
-                total_interest_accrued += act_int
-
-                # per-month payment (for card display)
-                month_paid = sum(p["amount_paid"] for p in repayments if ms <= p["payment_date"] < me)
-                # cumulative paid up to this month's end
-                total_paid_to_date = sum(p["amount_paid"] for p in repayments if p["payment_date"] <= me)
-                actual_bal = max(principal + total_interest_accrued - total_paid_to_date, 0)
-
-                # status from balance comparison
-                if m_end > today:
-                    status = "Upcoming"
-                elif actual_bal <= expected_bal * 0.95:
-                    status = "Extra Paid"
-                elif actual_bal <= expected_bal * 1.02:
-                    status = "Paid"
-                elif actual_bal <= expected_bal + entry["emi"] * 0.5:
-                    status = "Partially Paid"
-                else:
-                    status = "Missed"
-
-                rows.append({
-                    "month": mn, "date": m_start.strftime("%b %y"),
-                    "p_emi": entry["emi"], "a_paid": month_paid,
-                    "p_bal": round(expected_bal, 2), "a_bal": round(actual_bal, 2),
-                    "status": status,
-                })
-
-            else:
-                # ── Non-EMI loans: no amortization schedule ──
-                pass
+        mthd = loan.get("interest_method") or "COMPOUND"
+        freq = loan.get("interest_type") or "ANNUAL"
+        months = self._loan_months(loan)
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Loan from {loan['lender_name']}")
-        dlg.setMinimumWidth(720)
+        dlg.setMinimumWidth(560)
         lay = QVBoxLayout(dlg)
 
         # header
@@ -1498,9 +1500,10 @@ class LoansTakePage(_FunctionPage):
         hdr.addWidget(_badge(loan["status"], status_color("liability", loan["status"])))
         lay.addLayout(hdr)
 
+        # info
         mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
         emi_info = f"  {MDOT}  EMI: {fmt_money(a['original_emi'])}" if emi_type == "EMI" else ""
-        tenure_info = f"  {MDOT}  Tenure: {months} months" if emi_type == "EMI" else ""
+        tenure_info = f"  {MDOT}  Tenure: {months} months"
         info = QLabel(
             f"Principal: {fmt_money(loan['principal_amount'])}  {MDOT}  "
             f"Rate: {loan['interest_rate']}%  {mth_label}{emi_info}\n"
@@ -1510,12 +1513,11 @@ class LoansTakePage(_FunctionPage):
         info.setWordWrap(True)
         lay.addWidget(info)
 
+        # analysis
         a_lbl = QLabel(
-            f"Current Value: {fmt_money(a['current_value'])}  {MDOT}  "
-            f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
-            f"Full Payoff: {fmt_money(a['full_payoff'])}\n"
+            f"Outstanding: {fmt_money(a['current_value'])}  {MDOT}  "
+            f"Current Value: {fmt_money(a['current_value'])}\n"
             f"Total Paid: {fmt_money(a['total_paid'])}  {MDOT}  "
-            f"Total Expected: {fmt_money(a['total_expected'])}  {MDOT}  "
             f"Interest Accrued: {fmt_money(a['total_interest_accrued'])}"
         )
         a_lbl.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;padding:6px 0;")
@@ -1528,64 +1530,19 @@ class LoansTakePage(_FunctionPage):
             d.setWordWrap(True)
             lay.addWidget(d)
 
-        # tabs
-        tabs = QTabWidget()
-        if rows:
-            tabs.addTab(_amort_actuals_cards(rows), "Amortization + Actuals")
-
-        # Non-EMI: show saved plan or create button
-        if emi_type == "NON_EMI":
-            saved_start = loan.get("amort_start_date")
-            saved_tenure = loan.get("amort_tenure")
-            if saved_start and saved_tenure:
-                plan_sched = LoanService.plan_amortization(
-                    a["current_value"], rate, saved_tenure,
-                    loan.get("interest_type") or "ANNUAL", mthd)
-                tabs.addTab(_amort_cards(plan_sched), f"Repayment Plan ({saved_tenure}mo)")
-            else:
-                plan_widget = QWidget()
-                pw_lay = QVBoxLayout(plan_widget)
-                hint = QLabel("No repayment plan yet. Create one to see an amortization schedule.")
-                hint.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-                hint.setAlignment(Qt.AlignCenter)
-                pw_lay.addWidget(hint)
-                plan_btn_inner = QPushButton("\U0001f4c5  Create Repayment Plan")
-                plan_btn_inner.setObjectName("primary")
-                plan_btn_inner.clicked.connect(lambda: self._create_plan_and_close(loan, a, dlg))
-                pw_lay.addWidget(plan_btn_inner)
-                pw_lay.addStretch()
-                tabs.addTab(plan_widget, "Repayment Plan")
-
-        # Overdue: show closure plan if saved
-        closure_date_str = loan.get("target_closure_date")
-        if closure_date_str:
-            td = date.fromisoformat(closure_date_str)
-            today_d = date.today()
-            rem = max(1, round((td - today_d).days / 30.44))
-            fq = loan.get("interest_type") or "ANNUAL"
-            md2 = loan.get("interest_method") or "COMPOUND"
-            cv2 = a["current_value"]
-            closure_sched = LoanService.plan_amortization(cv2, rate, rem, fq, md2)
-            tabs.addTab(_amort_cards(closure_sched), f"Closure Plan → {closure_date_str}")
-
-        tabs.addTab(_repayment_cards(repayments, "amount_paid", "payment_date"), "Repayment Log")
-        lay.addWidget(tabs, 1)
+        # repayment log
+        lay.addWidget(_repayment_cards(repayments, "amount_paid", "payment_date"), 1)
 
         # buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        if loan["status"] == "OVERDUE" and not closure_date_str:
-            plan_btn = QPushButton("\U0001f4c5  Plan Closure")
-            plan_btn.setToolTip("Set a target closure date and see updated EMI")
-            plan_btn.clicked.connect(lambda: self._plan_closure_and_close(loan, a, dlg))
-            btn_row.addWidget(plan_btn)
         if loan["status"] == "REPAID":
             close_btn = QPushButton("\u2705 Mark as Closed")
             close_btn.setObjectName("primary")
             close_btn.clicked.connect(lambda: self._mark_closed(loan_id, dlg))
             btn_row.addWidget(close_btn)
         pbtn = QPushButton("\U0001f5a8  Print PDF")
-        pbtn.clicked.connect(lambda: self._print_take_loan(loan, a, repayments, rows))
+        pbtn.clicked.connect(lambda: self._print_take_loan(loan, a, repayments))
         btn_row.addWidget(pbtn)
         ok = QPushButton("Close")
         ok.clicked.connect(dlg.accept)
@@ -1593,188 +1550,14 @@ class LoansTakePage(_FunctionPage):
         lay.addLayout(btn_row)
         dlg.exec_()
 
-    def _plan_closure_dlg(self, loan, a):
-        """Dialog to plan closure for overdue loan."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Plan Loan Closure")
-        dlg.setMinimumWidth(420)
-        lay = QVBoxLayout(dlg)
-
-        info = QLabel(
-            f"Outstanding: {fmt_money(a['current_value'])}\n"
-            f"Original EMI: {fmt_money(a['original_emi'])}  {MDOT}  "
-            f"Elapsed: {a['months_elapsed']} months  {MDOT}  "
-            f"Paid: {fmt_money(a['total_paid'])}"
-        )
-        info.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
-
-        form = QFormLayout()
-        closure_date = QDateEdit(QDate.currentDate().addMonths(6))
-        closure_date.setCalendarPopup(True)
-        form.addRow("Target Closure Date", closure_date)
-        lay.addLayout(form)
-
-        result_lbl = QLabel("")
-        result_lbl.setStyleSheet(f"color:{C['accent']};font-weight:800;font-size:14px;")
-        result_lbl.setWordWrap(True)
-        lay.addWidget(result_lbl)
-
-        new_sched_container = QVBoxLayout()
-        new_sched_container.setAlignment(Qt.AlignTop)
-
-        def calc():
-            target = closure_date.date().toPyDate()
-            today = date.today()
-            rem_months = max(1, round((target - today).days / 30.44))
-            rate = loan["interest_rate"] or 0
-            fq = loan.get("interest_type") or "ANNUAL"
-            md = loan.get("interest_method") or "COMPOUND"
-            cv = a["current_value"]
-            if md == "SIMPLE":
-                new_emi = round(cv / rem_months, 2) if rem_months else 0
-            else:
-                new_emi = LoanService.compound_emi(cv, rate, rem_months, fq)
-            total = round(new_emi * rem_months, 2)
-            result_lbl.setText(
-                f"Updated EMI: {fmt_money(new_emi)}/month\n"
-                f"Remaining Months: {rem_months}\n"
-                f"Total to Repay: {fmt_money(total)}\n"
-                f"Interest Component: {fmt_money(max(total - cv, 0))}"
-            )
-            new_sched = LoanService.plan_amortization(cv, rate, rem_months, fq, md)
-            _clear_layout(new_sched_container)
-            new_sched_container.addWidget(_amort_cards(new_sched))
-
-        closure_date.dateChanged.connect(calc)
-        calc()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        inner = QWidget()
-        inner.setLayout(new_sched_container)
-        scroll.setWidget(inner)
-        lay.addWidget(scroll, 1)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        save_btn = QPushButton("\u2705 Save & Apply")
-        save_btn.setObjectName("primary")
-        def save_closure():
-            target_str = closure_date.date().toString("yyyy-MM-dd")
-            self.db.execute("UPDATE borrowed_loans SET target_closure_date=? WHERE loan_id=?",
-                            (target_str, loan["loan_id"]))
-            self.db.commit()
-            dlg.accept()
-        save_btn.clicked.connect(save_closure)
-        btn_row.addWidget(save_btn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(dlg.reject)
-        btn_row.addWidget(ok)
-        lay.addLayout(btn_row)
-        return dlg.exec_() == QDialog.Accepted
-
-    def _create_plan_dlg(self, loan, a):
-        """Create amortization plan for a Non-EMI loan."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Create Repayment Plan")
-        dlg.setMinimumWidth(420)
-        dlg.setMinimumHeight(500)
-        lay = QVBoxLayout(dlg)
-
-        info = QLabel(
-            f"Outstanding: {fmt_money(a['current_value'])}\n"
-            f"Rate: {loan['interest_rate']}%  {MDOT}  "
-            f"Interest Accrued: {fmt_money(a['total_interest_accrued'])}"
-        )
-        info.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
-
-        form = QFormLayout()
-        plan_start = QDateEdit(QDate.currentDate())
-        plan_start.setCalendarPopup(True)
-        tenure = QSpinBox()
-        tenure.setRange(1, 480)
-        tenure.setValue(12)
-        form.addRow("Payment Start Date", plan_start)
-        form.addRow("Tenure (months)", tenure)
-        lay.addLayout(form)
-
-        result_lbl = QLabel("")
-        result_lbl.setStyleSheet(f"color:{C['accent']};font-weight:800;font-size:13px;")
-        result_lbl.setWordWrap(True)
-        lay.addWidget(result_lbl)
-
-        sched_container = QVBoxLayout()
-        sched_container.setAlignment(Qt.AlignTop)
-
-        def calc():
-            months = tenure.value()
-            rate = loan["interest_rate"] or 0
-            fq = loan.get("interest_type") or "ANNUAL"
-            md = loan.get("interest_method") or "SIMPLE"
-            cv = a["current_value"]
-            if md == "SIMPLE":
-                new_emi = round(cv / months, 2) if months else 0
-            else:
-                new_emi = LoanService.compound_emi(cv, rate, months, fq)
-            total = round(new_emi * months, 2)
-            result_lbl.setText(
-                f"EMI: {fmt_money(new_emi)}/mo  |  Total: {fmt_money(total)}  |  Interest: {fmt_money(max(total - cv, 0))}"
-            )
-            sched = LoanService.plan_amortization(cv, rate, months, fq, md)
-            _clear_layout(sched_container)
-            sched_container.addWidget(_amort_cards(sched))
-
-        tenure.valueChanged.connect(calc)
-        plan_start.dateChanged.connect(calc)
-        calc()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        inner = QWidget()
-        inner.setLayout(sched_container)
-        scroll.setWidget(inner)
-        lay.addWidget(scroll, 1)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        save_btn = QPushButton("\u2705 Save Plan")
-        save_btn.setObjectName("primary")
-        def save_plan():
-            self.db.execute(
-                "UPDATE borrowed_loans SET amort_start_date=?, amort_tenure=? WHERE loan_id=?",
-                (plan_start.date().toString("yyyy-MM-dd"), tenure.value(), loan["loan_id"]))
-            self.db.commit()
-            dlg.accept()
-        save_btn.clicked.connect(save_plan)
-        btn_row.addWidget(save_btn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(dlg.reject)
-        btn_row.addWidget(ok)
-        lay.addLayout(btn_row)
-        return dlg.exec_() == QDialog.Accepted
-
     def _plan_closure_and_close(self, loan, a, detail_dlg):
-        """Plan Closure popup — closes detail dialog after save so it refreshes."""
-        result = self._plan_closure_dlg(loan, a)
-        if result:
-            detail_dlg.accept()
-            self.load_list()
+        pass  # removed
 
     def _create_plan_and_close(self, loan, a, detail_dlg):
-        """Create Plan popup — closes detail dialog after save so it refreshes."""
-        result = self._create_plan_dlg(loan, a)
-        if result:
-            detail_dlg.accept()
-            self.load_list()
+        pass  # removed
 
     def _mark_closed(self, loan_id, dlg=None):
-        if _confirm(self, "Mark Closed", "Confirm: this loan is fully repaid. Mark as CLOSED?"):
+        if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
             self.repos["borrowed"].update_status(loan_id, "CLOSED")
             self.load_list()
             if dlg:
@@ -1782,27 +1565,27 @@ class LoansTakePage(_FunctionPage):
             return True
         return False
 
-    def _print_take_loan(self, loan, a, repayments, rows):
-        mth_label = "Simple" if (loan.get("interest_method") or "COMPOUND") == "SIMPLE" else f"Compound ({loan.get('interest_type', 'ANNUAL')})"
+    def _print_take_loan(self, loan, a, repayments):
+        emi_type = loan.get("emi_type") or "EMI"
+        mthd = loan.get("interest_method") or "COMPOUND"
+        freq = loan.get("interest_type") or "ANNUAL"
+        mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
         info = [
             ("Principal", fmt_money(loan["principal_amount"])),
             ("Rate", f"{loan['interest_rate']}%"),
             ("Method", mth_label),
-            ("Original EMI", fmt_money(a["original_emi"])),
             ("Start", loan["start_date"]),
             ("Due", loan.get("due_date") or EM_DASH),
         ]
+        if emi_type == "EMI":
+            info.insert(3, ("EMI", fmt_money(a["original_emi"])))
         analysis = [
+            ("Outstanding", fmt_money(a["current_value"])),
             ("Current Value", fmt_money(a["current_value"])),
-            ("Updated EMI", fmt_money(a["updated_emi"])),
-            ("Full Payoff", fmt_money(a["full_payoff"])),
             ("Total Paid", fmt_money(a["total_paid"])),
             ("Interest Accrued", fmt_money(a["total_interest_accrued"])),
         ]
         sections = []
-        if rows:
-            sections.append({"title": "Amortization + Actuals", "color": "#4F46E5",
-                             "type": "amort_actuals", "data": rows})
         if repayments:
             rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
                       "description": r.get("description") or ""} for r in repayments]
@@ -2073,15 +1856,16 @@ class FDGivePage(_FunctionPage):
             return True
         return False
 
-    def _mark_withdrawn(self, fd_id, account_id, method_id):
+    def _mark_withdrawn(self, fd_id, account_id, method_id, fee=0):
         fd = self.repos["fd"].get(fd_id)
         if not fd:
             return False
-        amount = fd["maturity_amount"] or fd["principal_amount"]
+        amount = max((fd["maturity_amount"] or fd["principal_amount"]) - fee, 0)
         _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
             tx_type="CREDIT", amount=amount, person_org=None,
-            description="FD maturity withdrawal", category_names=("Investment", "Finance")
+            description="FD maturity withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
+            category_names=("Investment", "Finance")
         )
         self.repos["fd"].update_status(fd_id, "WITHDRAWN")
         self.load_list()
@@ -2152,10 +1936,24 @@ class FDDetailDialog(QDialog):
         if idx >= 0:
             acc_cb.setCurrentIndex(idx)
         method_cb = _method_combo(self.lookups_repo)
+        fee_spin = QDoubleSpinBox()
+        fee_spin.setRange(0, 999999)
+        fee_spin.setPrefix("\u20b9 ")
+        fee_spin.setDecimals(2)
+        fee_spin.setValue(0)
+        amt = self.fd["maturity_amount"] or self.fd["principal_amount"]
+        net_lbl = QLabel(f"Net credit: {fmt_money(amt)}")
+        net_lbl.setStyleSheet(f"color:{C['green']};font-weight:800;font-size:13px;")
+        def update_net():
+            net = max(amt - fee_spin.value(), 0)
+            net_lbl.setText(f"Net credit: {fmt_money(net)}")
+        fee_spin.valueChanged.connect(update_net)
         f.addRow("Credit Into *", acc_cb)
         f.addRow("Method *", method_cb)
+        f.addRow("Premature Fee / Charges", fee_spin)
+        f.addRow("", net_lbl)
         row = QHBoxLayout()
-        ok_btn = QPushButton("Confirm")
+        ok_btn = QPushButton("Confirm Withdrawal")
         ok_btn.setObjectName("primary")
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(dlg.reject)
@@ -2165,7 +1963,8 @@ class FDDetailDialog(QDialog):
         row.addWidget(ok_btn)
         f.addRow("", row)
         if dlg.exec_() == QDialog.Accepted:
-            if self._on_withdrawn(acc_cb.currentData(), method_cb.currentData()):
+            fee = fee_spin.value()
+            if self._on_withdrawn(acc_cb.currentData(), method_cb.currentData(), fee):
                 self.accept()
 
 
@@ -2464,13 +2263,36 @@ class FDOthersPage(_FunctionPage):
         if not dep:
             return
         repayments = self.repos["deposits"].get_repayments(deposit_id)
+        a = self._analysis(dep)
+        def print_dep():
+            info = [
+                ("Principal", fmt_money(dep["principal_amount"])),
+                ("Rate", f"{dep.get('interest_rate') or 0}%"),
+                ("Method", dep.get("interest_method") or "SIMPLE"),
+                ("Deposit Date", dep["deposit_date"]),
+                ("Return Date", dep.get("expected_return_date") or EM_DASH),
+            ]
+            analysis = [
+                ("Outstanding", fmt_money(a["current_value"])),
+                ("Total Paid", fmt_money(a["total_paid"])),
+                ("Interest Accrued", fmt_money(a["total_interest_accrued"])),
+            ]
+            sections = []
+            if repayments:
+                rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
+                          "description": r.get("description") or ""} for r in repayments]
+                sections.append({"title": "Repayment Log", "color": "#059669",
+                                 "type": "repayment", "data": rdata})
+            _export_detail_to_pdf(self, f"Deposit from {dep['depositor_name']}", dep["status"],
+                                  info, analysis, sections)
         dlg = LoanDetailDialog(
             role="take", title=f"Deposit from {dep['depositor_name']}",
             principal=dep["principal_amount"], status=dep["status"],
             start_date=dep["deposit_date"], due_date=dep["expected_return_date"],
             description=dep.get("description"), repayments=repayments,
             amount_key="amount_paid", date_key="payment_date",
-            on_mark_closed=lambda: self._mark_closed(deposit_id), parent=self
+            on_mark_closed=lambda: self._mark_closed(deposit_id),
+            on_print=print_dep, parent=self
         )
         dlg.exec_()
 
@@ -2500,9 +2322,10 @@ class FDOthersPage(_FunctionPage):
                     "full_payoff": cv, "total_expected": dep["principal_amount"],
                     "total_paid": total_paid, "total_interest_accrued": 0,
                     "months_elapsed": 0, "months_remaining": 0}
+        payments = self.repos["deposits"].get_repayments(dep["deposit_id"])
         return LoanService.loan_analysis(
             dep["principal_amount"], rate, months, "ANNUAL",
-            total_paid, dep["deposit_date"], method=method
+            total_paid, dep["deposit_date"], payments=payments, method=method
         )
 
     def _check_repaid(self, deposit_id):

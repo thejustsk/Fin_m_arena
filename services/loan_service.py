@@ -72,7 +72,7 @@ class LoanService:
     # ── full loan analysis ───────────────────────────────────────────
     @staticmethod
     def loan_analysis(principal, rate_pct, months, frequency, total_paid,
-                      start_date, as_of_date=None, method="COMPOUND"):
+                      start_date, as_of_date=None, method="COMPOUND", payments=None):
         """
         Reducing-balance (compound) or flat (simple) analysis as of *as_of_date*.
         """
@@ -80,12 +80,13 @@ class LoanService:
             return LoanService._simple_analysis(
                 principal, rate_pct, months, total_paid, start_date, as_of_date)
         return LoanService._compound_analysis(
-            principal, rate_pct, months, frequency, total_paid, start_date, as_of_date)
+            principal, rate_pct, months, frequency, total_paid, start_date, as_of_date,
+            payments=payments)
 
     # ── compound (reducing balance) ──────────────────────────────────
     @staticmethod
     def _compound_analysis(principal, rate_pct, months, frequency, total_paid,
-                           start_date, as_of_date=None):
+                           start_date, as_of_date=None, payments=None):
         if as_of_date is None:
             as_of_date = _date.today()
         if isinstance(start_date, str):
@@ -173,7 +174,7 @@ class LoanService:
     # ── non-EMI analysis (variable repayment, no fixed schedule) ────
     @staticmethod
     def non_emi_analysis(principal, rate_pct, total_paid, start_date,
-                         as_of_date=None, method="SIMPLE"):
+                         payments=None, as_of_date=None, method="SIMPLE"):
         if as_of_date is None:
             as_of_date = _date.today()
         if isinstance(start_date, str):
@@ -182,12 +183,33 @@ class LoanService:
             as_of_date = _date.fromisoformat(as_of_date)
         elapsed = (as_of_date.year - start_date.year) * 12 + (as_of_date.month - start_date.month)
         elapsed = max(0, elapsed)
+
         if method == "SIMPLE":
+            # Simple interest: flat on original principal
             interest = round(principal * rate_pct / 100 * elapsed / 12, 2)
+            current_value = max(principal + interest - total_paid, 0)
         else:
-            r = (1 + rate_pct / 100) ** (elapsed / 12) - 1
-            interest = round(principal * r, 2)
-        current_value = max(principal + interest - total_paid, 0)
+            # Compound: simulate month-by-month with actual payments
+            r = LoanService._monthly_rate(rate_pct, "ANNUAL")
+            bal = float(principal)
+            total_interest = 0.0
+            for m in range(elapsed):
+                month_start = _date(start_date.year + (start_date.month + m - 1) // 12,
+                                    (start_date.month + m - 1) % 12 + 1, 1)
+                month_end_y = start_date.year + (start_date.month + m) // 12
+                month_end_m = (start_date.month + m) % 12 + 1
+                month_end = _date(month_end_y, month_end_m, 1)
+                mi, me = month_start.isoformat(), month_end.isoformat()
+                int_m = bal * r
+                total_interest += int_m
+                if payments:
+                    mp = sum(p["amount_paid"] for p in payments if mi <= p["payment_date"] < me)
+                    bal = max(bal + int_m - mp, 0)
+                else:
+                    bal = bal + int_m
+            current_value = max(bal, 0)
+            interest = round(total_interest, 2)
+
         return {
             "current_value": round(current_value, 2), "original_emi": 0, "updated_emi": 0,
             "full_payoff": round(current_value, 2), "total_expected": round(principal + interest, 2),
