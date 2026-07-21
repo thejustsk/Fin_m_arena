@@ -34,3 +34,19 @@ class DepositsRepo:
         r = self.db.execute(
             "SELECT COALESCE(SUM(amount_paid),0) AS t FROM deposit_repayments_to_others WHERE deposit_id=?",
             (did,)).fetchone(); return r["t"]
+
+    def get_deposit(self, did):
+        rows = _rows(self.db.execute(
+            "SELECT d.*, dep.name AS depositor_name FROM deposits_from_others d "
+            "JOIN depositors dep ON dep.depositor_id=d.depositor_id WHERE d.deposit_id=?",
+            (did,)).fetchall())
+        return rows[0] if rows else None
+
+    def get_repayments(self, did):
+        return _rows(self.db.execute(
+            "SELECT * FROM deposit_repayments_to_others WHERE deposit_id=? ORDER BY payment_date",
+            (did,)).fetchall())
+
+    def update_status(self, did, status):
+        self.db.execute("UPDATE deposits_from_others SET status=? WHERE deposit_id=?", (status, did))
+        self.db.commit()

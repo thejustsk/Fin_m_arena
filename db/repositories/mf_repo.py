@@ -36,3 +36,13 @@ class MFRepo:
             else:
                 red += r["amt"]; units -= r["u"]
         return {"invested": inv, "redeemed": red, "units": units}
+
+    def get_scheme(self, sid):
+        rows = _rows(self.db.execute(
+            "SELECT * FROM mf_schemes WHERE scheme_id=?", (sid,)).fetchall())
+        return rows[0] if rows else None
+
+    def list_txns(self, sid):
+        return _rows(self.db.execute(
+            "SELECT * FROM mf_transactions WHERE scheme_id=? ORDER BY txn_date",
+            (sid,)).fetchall())

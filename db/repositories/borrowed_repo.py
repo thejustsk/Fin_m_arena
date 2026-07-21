@@ -1,6 +1,6 @@
 """Loans I take (institution borrowing) repository."""
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 def _rows(rows): return [dict(r) for r in rows] if rows else []
 def _row(row): return dict(row) if row else None
@@ -41,3 +41,19 @@ class BorrowedRepo:
         r = self.db.execute(
             "SELECT COALESCE(SUM(amount_paid),0) AS t FROM borrowed_loan_repayments WHERE loan_id=?",
             (lid,)).fetchone(); return r["t"]
+
+    def sync_overdue(self):
+        today = date.today().isoformat()
+        self.db.execute(
+            "UPDATE borrowed_loans SET status='OVERDUE' WHERE status='ACTIVE' AND due_date IS NOT NULL AND due_date < ?",
+            (today,))
+        self.db.commit()
+
+    def update_status(self, loan_id, status):
+        self.db.execute("UPDATE borrowed_loans SET status=? WHERE loan_id=?", (status, loan_id))
+        self.db.commit()
+
+    def get_repayments(self, loan_id):
+        return _rows(self.db.execute(
+            "SELECT * FROM borrowed_loan_repayments WHERE loan_id=? ORDER BY payment_date",
+            (loan_id,)).fetchall())

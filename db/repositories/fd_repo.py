@@ -1,6 +1,6 @@
 """Fixed Deposits repository."""
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 def _rows(rows): return [dict(r) for r in rows] if rows else []
 
@@ -24,3 +24,21 @@ class FDRepo:
             "SELECT fd.*, a.display_name AS account_name FROM fixed_deposits fd "
             "LEFT JOIN accounts a ON a.account_id=fd.bank_account_id ORDER BY fd.created_at DESC"
         ).fetchall())
+
+    def get(self, fd_id):
+        rows = _rows(self.db.execute(
+            "SELECT fd.*, a.display_name AS account_name FROM fixed_deposits fd "
+            "LEFT JOIN accounts a ON a.account_id=fd.bank_account_id WHERE fd.fd_id=?",
+            (fd_id,)).fetchall())
+        return rows[0] if rows else None
+
+    def update_status(self, fd_id, status):
+        self.db.execute("UPDATE fixed_deposits SET status=? WHERE fd_id=?", (status, fd_id))
+        self.db.commit()
+
+    def sync_matured(self):
+        today = date.today().isoformat()
+        self.db.execute(
+            "UPDATE fixed_deposits SET status='MATURED' WHERE status='ACTIVE' AND maturity_date <= ?",
+            (today,))
+        self.db.commit()
