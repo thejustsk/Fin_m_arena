@@ -283,6 +283,10 @@ def run_migrations(db):
         ("card_cycles", "paid", "REAL DEFAULT 0"),
         ("card_cycles", "remaining", "REAL DEFAULT 0"),
         ("borrowed_loans", "interest_type", "TEXT DEFAULT 'ANNUAL'"),
+        ("borrowed_loans", "interest_method", "TEXT DEFAULT 'COMPOUND'"),
+        ("loans", "interest_rate", "REAL DEFAULT 0"),
+        ("loans", "interest_method", "TEXT DEFAULT 'SIMPLE'"),
+        ("deposits_from_others", "interest_method", "TEXT DEFAULT 'SIMPLE'"),
     ]
     for table, col, typedef in _safe_cols:
         try:

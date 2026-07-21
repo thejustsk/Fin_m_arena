@@ -541,6 +541,12 @@ class LoansGivePage(_FunctionPage):
         self.lg_loan_amount.setRange(0, 99999999)
         self.lg_loan_amount.setPrefix("\u20b9 ")
         self.lg_loan_amount.setDecimals(2)
+        self.lg_loan_rate = QDoubleSpinBox()
+        self.lg_loan_rate.setRange(0, 60)
+        self.lg_loan_rate.setSuffix(" %")
+        self.lg_loan_rate.setDecimals(2)
+        self.lg_loan_method_type = QComboBox()
+        self.lg_loan_method_type.addItems(["Simple Interest", "Compound Interest"])
         self.lg_loan_account = _account_combo(self.repos["accounts"])
         self.lg_loan_method = _method_combo(self.repos["lookups"])
         self.lg_loan_start = QDateEdit(QDate.currentDate())
@@ -554,6 +560,8 @@ class LoansGivePage(_FunctionPage):
         give_btn.clicked.connect(self._give_loan)
         f1.addRow("Borrower *", _entity_row(self.lg_loan_borrower, self._add_borrower_dlg))
         f1.addRow("Loan Amount *", self.lg_loan_amount)
+        f1.addRow("Interest Rate", self.lg_loan_rate)
+        f1.addRow("Interest Method", self.lg_loan_method_type)
         f1.addRow("Pay From *", self.lg_loan_account)
         f1.addRow("Method *", self.lg_loan_method)
         f1.addRow("Start Date", self.lg_loan_start)
@@ -648,8 +656,11 @@ class LoansGivePage(_FunctionPage):
             tx_type="DEBIT", amount=amount, person_org=borrower_name,
             description=f"Loan given to {borrower_name}", category_names=("Finance", "Other")
         )
+        rate = self.lg_loan_rate.value()
+        imethod = "COMPOUND" if self.lg_loan_method_type.currentIndex() == 1 else "SIMPLE"
         self.repos["loans"].create_loan(
             borrower_id=bid, loan_amount=amount, payment_method=method,
+            interest_rate=rate, interest_method=imethod,
             start_date=self.lg_loan_start.date().toString("yyyy-MM-dd"),
             due_date=self.lg_loan_due.date().toString("yyyy-MM-dd"),
             status="ACTIVE", description=self.lg_loan_desc.text().strip() or None, trxn_id=txn_id
@@ -687,6 +698,23 @@ class LoansGivePage(_FunctionPage):
         self.load_list()
         QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
+    # ── analysis helper ──
+    def _loan_months(self, loan):
+        sd = date.fromisoformat(loan["start_date"])
+        dd = loan.get("due_date")
+        if dd:
+            return max(1, round((date.fromisoformat(dd) - sd).days / 30.44))
+        return 12
+
+    def _analysis(self, loan):
+        total_paid = self.repos["loans"].total_repaid(loan["loan_id"])
+        months = self._loan_months(loan)
+        method = loan.get("interest_method") or "SIMPLE"
+        rate = loan.get("interest_rate") or 0
+        return LoanService.loan_analysis(
+            loan["loan_amount"], rate, months, "ANNUAL", total_paid, loan["start_date"], method=method
+        )
+
     # ── List ──
     def load_list(self):
         # normalize CLEARED → CLOSED
@@ -718,7 +746,7 @@ class LoansGivePage(_FunctionPage):
             loans = [l for l in loans if search in l["borrower_name"].lower()]
         # sort (always ascending, then flip if direction is descending)
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
-        rank = {"ACTIVE": 0, "OVERDUE": 1, "PARTIALLY_PAID": 2, "CLOSED": 3}
+        rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2, "REPAID": 3, "CLOSED": 4}
         if mode == "Status":
             loans.sort(key=lambda l: rank.get(l["status"], 9))
         elif mode == "Borrower":
@@ -737,16 +765,18 @@ class LoansGivePage(_FunctionPage):
             self._list_lay.addWidget(empty)
             return
         for l in loans:
-            paid = self.repos["loans"].total_repaid(l["loan_id"])
-            pending = l["loan_amount"] - paid
-            pct = (paid / l["loan_amount"] * 100) if l["loan_amount"] else 0
+            a = self._analysis(l)
+            pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
             color = status_color("loan", l["status"])
+            mth = l.get("interest_method") or "SIMPLE"
+            mth_tag = "SI" if mth == "SIMPLE" else "CI"
+            rate_tag = f"{l.get('interest_rate') or 0}% {mth_tag}" if (l.get("interest_rate") or 0) > 0 else "Interest-Free"
             card = _wealth_card(
                 title=l["borrower_name"],
-                subtitle=f"Given {l['start_date']} {MDOT} Due {l['due_date'] or EM_DASH}",
-                amount_text=fmt_money(pending) + " pending", badge_text=l["status"],
+                subtitle=f"Given {l['start_date']} {MDOT} Due {l['due_date'] or EM_DASH} {MDOT} {rate_tag}",
+                amount_text=fmt_money(a["current_value"]) + " outstanding", badge_text=l["status"],
                 badge_color=color, progress_pct=pct,
-                extra_line=f"Loan: {fmt_money(l['loan_amount'])} {MDOT} Repaid: {fmt_money(paid)}",
+                extra_line=f"Loan: {fmt_money(l['loan_amount'])} {MDOT} Interest: {fmt_money(a['total_interest_accrued'])} {MDOT} Paid: {fmt_money(a['total_paid'])}",
                 on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
             self._list_lay.addWidget(card)
@@ -794,9 +824,10 @@ class LoansTakePage(_FunctionPage):
         total_paid = self.repos["borrowed"].total_repaid(loan["loan_id"])
         months = self._loan_months(loan)
         freq = loan.get("interest_type") or "ANNUAL"
+        method = loan.get("interest_method") or "COMPOUND"
         return LoanService.loan_analysis(
             loan["principal_amount"], loan["interest_rate"] or 0,
-            months, freq, total_paid, loan["start_date"]
+            months, freq, total_paid, loan["start_date"], method=method
         )
 
     # ── Entry ─────────────────────────────────────────────────────────
@@ -811,6 +842,9 @@ class LoansTakePage(_FunctionPage):
         self.lt_loan_lender = SearchableCombo(placeholder="Search lender\u2026")
         self.lt_loan_freq = QComboBox()
         self.lt_loan_freq.addItems(self._FREQ_LABELS)
+        self.lt_loan_method_type = QComboBox()
+        self.lt_loan_method_type.addItems(["Simple Interest", "Compound Interest"])
+        self.lt_loan_method_type.currentIndexChanged.connect(self._toggle_freq_visible)
         self.lt_loan_principal = QDoubleSpinBox()
         self.lt_loan_principal.setRange(0, 999999999)
         self.lt_loan_principal.setPrefix("\u20b9 ")
@@ -840,7 +874,8 @@ class LoansTakePage(_FunctionPage):
         take_btn.setObjectName("primary")
         take_btn.clicked.connect(self._take_loan)
         f1.addRow("Lender *", _entity_row(self.lt_loan_lender, self._add_lender_dlg))
-        f1.addRow("Interest Type", self.lt_loan_freq)
+        f1.addRow("Interest Method", self.lt_loan_method_type)
+        f1.addRow("Compounding", self.lt_loan_freq)
         f1.addRow("Principal *", self.lt_loan_principal)
         f1.addRow("Interest Rate (annual)", self.lt_loan_rate)
         f1.addRow("Tenure (months) *", self.lt_loan_months)
@@ -902,17 +937,25 @@ class LoansTakePage(_FunctionPage):
                 break
         QMessageBox.information(self, "Added", f"'{name}' added as a lender.")
 
+    def _toggle_freq_visible(self):
+        """Enable/disable compounding based on interest method."""
+        is_compound = self.lt_loan_method_type.currentIndex() == 1
+        self.lt_loan_freq.setEnabled(is_compound)
+        self._update_emi()
+
     def _update_emi(self):
         p = self.lt_loan_principal.value()
         r = self.lt_loan_rate.value()
         m = self.lt_loan_months.value()
         fi = self.lt_loan_freq.currentIndex()
         freq = self._FREQ_VALUES[fi] if fi >= 0 else "ANNUAL"
+        method = "COMPOUND" if self.lt_loan_method_type.currentIndex() == 1 else "SIMPLE"
         if p > 0 and m > 0:
-            emi = LoanService.emi(p, r, m, freq)
+            emi = LoanService.emi(p, r, m, freq, method)
             total = LoanService.total_expected(emi, m)
+            method_tag = "Simple" if method == "SIMPLE" else f"Compound ({freq})"
             self.lt_emi_preview.setText(
-                f"EMI: {fmt_money(emi)}/mo  |  Total Repay: {fmt_money(total)}  ({m} months)"
+                f"EMI: {fmt_money(emi)}/mo  |  Total Repay: {fmt_money(total)}  ({method_tag})"
             )
         else:
             self.lt_emi_preview.setText("EMI: \u2014  |  Total Repay: \u2014")
@@ -981,20 +1024,21 @@ class LoansTakePage(_FunctionPage):
         if not lid or principal <= 0:
             QMessageBox.warning(self, "Missing Info", "Select a lender and enter the principal.")
             return
-        emi = LoanService.emi(principal, rate, months, freq)
+        method = "COMPOUND" if self.lt_loan_method_type.currentIndex() == 1 else "SIMPLE"
+        emi = LoanService.emi(principal, rate, months, freq, method)
         start = self.lt_loan_start.date().toPyDate()
         due = _add_months(start, months)
         account_id = self.lt_loan_account.currentData()
-        method = self.lt_loan_method.currentData()
+        method_id = self.lt_loan_method.currentData()
         lender_name = self.lt_loan_lender.currentText()
         txn_id = _log_ledger_txn(
-            self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
+            self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
             tx_type="CREDIT", amount=principal, person_org=lender_name,
             description=f"Loan taken from {lender_name}", category_names=("Finance", "Other")
         )
         self.repos["borrowed"].create_loan(
             lender_id=lid, principal_amount=principal, interest_rate=rate, emi_amount=emi,
-            interest_type=freq,
+            interest_type=freq, interest_method=method,
             start_date=start.isoformat(), due_date=due.isoformat(), status="ACTIVE",
             description=self.lt_loan_desc.text().strip() or None, linked_txn_id=txn_id
         )
@@ -1088,9 +1132,12 @@ class LoansTakePage(_FunctionPage):
         for l in loans:
             a = self._analysis(l)
             color = status_color("liability", l["status"])
+            mth = l.get("interest_method") or "COMPOUND"
+            mth_tag = "SI" if mth == "SIMPLE" else "CI"
             freq_tag = l.get("interest_type") or "ANNUAL"
-            freq_short = {"ANNUAL": "Annual", "QUARTERLY": "Qtr", "SEMI_ANNUAL": "Semi"}.get(freq_tag, "")
-            sub = (f"Rate {l['interest_rate']}% {freq_short} {MDOT} "
+            freq_short = {"ANNUAL": "Ann", "QUARTERLY": "Qtr", "SEMI_ANNUAL": "Semi"}.get(freq_tag, "")
+            ci_extra = f" {freq_short}" if mth == "COMPOUND" else ""
+            sub = (f"Rate {l['interest_rate']}% {mth_tag}{ci_extra} {MDOT} "
                    f"EMI {fmt_money(a['original_emi'])} {MDOT} Due {l['due_date'] or EM_DASH}")
             amount_text = fmt_money(a["current_value"]) + " outstanding"
             extra = (f"Updated EMI: {fmt_money(a['updated_emi'])} {MDOT} "
@@ -1128,9 +1175,10 @@ class LoansTakePage(_FunctionPage):
         lay.addLayout(hdr)
 
         # info grid
+        mth_label = "Simple" if (loan.get("interest_method") or "COMPOUND") == "SIMPLE" else f"Compound ({freq})"
         info = QLabel(
             f"Principal: {fmt_money(loan['principal_amount'])}  {MDOT}  "
-            f"Rate: {loan['interest_rate']}%  {freq}  {MDOT}  "
+            f"Rate: {loan['interest_rate']}%  {mth_label}  {MDOT}  "
             f"Original EMI: {fmt_money(a['original_emi'])}\n"
             f"Start: {loan['start_date']}  {MDOT}  Due: {loan['due_date'] or EM_DASH}  {MDOT}  "
             f"Tenure: {months} months"
@@ -1594,6 +1642,8 @@ class FDOthersPage(_FunctionPage):
         self.fo_dep_interest_free.setChecked(True)
         self.fo_dep_interest_free.setObjectName("pill")
         self.fo_dep_interest_free.toggled.connect(self._toggle_if)
+        self.fo_dep_method_type = QComboBox()
+        self.fo_dep_method_type.addItems(["Simple Interest", "Compound Interest"])
         self.fo_dep_rate = QDoubleSpinBox()
         self.fo_dep_rate.setRange(0, 30)
         self.fo_dep_rate.setSuffix(" %")
@@ -1612,6 +1662,7 @@ class FDOthersPage(_FunctionPage):
         f1.addRow("Depositor *", _entity_row(self.fo_dep_depositor, self._add_depositor_dlg))
         f1.addRow("Amount *", self.fo_dep_amount)
         f1.addRow("", self.fo_dep_interest_free)
+        f1.addRow("Interest Method", self.fo_dep_method_type)
         f1.addRow("Interest Rate", self.fo_dep_rate)
         f1.addRow("Received Into *", self.fo_dep_account)
         f1.addRow("Method *", self.fo_dep_method)
@@ -1710,10 +1761,12 @@ class FDOthersPage(_FunctionPage):
             description=f"Deposit received from {name}", category_names=("Finance", "Other")
         )
         rate = None if self.fo_dep_interest_free.isChecked() else self.fo_dep_rate.value()
+        imethod = "COMPOUND" if self.fo_dep_method_type.currentIndex() == 1 else "SIMPLE"
         self.repos["deposits"].create_deposit(
             depositor_id=did, principal_amount=amount, interest_rate=rate,
             deposit_date=self.fo_dep_date.date().toString("yyyy-MM-dd"),
             expected_return_date=self.fo_dep_return_date.date().toString("yyyy-MM-dd"),
+            interest_method=imethod,
             status="ACTIVE", description=self.fo_dep_desc.text().strip() or None,
             linked_txn_id=txn_id
         )
