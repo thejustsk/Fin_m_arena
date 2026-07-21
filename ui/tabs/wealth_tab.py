@@ -711,6 +711,52 @@ class LoansGivePage(_FunctionPage):
     def _sort_options(self):
         return ["Status", "Borrower", "Amount", "Due Date"]
 
+    def _build_list(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        self._stats_row = QHBoxLayout()
+        lay.addLayout(self._stats_row)
+        fr = QHBoxLayout()
+        fr.setSpacing(8)
+        sort_lbl = QLabel("Sort by:")
+        sort_lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;font-weight:600;")
+        self._sort_cb = QComboBox()
+        self._sort_cb.addItems(self._sort_options())
+        self._sort_cb.currentIndexChanged.connect(self._on_sort_changed)
+        self._sort_asc = True
+        self._sort_order_btn = QPushButton("\u25b2")
+        self._sort_order_btn.setFixedSize(38, 38)
+        self._sort_order_btn.setFocusPolicy(Qt.NoFocus)
+        self._sort_order_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._sort_order_btn.clicked.connect(self._toggle_sort_dir)
+        self._sort_order_btn.setStyleSheet(
+            f"QPushButton{{font-family:'Segoe UI Symbol','Segoe UI',sans-serif;"
+            f"font-size:20px;font-weight:900;border:1.5px solid {C['accent']};"
+            f"border-radius:{C['radius_sm']};background:{C['surface']};"
+            f"color:{C['accent']};padding:0;margin:0;}}"
+            f"QPushButton:hover{{background:{C['accent']};color:white;}}"
+        )
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("\U0001f50d Search by name\u2026")
+        self._search_input.textChanged.connect(self._render_list)
+        self._search_input.setClearButtonEnabled(True)
+        # Print button
+        print_btn = QPushButton("\U0001f5a8 Print Pending")
+        print_btn.setFocusPolicy(Qt.NoFocus)
+        print_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        print_btn.clicked.connect(self._print_pending)
+        print_btn.setFixedHeight(36)
+        fr.addWidget(sort_lbl)
+        fr.addWidget(self._sort_cb)
+        fr.addWidget(self._sort_order_btn)
+        fr.addSpacing(12)
+        fr.addWidget(self._search_input, 1)
+        fr.addWidget(print_btn)
+        lay.addLayout(fr)
+        scroll, self._list_lay = self._scroll_area()
+        lay.addWidget(scroll, 1)
+        return page
+
     # ── Entry ──
     def _build_entry(self):
         page = QWidget()
@@ -938,12 +984,7 @@ class LoansGivePage(_FunctionPage):
             _metric_card("Pending Loans", str(pending_count)),
             _metric_card("Total Loans", str(len(loans))),
         ])
-        # print pending button
-        print_btn = QPushButton("\U0001f5a8  Print Pending")
-        print_btn.setFocusPolicy(Qt.NoFocus)
-        print_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        print_btn.clicked.connect(self._print_pending)
-        self._stats_row.addWidget(print_btn)
+
         # search
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
@@ -997,8 +1038,8 @@ class LoansGivePage(_FunctionPage):
         dlg.setWindowTitle("Print Pendings")
         dlg.setMinimumWidth(400)
         lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel("Select borrower to print non-closed pendings:"))
-        combo = SearchableCombo(placeholder="Search borrower...")
+        lay.addWidget(QLabel("Select person to print non-closed pendings:"))
+        combo = SearchableCombo(placeholder="Search person...")
         for b in self.repos["loans"].list_borrowers():
             combo.add_item(b["name"], b["borrower_id"])
         lay.addWidget(combo)
@@ -1025,7 +1066,7 @@ class LoansGivePage(_FunctionPage):
         if not borrower_loans:
             QMessageBox.information(self, "No Pendings", f"No pending items for {borrower_name}.")
             return
-        info = [("Borrower", borrower_name), ("Date", TODAY()), ("Count", str(len(borrower_loans)))]
+        info = [("Person", borrower_name), ("Date", TODAY()), ("Count", str(len(borrower_loans)))]
         sections = []
         for l in borrower_loans:
             a = self._analysis(l)
@@ -1821,7 +1862,8 @@ class FDGivePage(_FunctionPage):
             return
         for fd in fds:
             pct = FDService.progress(fd["start_date"], fd["maturity_date"])
-            fd_colors = {"ACTIVE": C["accent"], "MATURED": C["green"], "WITHDRAWN": C["text3"]}
+            fd_colors = {"ACTIVE": C["accent"], "MATURED": C["green"],
+                         "WITHDRAWN": C["text3"], "PREMATURE_WITHDRAWN": C["text3"]}
             color = fd_colors.get(fd["status"], C["text3"])
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(fd['maturity_amount'] or fd['principal_amount'])}</span>  "
@@ -1844,7 +1886,7 @@ class FDGivePage(_FunctionPage):
             return
         dlg = FDDetailDialog(
             fd, on_mark_matured=lambda: self._mark_matured(fd_id),
-            on_mark_withdrawn=lambda acc, method: self._mark_withdrawn(fd_id, acc, method),
+            on_mark_withdrawn=lambda acc, method, fee=0, net=0: self._mark_withdrawn(fd_id, acc, method, fee, net),
             accounts_repo=self.repos["accounts"], lookups_repo=self.repos["lookups"], parent=self
         )
         dlg.exec_()
@@ -1856,18 +1898,18 @@ class FDGivePage(_FunctionPage):
             return True
         return False
 
-    def _mark_withdrawn(self, fd_id, account_id, method_id, fee=0):
+    def _mark_withdrawn(self, fd_id, account_id, method_id, fee=0, net=0):
         fd = self.repos["fd"].get(fd_id)
         if not fd:
             return False
-        amount = max((fd["maturity_amount"] or fd["principal_amount"]) - fee, 0)
+        amount = net if net > 0 else max((fd["maturity_amount"] or fd["principal_amount"]) - fee, 0)
         _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
             tx_type="CREDIT", amount=amount, person_org=None,
-            description="FD maturity withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
+            description="FD premature withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
             category_names=("Investment", "Finance")
         )
-        self.repos["fd"].update_status(fd_id, "WITHDRAWN")
+        self.repos["fd"].update_status(fd_id, "PREMATURE_WITHDRAWN")
         self.load_list()
         return True
 
@@ -1930,24 +1972,59 @@ class FDDetailDialog(QDialog):
     def _do_withdrawn(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Withdraw FD")
+        dlg.setMinimumWidth(420)
         f = QFormLayout(dlg)
         acc_cb = _account_combo(self.accounts_repo)
         idx = acc_cb.findData(self.fd["bank_account_id"])
         if idx >= 0:
             acc_cb.setCurrentIndex(idx)
         method_cb = _method_combo(self.lookups_repo)
+        # withdrawal date
+        wd_date = QDateEdit(QDate.currentDate())
+        wd_date.setCalendarPopup(True)
+        # fee
         fee_spin = QDoubleSpinBox()
         fee_spin.setRange(0, 999999)
         fee_spin.setPrefix("\u20b9 ")
         fee_spin.setDecimals(2)
         fee_spin.setValue(0)
-        amt = self.fd["maturity_amount"] or self.fd["principal_amount"]
-        net_lbl = QLabel(f"Net credit: {fmt_money(amt)}")
+        # preview
+        net_lbl = QLabel("")
         net_lbl.setStyleSheet(f"color:{C['green']};font-weight:800;font-size:13px;")
+        net_lbl.setWordWrap(True)
+
         def update_net():
-            net = max(amt - fee_spin.value(), 0)
-            net_lbl.setText(f"Net credit: {fmt_money(net)}")
+            wd = wd_date.date().toPyDate()
+            sd = date.fromisoformat(self.fd["start_date"])
+            days = max((wd - sd).days, 0)
+            p = self.fd["principal_amount"]
+            r = self.fd["interest_rate"] or 0
+            freq = self.fd.get("interest_type") or "QUARTERLY"
+            mthd = self.fd.get("interest_method") or "COMPOUND"
+            if mthd == "SIMPLE":
+                interest = round(p * r / 100 * days / 365.25, 2)
+            else:
+                # compound up to withdrawal date
+                years = days / 365.25
+                periods = {"ANNUAL": 1, "SEMI_ANNUAL": 2, "QUARTERLY": 4}.get(freq, 4)
+                rate_per = r / (100 * periods)
+                n = periods * years
+                interest = round(p * ((1 + rate_per) ** n - 1), 2) if n > 0 else 0
+            gross = p + interest
+            fee = fee_spin.value()
+            net = max(gross - fee, 0)
+            net_lbl.setText(
+                f"Principal: {fmt_money(p)}\n"
+                f"Interest ({days} days): {fmt_money(interest)}\n"
+                f"Gross: {fmt_money(gross)}  -  Fee: {fmt_money(fee)}\n"
+                f"Net Credit: {fmt_money(net)}"
+            )
+
+        wd_date.dateChanged.connect(update_net)
         fee_spin.valueChanged.connect(update_net)
+        update_net()
+
+        f.addRow("Withdrawal Date", wd_date)
         f.addRow("Credit Into *", acc_cb)
         f.addRow("Method *", method_cb)
         f.addRow("Premature Fee / Charges", fee_spin)
@@ -1963,8 +2040,24 @@ class FDDetailDialog(QDialog):
         row.addWidget(ok_btn)
         f.addRow("", row)
         if dlg.exec_() == QDialog.Accepted:
+            wd = wd_date.date().toPyDate()
+            sd = date.fromisoformat(self.fd["start_date"])
+            days = max((wd - sd).days, 0)
+            p = self.fd["principal_amount"]
+            r = self.fd["interest_rate"] or 0
+            freq = self.fd.get("interest_type") or "QUARTERLY"
+            mthd = self.fd.get("interest_method") or "COMPOUND"
+            if mthd == "SIMPLE":
+                interest = round(p * r / 100 * days / 365.25, 2)
+            else:
+                years = days / 365.25
+                periods = {"ANNUAL": 1, "SEMI_ANNUAL": 2, "QUARTERLY": 4}.get(freq, 4)
+                rate_per = r / (100 * periods)
+                n = periods * years
+                interest = round(p * ((1 + rate_per) ** n - 1), 2) if n > 0 else 0
             fee = fee_spin.value()
-            if self._on_withdrawn(acc_cb.currentData(), method_cb.currentData(), fee):
+            net = max(p + interest - fee, 0)
+            if self._on_withdrawn(acc_cb.currentData(), method_cb.currentData(), fee, net):
                 self.accept()
 
 
@@ -2237,11 +2330,15 @@ class FDOthersPage(_FunctionPage):
             interest_free = not d["interest_rate"]
             if d["status"] == "CLOSED":
                 color = C["text3"]
+            elif d["status"] == "REPAID":
+                color = C["green"]
             elif a["total_paid"] > 0 and a["current_value"] > 0:
                 color = C["amber"]
             else:
                 color = C["accent"]
-            badge_text = "Interest-Free" if interest_free else f"{d['interest_rate']}%"
+            interest_tag = "Interest-Free" if interest_free else f"{d['interest_rate']}%"
+            status_tag = d["status"]
+            badge_text = f"{interest_tag} | {status_tag}"
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(a['current_value'])}</span>  "
                      f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
