@@ -37,6 +37,7 @@ class BorrowedRepo:
         cols = ", ".join(kw.keys()); phs = ", ".join(["?"]*len(kw))
         self.db.execute(f"INSERT INTO borrowed_loan_repayments({cols}) VALUES({phs})",
                         tuple(kw.values())); self.db.commit()
+        self._sync_status(kw["loan_id"])
     def total_repaid(self, lid):
         r = self.db.execute(
             "SELECT COALESCE(SUM(amount_paid),0) AS t FROM borrowed_loan_repayments WHERE loan_id=?",
@@ -45,8 +46,8 @@ class BorrowedRepo:
     def sync_overdue(self):
         today = date.today().isoformat()
         self.db.execute(
-            "UPDATE borrowed_loans SET status='OVERDUE' WHERE status='ACTIVE' AND due_date IS NOT NULL AND due_date < ?",
-            (today,))
+            "UPDATE borrowed_loans SET status='OVERDUE' WHERE status IN ('ACTIVE','PARTIALLY_PAID') "
+            "AND due_date IS NOT NULL AND due_date < ?", (today,))
         self.db.commit()
 
     def update_status(self, loan_id, status):
@@ -57,3 +58,31 @@ class BorrowedRepo:
         return _rows(self.db.execute(
             "SELECT * FROM borrowed_loan_repayments WHERE loan_id=? ORDER BY payment_date",
             (loan_id,)).fetchall())
+
+    # ── internal: auto-detect REPAID / PARTIALLY_PAID ────────────────
+    def _sync_status(self, loan_id):
+        loan = self.get_loan(loan_id)
+        if not loan or loan["status"] in ("CLOSED", "REPAID"):
+            return
+        total = self.total_repaid(loan_id)
+        from services.loan_service import LoanService
+        start = loan["start_date"]
+        due = loan.get("due_date")
+        if due:
+            sd = date.fromisoformat(start)
+            dd = date.fromisoformat(due)
+            months = max(1, round((dd - sd).days / 30.44))
+        else:
+            months = 12
+        freq = loan.get("interest_type") or "ANNUAL"
+        analysis = LoanService.loan_analysis(
+            loan["principal_amount"], loan["interest_rate"] or 0,
+            months, freq, total, start
+        )
+        if analysis["current_value"] <= 0 and total > 0:
+            self.db.execute("UPDATE borrowed_loans SET status='REPAID' WHERE loan_id=?",
+                            (loan_id,))
+        elif total > 0:
+            self.db.execute("UPDATE borrowed_loans SET status='PARTIALLY_PAID' WHERE loan_id=?",
+                            (loan_id,))
+        self.db.commit()

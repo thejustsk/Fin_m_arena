@@ -63,6 +63,8 @@ def status_color(role, status):
         return C["red"]
     if status == "PARTIALLY_PAID":
         return C["amber"]
+    if status == "REPAID":
+        return C["green"]
     if status in ("CLOSED", "MATURED", "WITHDRAWN", "CLEARED"):
         return C["green"] if role in ("asset", "loan") else C["text3"]
     if role == "loan":
@@ -455,18 +457,18 @@ class _FunctionPage(QWidget):
         self._sort_cb.currentIndexChanged.connect(self._on_sort_changed)
         # sort direction toggle
         self._sort_asc = True
-        self._sort_order_btn = QPushButton("A\u2192Z")
-        self._sort_order_btn.setFixedHeight(34)
-        self._sort_order_btn.setMinimumWidth(60)
+        self._sort_order_btn = QPushButton("\u25b2")
+        self._sort_order_btn.setFixedSize(38, 38)
         self._sort_order_btn.setFocusPolicy(Qt.NoFocus)
         self._sort_order_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self._sort_order_btn.setToolTip("Ascending (A\u2192Z). Click to reverse.")
         self._sort_order_btn.clicked.connect(self._toggle_sort_dir)
         self._sort_order_btn.setStyleSheet(
-            f"QPushButton{{font-size:12px;font-weight:800;padding:4px 8px;"
-            f"border:1.5px solid {C['border']};border-radius:{C['radius_sm']};"
-            f"background:{C['surface']};color:{C['accent']};}}"
-            f"QPushButton:hover{{border-color:{C['accent']};}}"
+            f"QPushButton{{font-family:'Segoe UI Symbol','Segoe UI',sans-serif;"
+            f"font-size:20px;font-weight:900;border:1.5px solid {C['accent']};"
+            f"border-radius:{C['radius_sm']};background:{C['surface']};"
+            f"color:{C['accent']};padding:0;margin:0;}}"
+            f"QPushButton:hover{{background:{C['accent']};color:white;}}"
         )
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("\U0001f50d Search by name\u2026")
@@ -488,18 +490,21 @@ class _FunctionPage(QWidget):
     def _on_sort_changed(self):
         """Reset direction to default for the chosen sort field, then render."""
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
-        # Date-based sorts default to descending (recent first)
         self._sort_asc = not ("Date" in mode or "date" in mode)
-        self._sort_order_btn.setText("A\u2192Z" if self._sort_asc else "Z\u2192A")
-        tip = "Ascending (A\u2192Z)" if self._sort_asc else "Descending (Z\u2192A)"
-        self._sort_order_btn.setToolTip(f"{tip}. Click to reverse.")
+        self._sort_order_btn.setText("\u25b2" if self._sort_asc else "\u25bc")
+        self._sort_order_btn.setToolTip(
+            "Ascending (A\u2192Z). Click to reverse." if self._sort_asc
+            else "Descending (Z\u2192A). Click to reverse."
+        )
         self._render_list()
 
     def _toggle_sort_dir(self):
         self._sort_asc = not self._sort_asc
-        self._sort_order_btn.setText("A\u2192Z" if self._sort_asc else "Z\u2192A")
-        tip = "Ascending (A\u2192Z)" if self._sort_asc else "Descending (Z\u2192A)"
-        self._sort_order_btn.setToolTip(f"{tip}. Click to reverse.")
+        self._sort_order_btn.setText("\u25b2" if self._sort_asc else "\u25bc")
+        self._sort_order_btn.setToolTip(
+            "Ascending (A\u2192Z). Click to reverse." if self._sort_asc
+            else "Descending (Z\u2192A). Click to reverse."
+        )
         self._render_list()
 
     def _refresh_entry_dropdowns(self):
@@ -560,7 +565,7 @@ class LoansGivePage(_FunctionPage):
         # ── Log Repayment ──
         p2 = QWidget()
         f2 = QFormLayout(p2)
-        self.lg_rep_loan = QComboBox()
+        self.lg_rep_loan = SearchableCombo(placeholder="Search loan\u2026")
         self.lg_rep_pending_lbl = QLabel("")
         self.lg_rep_pending_lbl.setStyleSheet(f"color:{C['amber']};font-weight:700;font-size:12px;")
         self.lg_rep_loan.currentIndexChanged.connect(self._update_lg_pending)
@@ -604,21 +609,21 @@ class LoansGivePage(_FunctionPage):
         self.lg_loan_borrower.clear_items()
         for b in self.repos["loans"].list_borrowers():
             self.lg_loan_borrower.add_item(b["name"], b["borrower_id"])
-        self.lg_rep_loan.clear()
-        # order: OVERDUE → ACTIVE → PARTIALLY_PAID; exclude CLOSED/CLEARED
+        self.lg_rep_loan.clear_items()
+        # order: OVERDUE → ACTIVE → PARTIALLY_PAID; exclude CLOSED/CLEARED/REPAID
         rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2}
         loans = [l for l in self.repos["loans"].list_loans()
-                 if l["status"] not in ("CLOSED", "CLEARED")]
+                 if l["status"] not in ("CLOSED", "CLEARED", "REPAID")]
         loans.sort(key=lambda l: rank.get(l["status"], 9))
         for l in loans:
-            self.lg_rep_loan.addItem(
+            self.lg_rep_loan.add_item(
                 f"{l['borrower_name']} \u2014 {fmt_money(l['loan_amount'])} ({l['status']})",
                 l["loan_id"]
             )
         self._update_lg_pending()
 
     def _update_lg_pending(self):
-        lid = self.lg_rep_loan.currentData()
+        lid = self.lg_rep_loan.get_data()
         if not lid:
             self.lg_rep_pending_lbl.setText("")
             return
@@ -656,7 +661,7 @@ class LoansGivePage(_FunctionPage):
         QMessageBox.information(self, "Loan Recorded", f"\u20b9{amount:,.2f} loan to {borrower_name} recorded.")
 
     def _log_repayment(self):
-        lid = self.lg_rep_loan.currentData()
+        lid = self.lg_rep_loan.get_data()
         amount = self.lg_rep_amount.value()
         if not lid or amount <= 0:
             QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
@@ -768,10 +773,33 @@ class LoansTakePage(_FunctionPage):
     ICON = "\U0001f3db\ufe0f"
     TITLE = "Loans I Take"
 
+    _FREQ_LABELS = ["Annual", "Quarterly", "Semi-Annual"]
+    _FREQ_VALUES = ["ANNUAL", "QUARTERLY", "SEMI_ANNUAL"]
+
     def _sort_options(self):
         return ["Status", "Lender", "Amount", "Due Date"]
 
-    # ── Entry ──
+    # ── helpers ───────────────────────────────────────────────────────
+    def _loan_months(self, loan):
+        """Derive tenure in months from start_date / due_date."""
+        sd = date.fromisoformat(loan["start_date"])
+        dd = loan.get("due_date")
+        if dd:
+            ed = date.fromisoformat(dd)
+            return max(1, round((ed - sd).days / 30.44))
+        return 12
+
+    def _analysis(self, loan):
+        """Run LoanService.loan_analysis for a given loan dict."""
+        total_paid = self.repos["borrowed"].total_repaid(loan["loan_id"])
+        months = self._loan_months(loan)
+        freq = loan.get("interest_type") or "ANNUAL"
+        return LoanService.loan_analysis(
+            loan["principal_amount"], loan["interest_rate"] or 0,
+            months, freq, total_paid, loan["start_date"]
+        )
+
+    # ── Entry ─────────────────────────────────────────────────────────
     def _build_entry(self):
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -781,6 +809,8 @@ class LoansTakePage(_FunctionPage):
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.lt_loan_lender = SearchableCombo(placeholder="Search lender\u2026")
+        self.lt_loan_freq = QComboBox()
+        self.lt_loan_freq.addItems(self._FREQ_LABELS)
         self.lt_loan_principal = QDoubleSpinBox()
         self.lt_loan_principal.setRange(0, 999999999)
         self.lt_loan_principal.setPrefix("\u20b9 ")
@@ -798,14 +828,19 @@ class LoansTakePage(_FunctionPage):
         self.lt_loan_start.setCalendarPopup(True)
         self.lt_loan_desc = QLineEdit()
         self.lt_loan_desc.setPlaceholderText("Optional note")
-        self.lt_emi_preview = QLabel("Estimated EMI: \u2014")
+        self.lt_emi_preview = QLabel("EMI: \u2014  |  Total Repay: \u2014")
         self.lt_emi_preview.setStyleSheet(f"color:{C['accent']};font-weight:800;font-size:13px;")
-        for w in (self.lt_loan_principal, self.lt_loan_rate, self.lt_loan_months):
-            w.valueChanged.connect(self._update_emi)
+        self.lt_emi_preview.setWordWrap(True)
+        for w in (self.lt_loan_principal, self.lt_loan_rate, self.lt_loan_months, self.lt_loan_freq):
+            if isinstance(w, QComboBox):
+                w.currentIndexChanged.connect(self._update_emi)
+            else:
+                w.valueChanged.connect(self._update_emi)
         take_btn = QPushButton("\U0001f3db\ufe0f  Take Loan")
         take_btn.setObjectName("primary")
         take_btn.clicked.connect(self._take_loan)
         f1.addRow("Lender *", _entity_row(self.lt_loan_lender, self._add_lender_dlg))
+        f1.addRow("Interest Type", self.lt_loan_freq)
         f1.addRow("Principal *", self.lt_loan_principal)
         f1.addRow("Interest Rate (annual)", self.lt_loan_rate)
         f1.addRow("Tenure (months) *", self.lt_loan_months)
@@ -821,7 +856,15 @@ class LoansTakePage(_FunctionPage):
         # ── Log EMI Payment ──
         p2 = QWidget()
         f2 = QFormLayout(p2)
-        self.lt_rep_loan = QComboBox()
+        self.lt_rep_loan = SearchableCombo(placeholder="Search loan\u2026")
+        self.lt_rep_info_lbl = QLabel("")
+        self.lt_rep_info_lbl.setStyleSheet(f"color:{C['text3']};font-weight:600;font-size:11px;")
+        self.lt_rep_info_lbl.setWordWrap(True)
+        self.lt_rep_loan.currentIndexChanged.connect(self._on_rep_loan_changed)
+        # amount type selector
+        self.lt_rep_type = QComboBox()
+        self.lt_rep_type.addItems(["Updated EMI", "Original EMI", "Full Pay", "Custom"])
+        self.lt_rep_type.currentIndexChanged.connect(self._on_rep_type_changed)
         self.lt_rep_amount = QDoubleSpinBox()
         self.lt_rep_amount.setRange(0, 99999999)
         self.lt_rep_amount.setPrefix("\u20b9 ")
@@ -832,12 +875,13 @@ class LoansTakePage(_FunctionPage):
         self.lt_rep_date.setCalendarPopup(True)
         self.lt_rep_desc = QLineEdit()
         self.lt_rep_desc.setPlaceholderText("Optional note")
-        self.lt_rep_loan.currentIndexChanged.connect(self._prefill_emi)
         pay_btn = QPushButton("\U0001f4b8  Log EMI Payment")
         pay_btn.setObjectName("primary")
         pay_btn.clicked.connect(self._log_emi)
         f2.addRow("Loan *", self.lt_rep_loan)
-        f2.addRow("EMI Amount *", self.lt_rep_amount)
+        f2.addRow("", self.lt_rep_info_lbl)
+        f2.addRow("Amount Type", self.lt_rep_type)
+        f2.addRow("Amount *", self.lt_rep_amount)
         f2.addRow("Pay From *", self.lt_rep_account)
         f2.addRow("Method *", self.lt_rep_method)
         f2.addRow("Date", self.lt_rep_date)
@@ -862,42 +906,82 @@ class LoansTakePage(_FunctionPage):
         p = self.lt_loan_principal.value()
         r = self.lt_loan_rate.value()
         m = self.lt_loan_months.value()
+        fi = self.lt_loan_freq.currentIndex()
+        freq = self._FREQ_VALUES[fi] if fi >= 0 else "ANNUAL"
         if p > 0 and m > 0:
-            emi = LoanService.emi(p, r, m)
-            self.lt_emi_preview.setText(f"Estimated EMI: {fmt_money(emi)} / month for {m} months")
+            emi = LoanService.emi(p, r, m, freq)
+            total = LoanService.total_expected(emi, m)
+            self.lt_emi_preview.setText(
+                f"EMI: {fmt_money(emi)}/mo  |  Total Repay: {fmt_money(total)}  ({m} months)"
+            )
         else:
-            self.lt_emi_preview.setText("Estimated EMI: \u2014")
+            self.lt_emi_preview.setText("EMI: \u2014  |  Total Repay: \u2014")
 
     def _refresh_entry_dropdowns(self):
         self.lt_loan_lender.clear_items()
         for l in self.repos["borrowed"].list_lenders():
             self.lt_loan_lender.add_item(l["name"], l["lender_id"])
-        self.lt_rep_loan.clear()
+        self.lt_rep_loan.clear_items()
         for l in self.repos["borrowed"].list_loans():
-            if l["status"] != "CLOSED":
-                self.lt_rep_loan.addItem(
+            if l["status"] not in ("CLOSED", "REPAID"):
+                self.lt_rep_loan.add_item(
                     f"{l['lender_name']} \u2014 {fmt_money(l['principal_amount'])} ({l['status']})",
                     l["loan_id"]
                 )
-        self._prefill_emi()
+        self._on_rep_loan_changed()
 
-    def _prefill_emi(self):
-        lid = self.lt_rep_loan.currentData()
+    def _on_rep_loan_changed(self):
+        """Refresh info label + pre-fill amount when loan selection changes."""
+        lid = self.lt_rep_loan.get_data()
+        if not lid:
+            self.lt_rep_info_lbl.setText("")
+            return
+        loan = self.repos["borrowed"].get_loan(lid)
+        if not loan:
+            return
+        a = self._analysis(loan)
+        self.lt_rep_info_lbl.setText(
+            f"Original EMI: {fmt_money(a['original_emi'])}  {MDOT}  "
+            f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
+            f"Current Value: {fmt_money(a['current_value'])}  {MDOT}  "
+            f"Paid: {fmt_money(a['total_paid'])}"
+        )
+        self._on_rep_type_changed()
+
+    def _on_rep_type_changed(self):
+        """Auto-fill amount based on selected type."""
+        mode = self.lt_rep_type.currentText()
+        lid = self.lt_rep_loan.get_data()
         if not lid:
             return
         loan = self.repos["borrowed"].get_loan(lid)
-        if loan and loan.get("emi_amount"):
-            self.lt_rep_amount.setValue(loan["emi_amount"])
+        if not loan:
+            return
+        a = self._analysis(loan)
+        if mode == "Updated EMI":
+            self.lt_rep_amount.setValue(a["updated_emi"])
+            self.lt_rep_amount.setEnabled(False)
+        elif mode == "Original EMI":
+            self.lt_rep_amount.setValue(a["original_emi"])
+            self.lt_rep_amount.setEnabled(False)
+        elif mode == "Full Pay":
+            self.lt_rep_amount.setValue(a["full_payoff"])
+            self.lt_rep_amount.setEnabled(False)
+        else:  # Custom
+            self.lt_rep_amount.setValue(0)
+            self.lt_rep_amount.setEnabled(True)
 
     def _take_loan(self):
         lid = self.lt_loan_lender.get_data()
         principal = self.lt_loan_principal.value()
         months = self.lt_loan_months.value()
         rate = self.lt_loan_rate.value()
+        fi = self.lt_loan_freq.currentIndex()
+        freq = self._FREQ_VALUES[fi] if fi >= 0 else "ANNUAL"
         if not lid or principal <= 0:
             QMessageBox.warning(self, "Missing Info", "Select a lender and enter the principal.")
             return
-        emi = LoanService.emi(principal, rate, months)
+        emi = LoanService.emi(principal, rate, months, freq)
         start = self.lt_loan_start.date().toPyDate()
         due = _add_months(start, months)
         account_id = self.lt_loan_account.currentData()
@@ -910,6 +994,7 @@ class LoansTakePage(_FunctionPage):
         )
         self.repos["borrowed"].create_loan(
             lender_id=lid, principal_amount=principal, interest_rate=rate, emi_amount=emi,
+            interest_type=freq,
             start_date=start.isoformat(), due_date=due.isoformat(), status="ACTIVE",
             description=self.lt_loan_desc.text().strip() or None, linked_txn_id=txn_id
         )
@@ -917,13 +1002,15 @@ class LoansTakePage(_FunctionPage):
         self.lt_loan_desc.clear()
         self._refresh_entry_dropdowns()
         self.load_list()
+        total = LoanService.total_expected(emi, months)
         QMessageBox.information(
             self, "Loan Recorded",
-            f"\u20b9{principal:,.2f} loan from {lender_name}. EMI \u2248 {fmt_money(emi)}/mo."
+            f"\u20b9{principal:,.2f} loan from {lender_name}.\n"
+            f"EMI \u2248 {fmt_money(emi)}/mo {MDOT} Total repay: {fmt_money(total)}"
         )
 
     def _log_emi(self):
-        lid = self.lt_rep_loan.currentData()
+        lid = self.lt_rep_loan.get_data()
         amount = self.lt_rep_amount.value()
         if not lid or amount <= 0:
             QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
@@ -931,10 +1018,11 @@ class LoansTakePage(_FunctionPage):
         loan = self.repos["borrowed"].get_loan(lid)
         account_id = self.lt_rep_account.currentData()
         method = self.lt_rep_method.currentData()
+        desc_extra = self.lt_rep_type.currentText()
         txn_id = _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="DEBIT", amount=amount, person_org=loan["lender_name"] if loan else None,
-            description=f"EMI payment to {loan['lender_name']}" if loan else "EMI payment",
+            description=f"EMI payment ({desc_extra}) to {loan['lender_name']}" if loan else f"EMI payment ({desc_extra})",
             category_names=("Finance", "Other")
         )
         self.repos["borrowed"].add_repayment(
@@ -946,9 +1034,15 @@ class LoansTakePage(_FunctionPage):
         self.lt_rep_desc.clear()
         self._refresh_entry_dropdowns()
         self.load_list()
-        QMessageBox.information(self, "Payment Logged", "EMI payment recorded successfully.")
+        # check if now REPAID
+        loan = self.repos["borrowed"].get_loan(lid)
+        if loan and loan["status"] == "REPAID":
+            QMessageBox.information(self, "Loan Fully Repaid",
+                "This loan has been fully repaid.\nStatus: REPAID \u2014 waiting for closure confirmation.")
+        else:
+            QMessageBox.information(self, "Payment Logged", f"{desc_extra} payment recorded successfully.")
 
-    # ── List ──
+    # ── List ──────────────────────────────────────────────────────────
     def load_list(self):
         self.repos["borrowed"].sync_overdue()
         self._list_data = self.repos["borrowed"].list_loans()
@@ -960,13 +1054,13 @@ class LoansTakePage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         loans = list(self._list_data)
-        active = [l for l in loans if l["status"] != "CLOSED"]
-        total_pending = sum(
-            max(l["principal_amount"] - self.repos["borrowed"].total_repaid(l["loan_id"]), 0)
-            for l in active
-        )
+        active = [l for l in loans if l["status"] not in ("CLOSED", "REPAID")]
+        total_outstanding = 0
+        for l in active:
+            a = self._analysis(l)
+            total_outstanding += a["current_value"]
         _fill_stats_row(self._stats_row, [
-            _metric_card("Total Pending", fmt_money(total_pending), C["amber"]),
+            _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
             _metric_card("Active Loans", str(len(active))),
             _metric_card("Total Loans", str(len(loans))),
         ])
@@ -974,7 +1068,7 @@ class LoansTakePage(_FunctionPage):
         if search:
             loans = [l for l in loans if search in l["lender_name"].lower()]
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
-        rank = {"ACTIVE": 0, "OVERDUE": 1, "CLOSED": 2}
+        rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2, "REPAID": 3, "CLOSED": 4}
         if mode == "Status":
             loans.sort(key=lambda l: rank.get(l["status"], 9))
         elif mode == "Lender":
@@ -992,13 +1086,20 @@ class LoansTakePage(_FunctionPage):
             self._list_lay.addWidget(empty)
             return
         for l in loans:
-            paid = self.repos["borrowed"].total_repaid(l["loan_id"])
+            a = self._analysis(l)
             color = status_color("liability", l["status"])
-            sub = f"Rate {l['interest_rate']}% {MDOT} EMI {fmt_money(l['emi_amount'])} {MDOT} Due {l['due_date'] or EM_DASH}"
+            freq_tag = l.get("interest_type") or "ANNUAL"
+            freq_short = {"ANNUAL": "Annual", "QUARTERLY": "Qtr", "SEMI_ANNUAL": "Semi"}.get(freq_tag, "")
+            sub = (f"Rate {l['interest_rate']}% {freq_short} {MDOT} "
+                   f"EMI {fmt_money(a['original_emi'])} {MDOT} Due {l['due_date'] or EM_DASH}")
+            amount_text = fmt_money(a["current_value"]) + " outstanding"
+            extra = (f"Updated EMI: {fmt_money(a['updated_emi'])} {MDOT} "
+                     f"Paid: {fmt_money(a['total_paid'])} {MDOT} "
+                     f"Principal: {fmt_money(l['principal_amount'])}")
             card = _wealth_card(
                 title=l["lender_name"], subtitle=sub,
-                amount_text=fmt_money(l["principal_amount"]), badge_text=l["status"],
-                badge_color=color, extra_line=f"Repaid so far: {fmt_money(paid)}",
+                amount_text=amount_text, badge_text=l["status"],
+                badge_color=color, extra_line=extra,
                 on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
             self._list_lay.addWidget(card)
@@ -1008,25 +1109,110 @@ class LoansTakePage(_FunctionPage):
         if not loan:
             return
         repayments = self.repos["borrowed"].get_repayments(loan_id)
-        start = date.fromisoformat(loan["start_date"])
-        due = date.fromisoformat(loan["due_date"]) if loan["due_date"] else None
-        months = max(1, round((due - start).days / 30.44)) if due else 12
-        amort = LoanService.amortize(loan["principal_amount"], loan["interest_rate"] or 0, months)
-        dlg = LoanDetailDialog(
-            role="take", title=f"Loan from {loan['lender_name']}",
-            principal=loan["principal_amount"], status=loan["status"],
-            start_date=loan["start_date"], due_date=loan["due_date"],
-            description=loan.get("description"), repayments=repayments,
-            amount_key="amount_paid", date_key="payment_date",
-            amortization=amort, emi=loan["emi_amount"], rate=loan["interest_rate"],
-            on_mark_closed=lambda: self._mark_closed(loan_id), parent=self
+        months = self._loan_months(loan)
+        freq = loan.get("interest_type") or "ANNUAL"
+        amort = LoanService.amortize(loan["principal_amount"], loan["interest_rate"] or 0, months, freq)
+        a = self._analysis(loan)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Loan from {loan['lender_name']}")
+        dlg.setMinimumWidth(580)
+        lay = QVBoxLayout(dlg)
+
+        # header
+        hdr = QHBoxLayout()
+        t = QLabel(f"Loan from {loan['lender_name']}")
+        t.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        hdr.addWidget(t, 1)
+        hdr.addWidget(_badge(loan["status"], status_color("liability", loan["status"])))
+        lay.addLayout(hdr)
+
+        # info grid
+        info = QLabel(
+            f"Principal: {fmt_money(loan['principal_amount'])}  {MDOT}  "
+            f"Rate: {loan['interest_rate']}%  {freq}  {MDOT}  "
+            f"Original EMI: {fmt_money(a['original_emi'])}\n"
+            f"Start: {loan['start_date']}  {MDOT}  Due: {loan['due_date'] or EM_DASH}  {MDOT}  "
+            f"Tenure: {months} months"
         )
+        info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        # analysis row
+        a_lbl = QLabel(
+            f"Current Value: {fmt_money(a['current_value'])}  {MDOT}  "
+            f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
+            f"Full Payoff: {fmt_money(a['full_payoff'])}\n"
+            f"Total Paid: {fmt_money(a['total_paid'])}  {MDOT}  "
+            f"Total Expected: {fmt_money(a['total_expected'])}  {MDOT}  "
+            f"Interest Accrued: {fmt_money(a['total_interest_accrued'])}"
+        )
+        a_lbl.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;padding:6px 0;")
+        a_lbl.setWordWrap(True)
+        lay.addWidget(a_lbl)
+
+        if loan.get("description"):
+            d = QLabel(loan["description"])
+            d.setStyleSheet(f"color:{C['text2']};font-size:12px;font-style:italic;")
+            d.setWordWrap(True)
+            lay.addWidget(d)
+
+        # tabs: repayments + amortization
+        tabs = QTabWidget()
+        # repayments table
+        rtable = QTableWidget()
+        rtable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        rtable.verticalHeader().setVisible(False)
+        rtable.setColumnCount(3)
+        rtable.setHorizontalHeaderLabels(["Date", "Amount", "Description"])
+        rtable.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        rtable.setRowCount(len(repayments))
+        for i, r in enumerate(repayments):
+            rtable.setItem(i, 0, QTableWidgetItem(r.get("payment_date", "")))
+            rtable.setItem(i, 1, QTableWidgetItem(fmt_money(r["amount_paid"])))
+            rtable.setItem(i, 2, QTableWidgetItem(r.get("description") or ""))
+        if not repayments:
+            rtable.setRowCount(1)
+            rtable.setItem(0, 0, QTableWidgetItem("No repayments logged yet."))
+            rtable.setSpan(0, 0, 1, 3)
+        tabs.addTab(rtable, "Repayment Log")
+        # amortization
+        atable = QTableWidget()
+        atable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        atable.verticalHeader().setVisible(False)
+        atable.setColumnCount(5)
+        atable.setHorizontalHeaderLabels(["Month", "EMI", "Principal", "Interest", "Balance"])
+        atable.setRowCount(len(amort))
+        for i, row in enumerate(amort):
+            atable.setItem(i, 0, QTableWidgetItem(str(row["month"])))
+            atable.setItem(i, 1, QTableWidgetItem(fmt_money(row["emi"])))
+            atable.setItem(i, 2, QTableWidgetItem(fmt_money(row["principal"])))
+            atable.setItem(i, 3, QTableWidgetItem(fmt_money(row["interest"])))
+            atable.setItem(i, 4, QTableWidgetItem(fmt_money(row["balance"])))
+        tabs.addTab(atable, "Amortization Schedule")
+        lay.addWidget(tabs, 1)
+
+        # buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        if loan["status"] == "REPAID":
+            close_btn = QPushButton("\u2705 Mark as Closed")
+            close_btn.setObjectName("primary")
+            close_btn.clicked.connect(lambda: self._mark_closed(loan_id, dlg))
+            btn_row.addWidget(close_btn)
+        ok = QPushButton("Close")
+        ok.clicked.connect(dlg.accept)
+        btn_row.addWidget(ok)
+        lay.addLayout(btn_row)
         dlg.exec_()
 
-    def _mark_closed(self, loan_id):
-        if _confirm(self, "Mark Closed", "Mark this loan as fully closed?"):
+    def _mark_closed(self, loan_id, dlg=None):
+        if _confirm(self, "Mark Closed", "Confirm: this loan is fully repaid. Mark as CLOSED?"):
             self.repos["borrowed"].update_status(loan_id, "CLOSED")
             self.load_list()
+            if dlg:
+                dlg.accept()
             return True
         return False
 
@@ -1438,7 +1624,7 @@ class FDOthersPage(_FunctionPage):
         # ── Log Repayment ──
         p2 = QWidget()
         f2 = QFormLayout(p2)
-        self.fo_rep_deposit = QComboBox()
+        self.fo_rep_deposit = SearchableCombo(placeholder="Search deposit\u2026")
         self.fo_rep_pending_lbl = QLabel("")
         self.fo_rep_pending_lbl.setStyleSheet(f"color:{C['amber']};font-weight:700;font-size:12px;")
         self.fo_rep_deposit.currentIndexChanged.connect(self._update_fo_pending)
@@ -1488,17 +1674,17 @@ class FDOthersPage(_FunctionPage):
         self.fo_dep_depositor.clear_items()
         for d in self.repos["deposits"].list_depositors():
             self.fo_dep_depositor.add_item(d["name"], d["depositor_id"])
-        self.fo_rep_deposit.clear()
+        self.fo_rep_deposit.clear_items()
         for d in self.repos["deposits"].list_deposits():
             if d["status"] != "CLOSED":
-                self.fo_rep_deposit.addItem(
+                self.fo_rep_deposit.add_item(
                     f"{d['depositor_name']} \u2014 {fmt_money(d['principal_amount'])} ({d['status']})",
                     d["deposit_id"]
                 )
         self._update_fo_pending()
 
     def _update_fo_pending(self):
-        did = self.fo_rep_deposit.currentData()
+        did = self.fo_rep_deposit.get_data()
         if not did:
             self.fo_rep_pending_lbl.setText("")
             return
@@ -1538,7 +1724,7 @@ class FDOthersPage(_FunctionPage):
         QMessageBox.information(self, "Deposit Recorded", f"\u20b9{amount:,.2f} deposit from {name} recorded.")
 
     def _log_repayment(self):
-        did = self.fo_rep_deposit.currentData()
+        did = self.fo_rep_deposit.get_data()
         amount = self.fo_rep_amount.value()
         if not did or amount <= 0:
             QMessageBox.warning(self, "Missing Info", "Select a deposit and enter an amount.")

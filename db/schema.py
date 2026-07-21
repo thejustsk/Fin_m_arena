@@ -265,7 +265,7 @@ def run_migrations(db):
         c.execute("INSERT OR IGNORE INTO preferences VALUES('complete_page_size', '150')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('scroll_trigger_px', '400')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('user_email', '')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('smtp_password', '')")
+
 
         _safe_cols = [
         ("cards", "credit_limit", "REAL DEFAULT 0"),
@@ -282,6 +282,7 @@ def run_migrations(db):
         ("card_cycles", "debits", "REAL DEFAULT 0"),
         ("card_cycles", "paid", "REAL DEFAULT 0"),
         ("card_cycles", "remaining", "REAL DEFAULT 0"),
+        ("borrowed_loans", "interest_type", "TEXT DEFAULT 'ANNUAL'"),
     ]
     for table, col, typedef in _safe_cols:
         try:
