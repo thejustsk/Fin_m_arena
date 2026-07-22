@@ -124,6 +124,7 @@ def _clear_layout(layout):
             _clear_layout(child)
 
 
+
 def _metric_card(label, value, color=None):
     color = color or C["text"]
     card = QFrame()
@@ -377,31 +378,28 @@ class WealthCard(QFrame):
         lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(8)
 
-        # ── Row 1: Title (left) | Badge + Principal (right) ──
+        # ── Row 1: Title + Badge (right) ──
         top = QHBoxLayout()
         t = QLabel(title)
-        t.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
+        t.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         top.addWidget(t, 1)
-        badge_row = QHBoxLayout()
-        badge_row.setSpacing(6)
-        badge_row.setAlignment(Qt.AlignRight | Qt.AlignTop)
         if updated:
             upd_lbl = _badge("Updated", C["accent"])
-            badge_row.addWidget(upd_lbl)
+            top.addWidget(upd_lbl)
         self._badge_lbl = _badge(badge_text, badge_color)
-        badge_row.addWidget(self._badge_lbl)
-        top.addLayout(badge_row)
-        a = QLabel(amount_text)
-        a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
-        a.setAlignment(Qt.AlignRight)
-        top.addWidget(a)
+        top.addWidget(self._badge_lbl)
         lay.addLayout(top)
 
-        # ── Row 2: Subtitle ──
+        # ── Row 2: Subtitle + Principal (right) ──
+        mid = QHBoxLayout()
         s = QLabel(subtitle)
-        s.setStyleSheet(f"font-size:12px;color:{C['text3']};line-height:1.4;")
+        s.setStyleSheet(f"font-size:12px;color:{C['text3']};")
         s.setWordWrap(True)
-        lay.addWidget(s)
+        mid.addWidget(s, 1)
+        a = QLabel(amount_text)
+        a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
+        mid.addWidget(a)
+        lay.addLayout(mid)
 
         # ── Row 3: Progress bar ──
         if progress_pct is not None:
@@ -690,6 +688,7 @@ class _FunctionPage(QWidget):
         self.services = services
         self.db = repos["accounts"].db
         self._list_data = []
+        self._loaded = False  # tracks if _render_list has run
         self._build_skeleton()
 
     def _build_skeleton(self):
@@ -811,7 +810,8 @@ class _FunctionPage(QWidget):
     def _refresh_entry_dropdowns(self):
         pass
 
-    def load_list(self):
+    def load_list(self, force=False):
+        """Override in subclass. force=True rebuilds after edit."""
         pass
 
     def _render_list(self):
@@ -843,7 +843,6 @@ class _FunctionPage(QWidget):
         return {r[id_col]: r["t"] for r in rows}
 
     def _toggle_card(self, item_id):
-        """Toggle expand/collapse for a WealthCard. Only one expanded at a time."""
         for i in range(self._list_lay.count()):
             item = self._list_lay.itemAt(i)
             w = item.widget()
@@ -1182,7 +1181,7 @@ class LoansGivePage(_FunctionPage):
         _fill_stats_row(self._stats_row, [
             _metric_card("Total Pending", fmt_money(total_pending), C["amber"]),
             _metric_card("Pending Loans", str(pending_count)),
-            _metric_card("Total Loans", str(len(loans))),
+            _metric_card("Total Loans", str(self.repos["loans"].count_total())),
         ])
 
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
@@ -1285,7 +1284,8 @@ class LoansGivePage(_FunctionPage):
                     self.repos["loans"].recalc_status(_lid)
                     self.db.execute("UPDATE loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
                     self.db.commit()
-                    self.load_list()
+                    self._loaded = False
+                    self.load_list(force=True)
                 return _save
 
             edit_form = _build_edit_form(fields, _make_lg_save(lid), lambda: None,
@@ -1390,6 +1390,8 @@ class LoansGivePage(_FunctionPage):
 
             all_cards.append(card)
 
+        # Cache for instant tab switching
+
         # Lazy loading
         if all_cards:
             first_batch = all_cards[:self._get_batch_size()]
@@ -1399,7 +1401,10 @@ class LoansGivePage(_FunctionPage):
             if self._pending_cards:
                 self._init_lazy_scroll()
 
-    def load_list(self):
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
         self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")
         self.repos["loans"].sync_overdue()
         loans = self.repos["loans"].list_loans()
@@ -1808,7 +1813,10 @@ class LoansTakePage(_FunctionPage):
             QMessageBox.information(self, "Payment Logged", f"{desc_extra} payment recorded successfully.")
 
     # ── List ──
-    def load_list(self):
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
         self.repos["borrowed"].sync_overdue()
         loans = self.repos["borrowed"].list_loans()
         # Batch recalc
@@ -1869,7 +1877,7 @@ class LoansTakePage(_FunctionPage):
         _fill_stats_row(self._stats_row, [
             _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
             _metric_card("Active Loans", str(len(active))),
-            _metric_card("Total Loans", str(len(loans))),
+            _metric_card("Total Loans", str(self.repos["borrowed"].count_total())),
         ])
 
         # Alerts
@@ -2011,7 +2019,8 @@ class LoansTakePage(_FunctionPage):
                     self.repos["borrowed"].recalc_status(_lid)
                     self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
                     self.db.commit()
-                    self.load_list()
+                    self._loaded = False
+                    self.load_list(force=True)
                 return _save
 
             edit_form = _build_edit_form(fields, _make_lt_save(lid), lambda: None,
@@ -2050,7 +2059,8 @@ class LoansTakePage(_FunctionPage):
                         self.repos["borrowed"].recalc_status(_lid)
                         self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
                         self.db.commit()
-                        self.load_list()
+                        self._loaded = False
+                        self.load_list(force=True)
                     return _save
                 return _on_rep_edit
 
@@ -2120,6 +2130,8 @@ class LoansTakePage(_FunctionPage):
             card.add_expand_layout(btn_row)
 
             all_cards.append(card)
+
+        # Cache for instant tab switching
 
         # Lazy loading
         if all_cards:
@@ -2247,7 +2259,10 @@ class FDGivePage(_FunctionPage):
         QMessageBox.information(self, "FD Created", "Fixed deposit recorded successfully.")
 
     # ── List ──
-    def load_list(self):
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
         self.repos["fd"].sync_matured()
         self._list_data = self.repos["fd"].list_all()
         self._render_list()
@@ -2366,7 +2381,8 @@ class FDGivePage(_FunctionPage):
                     self.db.commit()
                     self.db.execute("UPDATE fixed_deposits SET updated_at=? WHERE fd_id=?", (TODAY(), _fid))
                     self.db.commit()
-                    self.load_list()
+                    self._loaded = False
+                    self.load_list(force=True)
                 return _save
 
             edit_form = _build_edit_form(fields, _make_fd_save(fid), lambda: None,
@@ -2403,6 +2419,8 @@ class FDGivePage(_FunctionPage):
             card.add_expand_layout(btn_row)
 
             all_cards.append(card)
+
+        # Cache
 
         # Lazy loading
         if all_cards:
@@ -2744,7 +2762,10 @@ class FDOthersPage(_FunctionPage):
         return 12
 
     # ── List ──
-    def load_list(self):
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
         deps = self.repos["deposits"].list_deposits()
         # Batch recalc
         ids = [d["deposit_id"] for d in deps]
@@ -2818,7 +2839,7 @@ class FDOthersPage(_FunctionPage):
         _fill_stats_row(self._stats_row, [
             _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
             _metric_card("Active Deposits", str(len(active))),
-            _metric_card("Total Deposits", str(len(deps))),
+            _metric_card("Total Deposits", str(self.repos["deposits"].count_total())),
         ])
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
@@ -2917,7 +2938,8 @@ class FDOthersPage(_FunctionPage):
                     self.repos["deposits"].recalc_status(_did)
                     self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE deposit_id=?", (TODAY(), _did))
                     self.db.commit()
-                    self.load_list()
+                    self._loaded = False
+                    self.load_list(force=True)
                 return _save
 
             edit_form = _build_edit_form(fields, _make_fo_save(did), lambda: None,
@@ -2956,7 +2978,8 @@ class FDOthersPage(_FunctionPage):
                         self.repos["deposits"].recalc_status(_did)
                         self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE deposit_id=?", (TODAY(), _did))
                         self.db.commit()
-                        self.load_list()
+                        self._loaded = False
+                        self.load_list(force=True)
                     return _save
                 return _on_rep_edit
 
@@ -3021,6 +3044,8 @@ class FDOthersPage(_FunctionPage):
             card.add_expand_layout(btn_row)
 
             all_cards.append(card)
+
+        # Cache
 
         # Lazy loading
         if all_cards:
@@ -3550,7 +3575,10 @@ class MFPage(_FunctionPage):
         return txns[-1]["nav"] if txns else 0
 
     # ── List ──
-    def load_list(self):
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
         if self._nav_fetched:
             self._build_list_data()
         elif self._nav_worker and self._nav_worker.isRunning():
@@ -3690,6 +3718,8 @@ class MFPage(_FunctionPage):
             card.add_expand_layout(btn_row)
 
             all_cards.append(card)
+
+        # Cache
 
         # Lazy loading
         if all_cards:

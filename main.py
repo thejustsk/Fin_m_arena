@@ -54,12 +54,35 @@ def main():
     app.setStyleSheet(QSS)
 
     def show_main_window():
-        from ui.main_window import MainWindow
-        mw = MainWindow(db, repos, services)
-        mw.showMaximized()
-        mw.raise_()
-        mw.activateWindow()
-        _app_windows["main"] = mw  # prevent GC
+        from ui.loading_dialog import LoadingDialog
+        from PyQt5.QtCore import QTimer
+
+        splash = LoadingDialog()
+        splash.show()
+        app.processEvents()
+
+        def _step1():
+            splash.set_status("Loading accounts & categories...")
+            app.processEvents()
+            QTimer.singleShot(50, _step2)
+
+        def _step2():
+            splash.set_status("Building interface...")
+            app.processEvents()
+            from ui.main_window import MainWindow
+            mw = MainWindow(db, repos, services)
+            _app_windows["main"] = mw
+            QTimer.singleShot(50, lambda: _step3(mw))
+
+        def _step3(mw):
+            splash.set_status("Preparing data...")
+            app.processEvents()
+            mw.showMaximized()
+            mw.raise_()
+            mw.activateWindow()
+            QTimer.singleShot(300, splash.close)
+
+        QTimer.singleShot(50, _step1)
 
     if not services["security"].is_setup():
         from ui.login.setup_wizard import SetupWizard

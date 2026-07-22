@@ -46,6 +46,19 @@ class LoansRepo:
             f"JOIN borrowers b ON b.borrower_id=l.borrower_id "
             f"WHERE {w} ORDER BY l.created_at DESC", p).fetchall())
 
+    def list_active(self):
+        """Only non-CLOSED loans — for list views and KPIs."""
+        return _rows(self.db.execute(
+            "SELECT l.*, b.name AS borrower_name FROM loans l "
+            "JOIN borrowers b ON b.borrower_id=l.borrower_id "
+            "WHERE l.status != 'CLOSED' ORDER BY l.created_at DESC"
+        ).fetchall())
+
+    def count_total(self):
+        """Total loan count including CLOSED — for dashboard KPI."""
+        r = self.db.execute("SELECT COUNT(*) AS c FROM loans").fetchone()
+        return r["c"] if r else 0
+
     def get_loan(self, loan_id):
         return _row(self.db.execute(
             "SELECT l.*, b.name AS borrower_name FROM loans l "

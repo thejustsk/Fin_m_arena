@@ -42,6 +42,18 @@ class DepositsRepo:
             "JOIN depositors dep ON dep.depositor_id=d.depositor_id ORDER BY d.created_at DESC"
         ).fetchall())
 
+    def list_active(self):
+        """Only non-CLOSED deposits — for list views and KPIs."""
+        return _rows(self.db.execute(
+            "SELECT d.*, dep.name AS depositor_name FROM deposits_from_others d "
+            "JOIN depositors dep ON dep.depositor_id=d.depositor_id "
+            "WHERE d.status != 'CLOSED' ORDER BY d.created_at DESC"
+        ).fetchall())
+
+    def count_total(self):
+        r = self.db.execute("SELECT COUNT(*) AS c FROM deposits_from_others").fetchone()
+        return r["c"] if r else 0
+
     def add_repayment(self, **kw):
         kw.setdefault("repayment_id", str(uuid.uuid4()))
         kw.setdefault("created_at", datetime.now().isoformat())
