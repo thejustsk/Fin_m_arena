@@ -691,6 +691,24 @@ class _FunctionPage(QWidget):
         )
         self._render_list()
 
+    def _auto_fetch_buy_nav(self):
+        """Auto-fill NAV when a scheme is selected in Purchase form."""
+        sid = self.mf_buy_scheme.get_data()
+        if not sid:
+            return
+        nav = self._last_nav(sid)
+        if nav > 0:
+            self.mf_buy_nav.setValue(nav)
+
+    def _auto_fetch_sell_nav(self):
+        """Auto-fill NAV when a scheme is selected in Redemption form."""
+        sid = self.mf_sell_scheme.get_data()
+        if not sid:
+            return
+        nav = self._last_nav(sid)
+        if nav > 0:
+            self.mf_sell_nav.setValue(nav)
+
     def _refresh_entry_dropdowns(self):
         pass
 
@@ -2458,6 +2476,7 @@ class MFPage(_FunctionPage):
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.mf_buy_scheme = SearchableCombo(placeholder="Search scheme\u2026")
+        self.mf_buy_scheme.currentIndexChanged.connect(self._auto_fetch_buy_nav)
         self.mf_buy_type = QComboBox()
         self.mf_buy_type.addItems(["PURCHASE", "SIP"])
         self.mf_buy_date = QDateEdit(QDate.currentDate())
@@ -2500,6 +2519,7 @@ class MFPage(_FunctionPage):
         f2 = QFormLayout(p2)
         self.mf_sell_scheme = SearchableCombo(placeholder="Search scheme\u2026")
         self.mf_sell_scheme.currentIndexChanged.connect(self._update_holdings)
+        self.mf_sell_scheme.currentIndexChanged.connect(self._auto_fetch_sell_nav)
         self.mf_holdings_lbl = QLabel("")
         self.mf_holdings_lbl.setStyleSheet(f"color:{C['amber']};font-weight:700;font-size:12px;")
         self.mf_sell_date = QDateEdit(QDate.currentDate())
@@ -2540,7 +2560,7 @@ class MFPage(_FunctionPage):
     def _add_scheme_dlg(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Add New Scheme")
-        dlg.setMinimumWidth(420)
+        dlg.setMinimumWidth(480)
         f = QFormLayout(dlg)
         amc = QLineEdit()
         amc.setPlaceholderText("e.g. Parag Parikh")
@@ -2550,12 +2570,76 @@ class MFPage(_FunctionPage):
         stype.addItems(["Equity", "Debt", "Hybrid", "Index", "ELSS", "Liquid", "Other"])
         folio = QLineEdit()
         folio.setPlaceholderText("Optional")
+        # Search fund to link API scheme code
+        search_row = QHBoxLayout()
+        self._linked_code = None
+        self._linked_name = None
+        link_lbl = QLabel("Not linked")
+        link_lbl.setStyleSheet(f"color:{C['text3']};font-size:11px;")
+        def search_fund():
+            dlg2 = NavFetchDialog(initial_query=name.text(), parent=dlg)
+            if dlg2.exec_() == QDialog.Accepted and dlg2.result_nav:
+                idx = dlg2.results.currentRow()
+                if idx >= 0 and idx < len(dlg2._matches):
+                    code = dlg2._matches[idx].get("schemeCode")
+                    self._linked_code = str(code) if code else None
+                self._linked_name = dlg2.result_name
+                link_lbl.setText(f"Linked: {dlg2.result_name}")
+                link_lbl.setStyleSheet(f"color:{C['green']};font-size:11px;font-weight:700;")
+                # Auto-fill NAV
+                cur_nav.setValue(dlg2.result_nav)
+                # Fetch scheme details for launch date
+                if self._linked_code:
+                    try:
+                        import urllib.request
+                        url = f"https://api.mfapi.in/mf/{self._linked_code}"
+                        with urllib.request.urlopen(url, timeout=5) as resp:
+                            data = _json.loads(resp.read().decode())
+                        meta = data.get("meta", {})
+                        start = meta.get("scheme_start_date") or meta.get("scheme_start")
+                        if start:
+                            from datetime import datetime as _dt
+                            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+                                try:
+                                    dt = _dt.strptime(str(start), fmt)
+                                    launch_date.setDate(QDate(dt.year, dt.month, dt.day))
+                                    break
+                                except ValueError:
+                                    continue
+                    except Exception:
+                        pass
+        link_btn = QPushButton("\U0001f50d Search & Link")
+        link_btn.clicked.connect(search_fund)
+        search_row.addWidget(link_btn)
+        search_row.addWidget(link_lbl)
+        # Current status for existing investments
+        status_hint = QLabel("Leave at 0 if this is a new investment")
+        status_hint.setStyleSheet(f"color:{C['text3']};font-size:10px;font-style:italic;")
+        cur_units = QDoubleSpinBox()
+        cur_units.setRange(0, 99999999)
+        cur_units.setDecimals(4)
+        cur_units.setValue(0)
+        cur_nav = QDoubleSpinBox()
+        cur_nav.setRange(0, 999999)
+        cur_nav.setDecimals(4)
+        cur_nav.setValue(0)
+        cur_invested = QDoubleSpinBox()
+        cur_invested.setRange(0, 999999999)
+        cur_invested.setPrefix("\u20b9 ")
+        cur_invested.setDecimals(2)
+        cur_invested.setValue(0)
+
         f.addRow("AMC *", amc)
         f.addRow("Scheme Name *", name)
         f.addRow("Type", stype)
         f.addRow("Folio Number", folio)
+        f.addRow("Link Fund", search_row)
+        f.addRow("", status_hint)
+        f.addRow("Current Units Held", cur_units)
+        f.addRow("Current NAV", cur_nav)
+        f.addRow("Total Invested", cur_invested)
         btn_row = QHBoxLayout()
-        ok = QPushButton("Add")
+        ok = QPushButton("Add Scheme")
         ok.setObjectName("primary")
         cancel = QPushButton("Cancel")
         ok.clicked.connect(dlg.accept)
@@ -2570,17 +2654,30 @@ class MFPage(_FunctionPage):
         if not a or not n:
             QMessageBox.warning(self, "Missing Info", "AMC and Scheme Name are required.")
             return
-        self.repos["mf"].create_scheme(
+        sid = self.repos["mf"].create_scheme(
             amc_name=a, scheme_name=n, scheme_type=stype.currentText(),
-            folio_number=folio.text().strip() or None, is_active=1
+            folio_number=folio.text().strip() or None, is_active=1,
+            api_scheme_code=self._linked_code,
         )
+        # If existing holdings, create initial PURCHASE transaction
+        units = cur_units.value()
+        nav = cur_nav.value()
+        invested = cur_invested.value()
+        if units > 0 and nav > 0 and invested > 0:
+            self.repos["mf"].add_txn(
+                scheme_id=sid, txn_type="PURCHASE",
+                txn_date=TODAY(),
+                amount=invested, nav=nav, units=units, linked_txn_id=None,
+            )
         self._refresh_entry_dropdowns()
         label = f"{a} \u2014 {n}"
         for i in range(self.mf_buy_scheme.count()):
             if self.mf_buy_scheme.itemText(i) == label:
                 self.mf_buy_scheme.setCurrentIndex(i)
                 break
-        QMessageBox.information(self, "Scheme Added", f"'{n}' added to your mutual fund schemes.")
+        QMessageBox.information(self, "Scheme Added",
+            f"'{n}' added to your mutual fund schemes."
+            + (f"\nInitial holdings: {units:,.4f} units at NAV {nav:,.4f}" if units > 0 else ""))
 
     def _update_units(self):
         amt = self.mf_buy_amount.value()
@@ -2681,9 +2778,85 @@ class MFPage(_FunctionPage):
         self.load_list()
         QMessageBox.information(self, "Redemption Logged", f"{units:,.4f} units redeemed for {fmt_money(amount)}.")
 
+    def _edit_scheme(self, scheme):
+        """Edit scheme details dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit Scheme")
+        dlg.setMinimumWidth(480)
+        f = QFormLayout(dlg)
+        amc = QLineEdit(scheme.get("amc_name", ""))
+        name = QLineEdit(scheme.get("scheme_name", ""))
+        stype = QComboBox()
+        stype.addItems(["Equity", "Debt", "Hybrid", "Index", "ELSS", "Liquid", "Other"])
+        stype.setCurrentText(scheme.get("scheme_type") or "Equity")
+        folio = QLineEdit(scheme.get("folio_number") or "")
+        # Link fund section
+        cur_code = scheme.get("api_scheme_code") or ""
+        link_lbl = QLabel(f"Linked: {cur_code}" if cur_code else "Not linked")
+        link_lbl.setStyleSheet(f"color:{C['green'] if cur_code else C['text3']};font-size:11px;font-weight:700;")
+        new_code = [cur_code]  # mutable for closure
+        def relink():
+            d = NavFetchDialog(initial_query=name.text(), parent=dlg)
+            if d.exec_() == QDialog.Accepted and d.result_nav:
+                idx = d.results.currentRow()
+                if 0 <= idx < len(d._matches):
+                    new_code[0] = str(d._matches[idx].get("schemeCode", ""))
+                link_lbl.setText(f"Linked: {d.result_name}")
+                link_lbl.setStyleSheet(f"color:{C['green']};font-size:11px;font-weight:700;")
+        link_row = QHBoxLayout()
+        link_btn = QPushButton("\U0001f50d Re-Link Fund")
+        link_btn.clicked.connect(relink)
+        link_row.addWidget(link_btn)
+        link_row.addWidget(link_lbl)
+
+        f.addRow("AMC *", amc)
+        f.addRow("Scheme Name *", name)
+        f.addRow("Type", stype)
+        f.addRow("Folio Number", folio)
+        f.addRow("Link Fund", link_row)
+        btn_row = QHBoxLayout()
+        ok = QPushButton("Save")
+        ok.setObjectName("primary")
+        cancel = QPushButton("Cancel")
+        ok.clicked.connect(dlg.accept)
+        cancel.clicked.connect(dlg.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel)
+        btn_row.addWidget(ok)
+        f.addRow("", btn_row)
+        if dlg.exec_() == QDialog.Accepted:
+            a, n = amc.text().strip(), name.text().strip()
+            if not a or not n:
+                QMessageBox.warning(self, "Missing Info", "AMC and Scheme Name are required.")
+                return
+            self.db.execute(
+                "UPDATE mf_schemes SET amc_name=?, scheme_name=?, scheme_type=?, folio_number=?, api_scheme_code=? WHERE scheme_id=?",
+                (a, n, stype.currentText(), folio.text().strip() or None, new_code[0] or None, scheme["scheme_id"]))
+            self.db.commit()
+            self._nav_cache.pop(scheme["scheme_id"], None)  # clear cached NAV
+            self._refresh_entry_dropdowns()
+            self.load_list()
+            QMessageBox.information(self, "Updated", f"Scheme '{n}' updated successfully.")
+
     def _last_nav(self, scheme_id):
         if scheme_id in self._nav_cache:
             return self._nav_cache[scheme_id]
+        # Try auto-fetch from saved API scheme code
+        scheme = self.repos["mf"].get_scheme(scheme_id)
+        api_code = scheme.get("api_scheme_code") if scheme else None
+        if api_code:
+            try:
+                import urllib.request
+                url = f"https://api.mfapi.in/mf/{api_code}/latest"
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    data = _json.loads(resp.read().decode())
+                rows = data.get("data") or [] if isinstance(data, dict) else []
+                if rows:
+                    nav = float(rows[0]["nav"])
+                    self._nav_cache[scheme_id] = nav
+                    return nav
+            except Exception:
+                pass
         txns = self.repos["mf"].list_txns(scheme_id)
         return txns[-1]["nav"] if txns else 0
 
@@ -2763,7 +2936,9 @@ class MFPage(_FunctionPage):
         txns = self.repos["mf"].list_txns(scheme_id)
         h = self.repos["mf"].holdings(scheme_id)
         nav = self._last_nav(scheme_id)
-        dlg = MFDetailDialog(scheme, txns, h, nav, parent=self)
+        dlg = MFDetailDialog(scheme, txns, h, nav,
+                             on_edit=lambda: self._edit_scheme(scheme),
+                             parent=self)
         dlg.exec_()
 
 
@@ -2771,7 +2946,7 @@ class MFPage(_FunctionPage):
 #  MF DETAIL DIALOG
 # ══════════════════════════════════════════════════════════════════════════
 class MFDetailDialog(QDialog):
-    def __init__(self, scheme, txns, holdings, nav, parent=None):
+    def __init__(self, scheme, txns, holdings, nav, on_edit=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"{scheme['amc_name']} \u2014 {scheme['scheme_name']}")
         self.setMinimumWidth(560)
@@ -2797,6 +2972,10 @@ class MFDetailDialog(QDialog):
         lay.addWidget(_mf_txn_cards(txns), 1)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        if on_edit:
+            edit_btn = QPushButton("\u270f\ufe0f  Edit Scheme")
+            edit_btn.clicked.connect(lambda: (on_edit(), self.accept()))
+            btn_row.addWidget(edit_btn)
         ok = QPushButton("Close")
         ok.clicked.connect(self.accept)
         btn_row.addWidget(ok)
