@@ -382,19 +382,19 @@ class WealthCard(QFrame):
         t = QLabel(title)
         t.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         top.addWidget(t, 1)
-        right_col = QVBoxLayout()
-        right_col.setSpacing(2)
-        right_col.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        self._badge_lbl = _badge(badge_text, badge_color)
-        right_col.addWidget(self._badge_lbl, 0, Qt.AlignRight)
+        badge_row = QHBoxLayout()
+        badge_row.setSpacing(6)
+        badge_row.setAlignment(Qt.AlignRight | Qt.AlignTop)
         if updated:
             upd_lbl = _badge("Updated", C["accent"])
-            right_col.addWidget(upd_lbl, 0, Qt.AlignRight)
+            badge_row.addWidget(upd_lbl)
+        self._badge_lbl = _badge(badge_text, badge_color)
+        badge_row.addWidget(self._badge_lbl)
+        top.addLayout(badge_row)
         a = QLabel(amount_text)
         a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
         a.setAlignment(Qt.AlignRight)
-        right_col.addWidget(a)
-        top.addLayout(right_col)
+        top.addWidget(a)
         lay.addLayout(top)
 
         # ── Row 2: Subtitle ──
@@ -833,6 +833,8 @@ class _FunctionPage(QWidget):
     # ── Lazy loading support (uses settings preferences) ──
     def _get_batch_size(self):
         try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='wealth_page_size'").fetchone()
+            if r: return int(r[0])
             r = self.db.execute("SELECT value FROM preferences WHERE key='complete_page_size'").fetchone()
             return int(r[0]) if r else 150
         except Exception:
@@ -840,6 +842,8 @@ class _FunctionPage(QWidget):
 
     def _get_scroll_trigger(self):
         try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='wealth_scroll_trigger'").fetchone()
+            if r: return int(r[0])
             r = self.db.execute("SELECT value FROM preferences WHERE key='scroll_trigger_px'").fetchone()
             return int(r[0]) if r else 400
         except Exception:
@@ -2180,9 +2184,10 @@ class FDGivePage(_FunctionPage):
                 item_id=fd["fd_id"],
                 title=fd["account_name"] or "Fixed Deposit",
                 subtitle=f"{fd['interest_rate']}% {MDOT} {fd['start_date']} \u2192 {fd['maturity_date']}",
-            amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
+                amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
                 badge_text=fd["status"], badge_color=color, progress_pct=pct,
                 extra_line=extra,
+                updated=_is_updated(fd),
             )
             card.clicked.connect(self._toggle_card)
 

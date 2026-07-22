@@ -117,14 +117,44 @@ class SettingsTab(QWidget):
         title2.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         f2.addRow(title2)
 
-        self.pref_page_size = QSpinBox(); self.pref_page_size.setRange(50, 1000); self.pref_page_size.setSingleStep(50)
+        self.pref_page_size = QSpinBox(); self.pref_page_size.setRange(30, 1000); self.pref_page_size.setSingleStep(10)
         self.pref_page_size.setToolTip("Number of transactions loaded per batch")
         f2.addRow("Page Size:", self.pref_page_size)
 
-        self.pref_scroll_trigger = QSpinBox(); self.pref_scroll_trigger.setRange(100, 2000); self.pref_scroll_trigger.setSingleStep(100)
+        self.pref_scroll_trigger = QSpinBox(); self.pref_scroll_trigger.setRange(50, 2000); self.pref_scroll_trigger.setSingleStep(50)
         self.pref_scroll_trigger.setToolTip("Load more when this many pixels from the bottom")
         f2.addRow("Scroll Trigger (px):", self.pref_scroll_trigger)
         l.addWidget(grp2)
+
+        # ── Wealth Pagination ──
+        grp_w = QFrame()
+        grp_w.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        fw = QFormLayout(grp_w); fw.setContentsMargins(16,16,16,16); fw.setSpacing(10)
+        title_w = QLabel("\U0001f4c8  Wealth Pagination")
+        title_w.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        fw.addRow(title_w)
+        self.pref_wealth_page_size = QSpinBox(); self.pref_wealth_page_size.setRange(10, 1000); self.pref_wealth_page_size.setSingleStep(10)
+        self.pref_wealth_page_size.setToolTip("Cards loaded per batch in Wealth tab")
+        fw.addRow("Page Size:", self.pref_wealth_page_size)
+        self.pref_wealth_scroll_trigger = QSpinBox(); self.pref_wealth_scroll_trigger.setRange(20, 2000); self.pref_wealth_scroll_trigger.setSingleStep(50)
+        self.pref_wealth_scroll_trigger.setToolTip("Load more when scrolled near bottom")
+        fw.addRow("Scroll Trigger (px):", self.pref_wealth_scroll_trigger)
+        l.addWidget(grp_w)
+
+        # ── Notes Pagination ──
+        grp_n = QFrame()
+        grp_n.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        fn = QFormLayout(grp_n); fn.setContentsMargins(16,16,16,16); fn.setSpacing(10)
+        title_n = QLabel("\U0001f4cb  Notes Pagination")
+        title_n.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        fn.addRow(title_n)
+        self.pref_notes_page_size = QSpinBox(); self.pref_notes_page_size.setRange(10, 500); self.pref_notes_page_size.setSingleStep(10)
+        self.pref_notes_page_size.setToolTip("Notes loaded per batch")
+        fn.addRow("Page Size:", self.pref_notes_page_size)
+        self.pref_notes_scroll_trigger = QSpinBox(); self.pref_notes_scroll_trigger.setRange(20, 2000); self.pref_notes_scroll_trigger.setSingleStep(50)
+        self.pref_notes_scroll_trigger.setToolTip("Load more when scrolled near bottom")
+        fn.addRow("Scroll Trigger (px):", self.pref_notes_scroll_trigger)
+        l.addWidget(grp_n)
 
         # ── Alert Settings ──
         grp3 = QFrame()
@@ -158,6 +188,14 @@ class SettingsTab(QWidget):
                             (str(self.pref_page_size.value()),))
             self.db.execute("INSERT OR REPLACE INTO preferences VALUES('scroll_trigger_px', ?)",
                             (str(self.pref_scroll_trigger.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('wealth_page_size', ?)",
+                            (str(self.pref_wealth_page_size.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('wealth_scroll_trigger', ?)",
+                            (str(self.pref_wealth_scroll_trigger.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('notes_page_size', ?)",
+                            (str(self.pref_notes_page_size.value()),))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('notes_scroll_trigger', ?)",
+                            (str(self.pref_notes_scroll_trigger.value()),))
             self.db.execute("INSERT OR REPLACE INTO preferences VALUES('min_txn_alert', ?)",
                             (str(self.pref_txn_alert.value()),))
             self.db.commit()
@@ -334,6 +372,10 @@ class SettingsTab(QWidget):
         if hasattr(self, 'pref_page_size'):
             self.pref_page_size.setValue(self._get_pref('complete_page_size', 150))
             self.pref_scroll_trigger.setValue(self._get_pref('scroll_trigger_px', 400))
+            self.pref_wealth_page_size.setValue(self._get_pref('wealth_page_size', 150))
+            self.pref_wealth_scroll_trigger.setValue(self._get_pref('wealth_scroll_trigger', 400))
+            self.pref_notes_page_size.setValue(self._get_pref('notes_page_size', 50))
+            self.pref_notes_scroll_trigger.setValue(self._get_pref('notes_scroll_trigger', 200))
             self.pref_txn_alert.setValue(self._get_pref('min_txn_alert', 499))
 
 
