@@ -15,6 +15,7 @@ from ui.widgets.searchable_combo import SearchableCombo
 from services.loan_service import LoanService
 from services.fd_service import FDService
 from services.mf_service import MFService
+from ui.wealth_verify import WealthEditVerifyDialog
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -523,13 +524,14 @@ def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=N
     edit_frame.hide()
     cl.addWidget(edit_frame)
 
-    # Edit button (always visible if on_edit provided)
+    # Edit button (hidden until card clicked)
     if on_edit:
         edit_btn = QPushButton("\u270f\ufe0f Edit")
         edit_btn.setFixedHeight(24)
         edit_btn.setFocusPolicy(Qt.NoFocus)
         edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
         edit_btn.setStyleSheet(_accent_btn_css(accent))
+        edit_btn.hide()
         cl.addWidget(edit_btn)
 
         def _toggle_edit():
@@ -543,19 +545,18 @@ def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=N
                 "date": e_date.date().toString("yyyy-MM-dd"),
                 "description": e_desc.text().strip() or None,
             }
-            save_fn = on_edit()       # no args → _r uses captured repayment record
+            save_fn = on_edit()
             if callable(save_fn):
-                # Show saving indicator
-                saving_lbl = QLabel("\U0001f4be Saving...")
-                saving_lbl.setStyleSheet(f"color:{accent};font-size:11px;font-weight:700;")
-                cl.addWidget(saving_lbl)
-                from PyQt5.QtWidgets import QApplication
-                QApplication.processEvents()
-                save_fn(data)          # pass form data to _save
+                save_fn(data)
 
         edit_btn.clicked.connect(_toggle_edit)
         e_cancel.clicked.connect(_toggle_edit)
         e_save.clicked.connect(_save_edit)
+
+        # Click card → show edit button (2-click pattern)
+        def _on_card_click(event):
+            edit_btn.show()
+        card.mousePressEvent = _on_card_click
 
     return card
 
@@ -809,6 +810,13 @@ class _FunctionPage(QWidget):
 
     def _refresh_entry_dropdowns(self):
         pass
+
+    def _verify_edit(self):
+        """Require 2FA/password before allowing wealth edits."""
+        sec = self.services.get("security")
+        if not sec:
+            return True
+        return WealthEditVerifyDialog.verify_user(sec, self)
 
     def load_list(self, force=False):
         """Override in subclass. force=True rebuilds after edit."""
@@ -1285,6 +1293,8 @@ class LoansGivePage(_FunctionPage):
 
         def _make_save(_lid=lid):
             def _save(data):
+                if not self._verify_edit():
+                    return
                 self.db.execute(
                     "UPDATE loans SET loan_amount=?, interest_rate=?, interest_method=?, due_date=?, description=? WHERE loan_id=?",
                     (data["Loan Amount"], data["Interest Rate"], data["Interest Method"],
@@ -1326,6 +1336,8 @@ class LoansGivePage(_FunctionPage):
         def _make_rep_edit(_lid=lid):
             def _on_rep_edit(rep_data):
                 def _save(data):
+                    if not self._verify_edit():
+                        return
                     self.db.execute(
                         "UPDATE repayments SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
                         (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))
@@ -2045,6 +2057,8 @@ class LoansTakePage(_FunctionPage):
         ]
         def _make_save(_lid=lid, _l=l):
             def _save(data):
+                if not self._verify_edit():
+                    return
                 emi_type_inner = _l.get("emi_type") or "EMI"
                 kw = {"principal_amount": data["Principal"], "interest_rate": data["Interest Rate"],
                       "interest_method": data["Interest Method"], "due_date": data["Due Date"],
@@ -2084,6 +2098,8 @@ class LoansTakePage(_FunctionPage):
         def _make_rep_edit(_lid=lid):
             def _on_rep_edit(rep_data):
                 def _save(data):
+                    if not self._verify_edit():
+                        return
                     self.db.execute("UPDATE borrowed_loan_repayments SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
                                    (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))
                     if rep_data.get("linked_txn_id"):
@@ -2361,6 +2377,8 @@ class FDGivePage(_FunctionPage):
 
             def _make_fd_save(_fid):
                 def _save(data):
+                    if not self._verify_edit():
+                        return
                     # Recalculate maturity amount
                     p = data["Principal"]
                     r = data["Interest Rate"]
@@ -2928,6 +2946,8 @@ class FDOthersPage(_FunctionPage):
 
             def _make_fo_save(_did, _d=d):
                 def _save(data):
+                    if not self._verify_edit():
+                        return
                     rate = data["Interest Rate"] if _d.get("interest_rate") is not None else None
                     imethod = data["Interest Method"]
                     self.db.execute(
@@ -2971,6 +2991,8 @@ class FDOthersPage(_FunctionPage):
             def _make_fo_rep_edit(_did):
                 def _on_rep_edit(rep_data):
                     def _save(data):
+                        if not self._verify_edit():
+                            return
                         self.db.execute(
                             "UPDATE deposit_repayments_to_others SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
                             (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))

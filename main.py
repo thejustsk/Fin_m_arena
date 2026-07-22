@@ -75,40 +75,38 @@ def main():
             QTimer.singleShot(50, lambda: _step3(mw))
 
         def _step3(mw):
-            splash.set_status("Preparing data...")
+            splash.set_status("Preparing home page...")
             app.processEvents()
             mw.showMaximized()
             mw.raise_()
             mw.activateWindow()
-            # Pre-load wealth + notes tabs in sequence
-            _preload_pages(mw, splash, 0)
+            # Close splash once window is visible — home page is ready
+            QTimer.singleShot(300, lambda: _close_splash(splash))
+            # Continue pre-loading wealth + notes in background (non-blocking)
+            QTimer.singleShot(500, lambda: _preload_pages(mw, 0))
 
-        def _preload_pages(mw, splash, idx):
-            """Pre-load wealth + notes pages one at a time with status updates."""
+        def _close_splash(splash):
+            splash.close()
+            splash.deleteLater()
+
+        def _preload_pages(mw, idx):
+            """Pre-load wealth + notes pages in background after splash closes."""
             pages_to_load = []
-            # Collect wealth sub-pages from _tabs dict
             wealth = mw._tabs.get("wealth")
             if wealth and hasattr(wealth, '_pages'):
                 for p in wealth._pages:
                     pages_to_load.append(p)
-            # Collect notes tab
             notes = mw._tabs.get("notes")
             if notes:
                 pages_to_load.append(notes)
 
             if idx >= len(pages_to_load):
-                splash.set_status("Ready!")
-                app.processEvents()
-                QTimer.singleShot(200, splash.close)
-                return
+                return  # all done
 
             page = pages_to_load[idx]
-            name = getattr(page, 'TITLE', 'Notes') if hasattr(page, 'TITLE') else 'Notes'
-            splash.set_status(f"Loading {name}...")
-            app.processEvents()
             page.load_list()
-            app.processEvents()
-            QTimer.singleShot(50, lambda: _preload_pages(mw, splash, idx + 1))
+            # Continue with next page after a short delay (keeps UI responsive)
+            QTimer.singleShot(100, lambda: _preload_pages(mw, idx + 1))
 
         QTimer.singleShot(50, _step1)
 
