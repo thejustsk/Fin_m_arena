@@ -928,9 +928,40 @@ class AuditTab(QWidget):
         sub.setStyleSheet(f"color:{C['text3']};font-size:12px;")
         outer.addWidget(sub)
 
+        # Sub-tab navigation: Regular | Wealth
         nav = QHBoxLayout()
+        nav.setSpacing(8)
+        self.btn_regular = QPushButton("\U0001f4cb Regular Transactions")
+        self.btn_wealth = QPushButton("\U0001f4c8 Wealth Transactions")
+        self._audit_btns = [self.btn_regular, self.btn_wealth]
+        for b in self._audit_btns:
+            b.setMinimumHeight(32)
+            b.setCursor(QCursor(Qt.PointingHandCursor))
+            nav.addWidget(b)
+        nav.addStretch()
+        outer.addLayout(nav)
+
+        self.audit_stack = QStackedWidget()
+        outer.addWidget(self.audit_stack, 1)
+
         self.regular_tab = _AuditSubTab(self.db, self.repos, self.services, wealth_mode=False)
-        outer.addWidget(self.regular_tab)
+        self.wealth_tab = _AuditSubTab(self.db, self.repos, self.services, wealth_mode=True)
+        self.audit_stack.addWidget(self.regular_tab)
+        self.audit_stack.addWidget(self.wealth_tab)
+
+        self.btn_regular.clicked.connect(lambda: self._goto_audit(0))
+        self.btn_wealth.clicked.connect(lambda: self._goto_audit(1))
+        _switch_tabs(self._audit_btns, 0)
+        self.audit_stack.setCurrentIndex(0)
+
+    def _goto_audit(self, idx):
+        _switch_tabs(self._audit_btns, idx)
+        self.audit_stack.setCurrentIndex(idx)
+        if idx == 0:
+            self.regular_tab.load_records()
+        else:
+            self.wealth_tab.load_records()
 
     def refresh(self):
         self.regular_tab.refresh()
+        self.wealth_tab.refresh()

@@ -529,15 +529,107 @@ class DatabaseTab(QWidget):
     # ═══════════════════════════════════
     def _build_complete(self):
         w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(8)
+
+        # Search bar
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        self.comp_search = QLineEdit()
+        self.comp_search.setPlaceholderText("\U0001f50d Search by person, description, or amount\u2026")
+        self.comp_search.setMinimumHeight(36)
+        self.comp_search.setStyleSheet(
+            f"QLineEdit{{background:{C['surface']};border:1.5px solid {C['border']};"
+            f"border-radius:{C['radius_sm']};padding:8px 12px;font-size:13px;}}"
+            f"QLineEdit:focus{{border-color:{C['accent']};}}")
+        self.comp_search.returnPressed.connect(self._search_complete)
+        search_row.addWidget(self.comp_search, 1)
+
+        search_btn = QPushButton("\U0001f50d Search")
+        search_btn.setMinimumHeight(36)
+        search_btn.setStyleSheet(
+            f"QPushButton{{background:{C['accent']};color:white;border:none;"
+            f"border-radius:{C['radius_sm']};padding:8px 16px;font-size:13px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#4338CA;}}")
+        search_btn.clicked.connect(self._search_complete)
+        search_row.addWidget(search_btn)
+
+        clear_btn = QPushButton("\u2715 Clear")
+        clear_btn.setMinimumHeight(36)
+        clear_btn.setStyleSheet(
+            f"QPushButton{{background:{C['surface']};color:{C['text2']};"
+            f"border:1px solid {C['border']};border-radius:{C['radius_sm']};"
+            f"padding:8px 12px;font-size:13px;}}"
+            f"QPushButton:hover{{border-color:{C['accent']};color:{C['accent']};}}")
+        clear_btn.clicked.connect(self._clear_complete_search)
+        search_row.addWidget(clear_btn)
+        lay.addLayout(search_row)
+
+        self.comp_search_count = QLabel("")
+        self.comp_search_count.setStyleSheet(f"color:{C['text3']};font-size:11px;font-weight:600;")
+        lay.addWidget(self.comp_search_count)
+
+        # Scroll area
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         inner = QWidget()
         self.comp_lay = QVBoxLayout(inner); self.comp_lay.setSpacing(4); self.comp_lay.setContentsMargins(0,4,0,0)
-        self.comp_lay.addStretch()  # permanent sentinel
+        self.comp_lay.addStretch()
         scroll.setWidget(inner)
-        lay = QVBoxLayout(w); lay.setContentsMargins(0,8,0,0); lay.addWidget(scroll)
+        lay.addWidget(scroll, 1)
         self._comp_scroll = scroll
         scroll.verticalScrollBar().valueChanged.connect(self._on_complete_scroll)
+        self._comp_search_active = False
         return w
+
+    def _search_complete(self):
+        query = self.comp_search.text().strip().lower()
+        if not query:
+            self._clear_complete_search()
+            return
+        self._comp_search_active = True
+        while self.comp_lay.count() > 1:
+            itm = self.comp_lay.takeAt(0)
+            if itm.widget(): itm.widget().deleteLater()
+        all_txns = self.tx_repo.list_filters(limit=50000)
+        matched = [tx for tx in all_txns
+                   if query in (tx.get("person_org") or "").lower()
+                   or query in (tx.get("description") or "").lower()
+                   or query in (tx.get("cat_name") or "").lower()
+                   or query in (tx.get("account_name") or "").lower()
+                   or query in str(tx["amount"])]
+        self.comp_search_count.setText(f"Found {len(matched)} result(s) for \"{self.comp_search.text().strip()}\"" )
+        if not matched:
+            lbl = QLabel(f"No transactions match \"{self.comp_search.text().strip()}\".")
+            lbl.setStyleSheet(f"color:{C['text3']};font-size:13px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            self.comp_lay.insertWidget(0, lbl)
+            return
+        bal_map = self._compute_all_running_balances()
+        last_m, last_d = None, None
+        at = 0
+        for tx in sorted(matched, key=lambda t: t["tx_date"], reverse=True):
+            d = tx["tx_date"]; mk = d[:7]
+            if mk != last_m:
+                try:
+                    y, m = map(int, mk.split("-"))
+                    hdr = _month_header(date(y, m, 1).strftime("%B %Y"))
+                except Exception:
+                    hdr = _month_header(mk)
+                self.comp_lay.insertWidget(at, hdr); at += 1; last_m = mk; last_d = None
+            if d != last_d:
+                try:
+                    hdr = _day_header(date.fromisoformat(d).strftime("%A, %d %b"))
+                except Exception:
+                    hdr = _day_header(d)
+                self.comp_lay.insertWidget(at, hdr); at += 1; last_d = d
+            self.comp_lay.insertWidget(at, _tx_card(tx, bal_map.get(tx["id"]))); at += 1
+
+    def _clear_complete_search(self):
+        self.comp_search.clear()
+        self.comp_search_count.setText("")
+        self._comp_search_active = False
+        self._load_complete()
 
     def _load_complete(self):
         # Reset pagination state
@@ -555,6 +647,8 @@ class DatabaseTab(QWidget):
         self._load_more_complete()
 
     def _on_complete_scroll(self, value):
+        if getattr(self, '_comp_search_active', False):
+            return  # don't paginate during search
         sb = self._comp_scroll.verticalScrollBar()
         trigger = getattr(self, '_comp_scroll_trigger', SCROLL_TRIGGER_PX)
         if value >= sb.maximum() - trigger:
