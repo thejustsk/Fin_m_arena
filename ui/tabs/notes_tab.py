@@ -256,7 +256,8 @@ class NotesTab(QWidget):
         self._loading_tx = False
         self._composer_tags = []
         self._fv = []
-        self._all_filtered_ids = []  # for select all
+        self._all_filtered_ids = []
+        self._loaded = False
         self._build()
         self.refresh()
 
@@ -300,7 +301,15 @@ class NotesTab(QWidget):
         elif idx == 2: self._load_trash()
 
     def refresh(self):
+        self._loaded = False
         self._load_notes(); self._load_trash()
+
+    def load_list(self, force=False):
+        """Called by pre-load and tab switch."""
+        if self._loaded and not force:
+            return
+        self._loaded = True
+        self._load_notes()
 
     # ─────────────── PAGE 1: All Notes ───────────────
     def _build_all_page(self):
@@ -336,9 +345,11 @@ class NotesTab(QWidget):
         return 200
 
     def _load_notes(self):
-        for i in reversed(range(self.notes_lay.count())):
-            item = self.notes_lay.itemAt(i)
-            if item.widget(): item.widget().deleteLater()
+        while self.notes_lay.count():
+            item = self.notes_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
         notes = self.nr.list_active(self.search_box.text().strip() or None)
         if not notes:
             empty = QLabel("No notes yet. Click \"+ New Note\" to create one.")

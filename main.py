@@ -80,7 +80,35 @@ def main():
             mw.showMaximized()
             mw.raise_()
             mw.activateWindow()
-            QTimer.singleShot(300, splash.close)
+            # Pre-load wealth + notes tabs in sequence
+            _preload_pages(mw, splash, 0)
+
+        def _preload_pages(mw, splash, idx):
+            """Pre-load wealth + notes pages one at a time with status updates."""
+            pages_to_load = []
+            # Collect wealth sub-pages from _tabs dict
+            wealth = mw._tabs.get("wealth")
+            if wealth and hasattr(wealth, '_pages'):
+                for p in wealth._pages:
+                    pages_to_load.append(p)
+            # Collect notes tab
+            notes = mw._tabs.get("notes")
+            if notes:
+                pages_to_load.append(notes)
+
+            if idx >= len(pages_to_load):
+                splash.set_status("Ready!")
+                app.processEvents()
+                QTimer.singleShot(200, splash.close)
+                return
+
+            page = pages_to_load[idx]
+            name = getattr(page, 'TITLE', 'Notes') if hasattr(page, 'TITLE') else 'Notes'
+            splash.set_status(f"Loading {name}...")
+            app.processEvents()
+            page.load_list()
+            app.processEvents()
+            QTimer.singleShot(50, lambda: _preload_pages(mw, splash, idx + 1))
 
         QTimer.singleShot(50, _step1)
 
