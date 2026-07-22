@@ -817,6 +817,31 @@ class _FunctionPage(QWidget):
     def _render_list(self):
         pass
 
+    # ── Batch query helpers ──
+    def _batch_query(self, table, id_col, ids):
+        """Batch query: get all rows from table where id_col IN ids, grouped by id_col."""
+        if not ids:
+            return {}
+        phs = ",".join(["?"] * len(ids))
+        rows = self.db.execute(
+            f"SELECT * FROM {table} WHERE {id_col} IN ({phs}) ORDER BY {id_col}",
+            ids).fetchall()
+        grouped = {}
+        for r in rows:
+            d = dict(r)
+            grouped.setdefault(d[id_col], []).append(d)
+        return grouped
+
+    def _batch_sum(self, table, id_col, sum_col, ids):
+        """Batch SUM query: {id: sum} for all ids."""
+        if not ids:
+            return {}
+        phs = ",".join(["?"] * len(ids))
+        rows = self.db.execute(
+            f"SELECT {id_col}, COALESCE(SUM({sum_col}),0) AS t FROM {table} WHERE {id_col} IN ({phs}) GROUP BY {id_col}",
+            ids).fetchall()
+        return {r[id_col]: r["t"] for r in rows}
+
     def _toggle_card(self, item_id):
         """Toggle expand/collapse for a WealthCard. Only one expanded at a time."""
         for i in range(self._list_lay.count()):
@@ -1136,14 +1161,21 @@ class LoansGivePage(_FunctionPage):
         )
 
     # ── List ──
+    # ── List ──
     def _render_list(self):
         if not hasattr(self, "_list_lay"):
             return
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         loans = list(self._list_data)
+
+        # ── Use cached batch data from load_list ──
+        repaid_map = getattr(self, '_repaid_map', {})
+        ids = [l["loan_id"] for l in loans]
+        repay_map = self._batch_query("repayments", "loan_id", ids)
+
         total_pending = sum(
-            max(l["loan_amount"] - self.repos["loans"].total_repaid(l["loan_id"]), 0)
+            max(l["loan_amount"] - repaid_map.get(l["loan_id"], 0), 0)
             for l in loans if l["status"] != "CLOSED"
         )
         pending_count = len([l for l in loans if l["status"] != "CLOSED"])
@@ -1176,12 +1208,17 @@ class LoansGivePage(_FunctionPage):
             return
         all_cards = []
         for l in loans:
-            a = self._analysis(l)
+            total_paid = repaid_map.get(l["loan_id"], 0)
+            months = self._loan_months(l)
+            method = l.get("interest_method") or "SIMPLE"
+            rate = l.get("interest_rate") or 0
+            a = LoanService.loan_analysis(
+                l["loan_amount"], rate, months, "ANNUAL", total_paid, l["start_date"], method=method
+            )
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
             color = status_color(l["status"])
-            mth = l.get("interest_method") or "SIMPLE"
-            mth_tag = "SI" if mth == "SIMPLE" else "CI"
-            rate_tag = f"{l.get('interest_rate') or 0}% {mth_tag}" if (l.get('interest_rate') or 0) > 0 else "Interest-Free"
+            mth_tag = "SI" if method == "SIMPLE" else "CI"
+            rate_tag = f"{rate}% {mth_tag}" if rate > 0 else "Interest-Free"
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(a['current_value'])}</span>  "
                      f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
@@ -1207,7 +1244,7 @@ class LoansGivePage(_FunctionPage):
             detail_info.setText(
                 f"<table style='font-size:13px;color:{C['text2']};' cellpadding='3'>"
                 f"<tr><td style='color:{C['text3']};font-weight:600;'>Rate</td>"
-                f"<td style='font-weight:700;color:{C['text']};'>{l.get('interest_rate') or 0}% {mth_tag}</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{rate}% {mth_tag}</td>"
                 f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Start</td>"
                 f"<td style='font-weight:700;color:{C['text']};'>{l['start_date']}</td></tr>"
                 f"<tr><td style='color:{C['text3']};font-weight:600;'>Due Date</td>"
@@ -1227,8 +1264,8 @@ class LoansGivePage(_FunctionPage):
             # Edit form
             fields = [
                 ("Loan Amount", "number", l["loan_amount"], None),
-                ("Interest Rate", "rate", l.get("interest_rate") or 0, None),
-                ("Interest Method", "combo", l.get("interest_method") or "SIMPLE",
+                ("Interest Rate", "rate", rate, None),
+                ("Interest Method", "combo", method,
                  [("Simple Interest", "SIMPLE"), ("Compound Interest", "COMPOUND")]),
                 ("Due Date", "date", l.get("due_date"), None),
                 ("Description", "text", l.get("description"), None),
@@ -1291,7 +1328,7 @@ class LoansGivePage(_FunctionPage):
                     return _save
                 return _on_rep_edit
 
-            repayments = self.repos["loans"].get_repayments(lid)
+            repayments = repay_map.get(lid, [])
             rep_section = _repayment_section(
                 repayments, "amount_paid", "payment_date",
                 accent_color=color,
@@ -1365,11 +1402,38 @@ class LoansGivePage(_FunctionPage):
     def load_list(self):
         self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")
         self.repos["loans"].sync_overdue()
-        # Recalc all non-closed loans for comprehensive status
-        for l in self.repos["loans"].list_loans():
-            if l["status"] not in ("CLOSED",):
-                self.repos["loans"].recalc_status(l["loan_id"])
-        self._list_data = self.repos["loans"].list_loans()
+        loans = self.repos["loans"].list_loans()
+        # Batch: single query for all totals
+        ids = [l["loan_id"] for l in loans]
+        repaid_map = self._batch_sum("repayments", "loan_id", "amount_paid", ids)
+        # Batch status recalc using CASE WHEN (single UPDATE)
+        today_str = date.today().isoformat()
+        case_parts, case_ids = [], []
+        for l in loans:
+            if l["status"] == "CLOSED":
+                continue
+            total = repaid_map.get(l["loan_id"], 0)
+            due = l.get("due_date")
+            if total >= l["loan_amount"]:
+                new_status = "REPAID"
+            elif due and due < today_str:
+                new_status = "OVERDUE"
+            elif total > 0:
+                new_status = "PARTIALLY_PAID"
+            else:
+                new_status = "ACTIVE"
+            if l["status"] != new_status:
+                case_parts.append("WHEN loan_id=? THEN ?")
+                case_ids.extend([l["loan_id"], new_status])
+        if case_parts:
+            phs = ", ".join(case_parts)
+            self.db.execute(
+                f"UPDATE loans SET status=CASE {phs} ELSE status END WHERE loan_id IN ({','.join(['?']*len(case_ids))})",
+                case_ids + case_ids)
+            self.db.commit()
+        # Store for _render_list (no second list_loans call)
+        self._list_data = loans
+        self._repaid_map = repaid_map
         self._render_list()
 
     def _mark_closed_lg(self, loan_id):
@@ -1746,9 +1810,28 @@ class LoansTakePage(_FunctionPage):
     # ── List ──
     def load_list(self):
         self.repos["borrowed"].sync_overdue()
-        for l in self.repos["borrowed"].list_loans():
-            if l["status"] not in ("CLOSED",):
-                self.repos["borrowed"].recalc_status(l["loan_id"])
+        loans = self.repos["borrowed"].list_loans()
+        # Batch recalc
+        ids = [l["loan_id"] for l in loans]
+        repaid_map = self._batch_sum("borrowed_loan_repayments", "loan_id", "amount_paid", ids)
+        today_str = date.today().isoformat()
+        for l in loans:
+            if l["status"] == "CLOSED":
+                continue
+            total = repaid_map.get(l["loan_id"], 0)
+            due = l.get("due_date")
+            if total >= l["principal_amount"]:
+                new_status = "REPAID"
+            elif due and due < today_str:
+                new_status = "OVERDUE"
+            elif total > 0:
+                new_status = "PARTIALLY_PAID"
+            else:
+                new_status = "ACTIVE"
+            if l["status"] != new_status:
+                self.db.execute("UPDATE borrowed_loans SET status=? WHERE loan_id=?",
+                                (new_status, l["loan_id"]))
+        self.db.commit()
         self._list_data = self.repos["borrowed"].list_loans()
         self._render_list()
 
@@ -1758,10 +1841,30 @@ class LoansTakePage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         loans = list(self._list_data)
+        # Batch queries
+        lt_ids = [l["loan_id"] for l in loans]
+        lt_repaid_map = self._batch_sum("borrowed_loan_repayments", "loan_id", "amount_paid", lt_ids)
+        lt_repay_map = self._batch_query("borrowed_loan_repayments", "loan_id", lt_ids)
         active = [l for l in loans if l["status"] != "CLOSED"]
         total_outstanding = 0
         for l in active:
-            a = self._analysis(l)
+            total_paid = lt_repaid_map.get(l["loan_id"], 0)
+            emi_type = l.get("emi_type") or "EMI"
+            if emi_type == "NON_EMI":
+                method = l.get("interest_method") or "SIMPLE"
+                payments = lt_repay_map.get(l["loan_id"], [])
+                a = LoanService.non_emi_analysis(
+                    l["principal_amount"], l["interest_rate"] or 0,
+                    total_paid, l["start_date"], payments=payments, method=method
+                )
+            else:
+                months = self._loan_months(l)
+                freq = l.get("interest_type") or "ANNUAL"
+                method = l.get("interest_method") or "COMPOUND"
+                a = LoanService.loan_analysis(
+                    l["principal_amount"], l["interest_rate"] or 0,
+                    months, freq, total_paid, l["start_date"], method=method
+                )
             total_outstanding += a["current_value"]
         _fill_stats_row(self._stats_row, [
             _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
@@ -2642,9 +2745,33 @@ class FDOthersPage(_FunctionPage):
 
     # ── List ──
     def load_list(self):
-        for d in self.repos["deposits"].list_deposits():
-            if d["status"] not in ("CLOSED",):
-                self.repos["deposits"].recalc_status(d["deposit_id"])
+        deps = self.repos["deposits"].list_deposits()
+        # Batch recalc
+        ids = [d["deposit_id"] for d in deps]
+        repaid_map = self._batch_sum("deposit_repayments_to_others", "deposit_id", "amount_paid", ids)
+        today_str = date.today().isoformat()
+        for d in deps:
+            if d["status"] == "CLOSED":
+                continue
+            total = repaid_map.get(d["deposit_id"], 0)
+            return_date = d.get("expected_return_date")
+            rate = d.get("interest_rate") or 0
+            if not rate:
+                fully_paid = total >= d["principal_amount"]
+            else:
+                fully_paid = total >= d["principal_amount"]  # simplified for batch
+            if fully_paid and total > 0:
+                new_status = "REPAID"
+            elif return_date and return_date < today_str:
+                new_status = "OVERDUE"
+            elif total > 0:
+                new_status = "PARTIALLY_PAID"
+            else:
+                new_status = "ACTIVE"
+            if d["status"] != new_status:
+                self.db.execute("UPDATE deposits_from_others SET status=? WHERE deposit_id=?",
+                                (new_status, d["deposit_id"]))
+        self.db.commit()
         self._list_data = self.repos["deposits"].list_deposits()
         self._render_list()
 
@@ -2667,11 +2794,27 @@ class FDOthersPage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         deps = list(self._list_data)
+        fo_ids = [d["deposit_id"] for d in deps]
+        fo_repaid_map = self._batch_sum("deposit_repayments_to_others", "deposit_id", "amount_paid", fo_ids)
+        fo_repay_map = self._batch_query("deposit_repayments_to_others", "deposit_id", fo_ids)
         active = [d for d in deps if d["status"] != "CLOSED"]
         total_outstanding = 0
         for d in active:
-            a = self._analysis(d)
-            total_outstanding += a["current_value"]
+            total_paid = fo_repaid_map.get(d["deposit_id"], 0)
+            rate = d.get("interest_rate") or 0
+            if not rate:
+                cv = max(d["principal_amount"] - total_paid, 0)
+            else:
+                # Use full analysis for interest-bearing deposits
+                months = self._dep_months(d)
+                payments = fo_repay_map.get(d["deposit_id"], [])
+                a = LoanService.loan_analysis(
+                    d["principal_amount"], rate, months, "ANNUAL",
+                    total_paid, d["deposit_date"], payments=payments,
+                    method=d.get("interest_method") or "SIMPLE"
+                )
+                cv = a["current_value"]
+            total_outstanding += cv
         _fill_stats_row(self._stats_row, [
             _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
             _metric_card("Active Deposits", str(len(active))),
@@ -3399,23 +3542,10 @@ class MFPage(_FunctionPage):
             QMessageBox.information(self, "Updated", f"Scheme '{n}' updated successfully.")
 
     def _last_nav(self, scheme_id):
+        # Fast path: cache hit
         if scheme_id in self._nav_cache:
             return self._nav_cache[scheme_id]
-        scheme = self.repos["mf"].get_scheme(scheme_id)
-        api_code = scheme.get("api_scheme_code") if scheme else None
-        if api_code:
-            try:
-                import urllib.request
-                url = f"https://api.mfapi.in/mf/{api_code}/latest"
-                with urllib.request.urlopen(url, timeout=3) as resp:
-                    data = _json.loads(resp.read().decode())
-                rows = data.get("data") or [] if isinstance(data, dict) else []
-                if rows:
-                    nav = float(rows[0]["nav"])
-                    self._nav_cache[scheme_id] = nav
-                    return nav
-            except Exception:
-                pass
+        # Fallback: last transaction NAV (no network call)
         txns = self.repos["mf"].list_txns(scheme_id)
         return txns[-1]["nav"] if txns else 0
 
