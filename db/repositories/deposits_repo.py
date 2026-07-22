@@ -19,6 +19,7 @@ class DepositsRepo:
         cols = ", ".join(kw.keys()); phs = ", ".join(["?"]*len(kw))
         self.db.execute(f"INSERT INTO deposits_from_others({cols}) VALUES({phs})",
                         tuple(kw.values())); self.db.commit()
+        return kw["deposit_id"]
     def list_deposits(self):
         return _rows(self.db.execute(
             "SELECT d.*, dep.name AS depositor_name FROM deposits_from_others d "
