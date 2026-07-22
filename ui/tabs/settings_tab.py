@@ -76,18 +76,41 @@ class SettingsTab(QWidget):
     def _security_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
 
-        # 2FA Status (read-only, mandatory)
+        # ── 2FA / TOTP Section ──
         tfa_frame = QFrame()
         tfa_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         tf = QVBoxLayout(tfa_frame); tf.setContentsMargins(16,16,16,16); tf.setSpacing(10)
         tfa_title = QLabel("🔐  Two-Factor Authentication")
         tfa_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); tf.addWidget(tfa_title)
-        tfa_note = QLabel("2FA is mandatory and cannot be disabled.")
-        tfa_note.setStyleSheet(f"font-size:12px;color:{C['text3']};"); tf.addWidget(tfa_note)
+
+        # Status label
         self.totp_lbl = QLabel(); self.totp_lbl.setStyleSheet("font-size:13px;font-weight:600;"); tf.addWidget(self.totp_lbl)
+
+        # Toggle row
+        toggle_row = QHBoxLayout()
+        toggle_label = QLabel("Require TOTP for login & edits:")
+        toggle_label.setStyleSheet(f"font-size:12px;color:{C['text2']};font-weight:600;")
+        toggle_row.addWidget(toggle_label)
+        self.tfa_toggle = QPushButton("ON")
+        self.tfa_toggle.setCheckable(True)
+        self.tfa_toggle.setFixedWidth(80)
+        self.tfa_toggle.setCursor(Qt.PointingHandCursor)
+        self.tfa_toggle.clicked.connect(self._toggle_2fa)
+        toggle_row.addWidget(self.tfa_toggle)
+        toggle_row.addStretch()
+        tf.addLayout(toggle_row)
+
+        # Edit 2FA button (change secret key)
+        tfa_note = QLabel("Toggle changes login method. Secret key stays the same.")
+        tfa_note.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;"); tf.addWidget(tfa_note)
+        edit_tfa_btn = QPushButton("✏️  Edit 2FA Key (new secret)")
+        edit_tfa_btn.setCursor(Qt.PointingHandCursor)
+        edit_tfa_btn.clicked.connect(self._edit_tfa_key)
+        tf.addWidget(edit_tfa_btn)
+
         l.addWidget(tfa_frame)
 
-        # Change Password
+        # ── Change Password ──
         pw_frame = QFrame()
         pw_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         pf = QVBoxLayout(pw_frame); pf.setContentsMargins(16,16,16,16); pf.setSpacing(10)
@@ -311,6 +334,133 @@ class SettingsTab(QWidget):
         self.db.commit()
         self.refresh()
 
+    def _toggle_2fa(self):
+        """Toggle 2FA on/off WITHOUT changing the secret key."""
+        new_state = self.tfa_toggle.isChecked()
+        if new_state:
+            # Enabling — check if secret exists
+            if not self.sec.get_secret():
+                QMessageBox.warning(self, "No Secret Key",
+                    "No 2FA secret key found. Please use 'Edit 2FA Key' to set up first.")
+                self.tfa_toggle.setChecked(False)
+                return
+            self.sec.toggle_2fa(True)
+            QMessageBox.information(self, "2FA Enabled",
+                "TOTP is now required for login and wealth edits.")
+        else:
+            # Disabling — warn
+            reply = QMessageBox.question(self, "Disable 2FA?",
+                "Password will be used instead of TOTP for login and edits.\nContinue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.sec.toggle_2fa(False)
+                QMessageBox.information(self, "2FA Disabled",
+                    "Password is now required for login and wealth edits.")
+            else:
+                self.tfa_toggle.setChecked(True)
+        self.refresh()
+
+    def _edit_tfa_key(self):
+        """Generate new TOTP secret key — follows setup wizard flow."""
+        try:
+            import pyotp, qrcode
+            from io import BytesIO
+            from PyQt5.QtGui import QPixmap
+        except ImportError:
+            QMessageBox.warning(self, "Missing", "Install pyotp and qrcode:\npip install pyotp qrcode[pil]")
+            return
+
+        # Verify current identity first
+        if self.sec.is_2fa():
+            code, ok = QInputDialog.getText(self, "Verify", "Enter current TOTP code to proceed:")
+            if not ok or not self.sec.verify_totp(code):
+                QMessageBox.warning(self, "Failed", "Invalid code. Aborted.")
+                return
+        else:
+            pw, ok = QInputDialog.getText(self, "Verify", "Enter your password:", QLineEdit.Password)
+            if not ok or not self.sec.verify(pw):
+                QMessageBox.warning(self, "Failed", "Invalid password. Aborted.")
+                return
+
+        # Generate new secret
+        secret = pyotp.random_base32()
+        totp = pyotp.TOTP(secret)
+        uri = totp.provisioning_uri("FinanceManager", issuer_name="Finance Manager")
+
+        # Generate QR
+        qr = qrcode.make(uri)
+        buf = BytesIO()
+        qr.save(buf, format="PNG")
+        buf.seek(0)
+        pixmap = QPixmap()
+        pixmap.loadFromData(buf.read())
+
+        # Show dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Setup New 2FA Key")
+        dlg.setMinimumWidth(420)
+        dl = QVBoxLayout(dlg)
+        dl.setSpacing(12)
+
+        info = QLabel("Scan this QR code with your authenticator app:")
+        info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
+        info.setAlignment(Qt.AlignCenter)
+        dl.addWidget(info)
+
+        qr_lbl = QLabel()
+        qr_lbl.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        qr_lbl.setAlignment(Qt.AlignCenter)
+        qr_lbl.setStyleSheet("background:white;border:2px solid #E5E7EB;border-radius:12px;padding:8px;")
+        dl.addWidget(qr_lbl, alignment=Qt.AlignCenter)
+
+        sec_lbl = QLabel(f"Manual key: {secret}")
+        sec_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        sec_lbl.setStyleSheet(f"font-family:'Courier New',monospace;font-size:14px;font-weight:700;"
+                              f"color:{C['accent']};background:{C['accent_bg']};"
+                              f"padding:10px 16px;border-radius:8px;letter-spacing:2px;")
+        sec_lbl.setAlignment(Qt.AlignCenter)
+        dl.addWidget(sec_lbl)
+
+        verify_lbl = QLabel("Enter 6-digit code to verify & save:")
+        verify_lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};")
+        dl.addWidget(verify_lbl)
+
+        code_input = QLineEdit()
+        code_input.setPlaceholderText("000000")
+        code_input.setMaxLength(6)
+        code_input.setMinimumHeight(44)
+        code_input.setStyleSheet(f"font-size:18px;font-weight:700;letter-spacing:4px;padding:10px;")
+        code_input.setAlignment(Qt.AlignCenter)
+        dl.addWidget(code_input)
+
+        err_lbl = QLabel("")
+        err_lbl.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
+        err_lbl.setAlignment(Qt.AlignCenter)
+        dl.addWidget(err_lbl)
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel"); cancel_btn.clicked.connect(dlg.reject)
+        save_btn = QPushButton("✅ Verify & Save"); save_btn.setObjectName("primary")
+        def do_save():
+            code = code_input.text().strip()
+            if not code:
+                err_lbl.setText("Enter the code."); return
+            if not totp.verify(code, valid_window=1):
+                err_lbl.setText("Invalid code. Try again.")
+                code_input.clear(); code_input.setFocus()
+                return
+            # Save new secret + enable
+            self.sec.repo.set_totp(secret, True)
+            dlg.accept()
+            QMessageBox.information(self, "Done", "New 2FA key saved and enabled.")
+            self.refresh()
+        save_btn.clicked.connect(do_save)
+        code_input.returnPressed.connect(do_save)
+        btn_row.addStretch(); btn_row.addWidget(cancel_btn); btn_row.addWidget(save_btn)
+        dl.addLayout(btn_row)
+
+        dlg.exec_()
+
     def refresh(self):
         accts = self.acct.list_all()
         self.acct_table.setRowCount(len(accts))
@@ -364,8 +514,15 @@ class SettingsTab(QWidget):
             self.tag_table.setItem(i, 0, QTableWidgetItem(t["display_name"]))
             self.tag_table.setItem(i, 1, QTableWidgetItem("✓" if t["is_active"] else "✗"))
 
-        self.totp_lbl.setText("✓ 2FA Enabled" if self.sec.is_2fa() else "✗ 2FA Disabled")
-        self.totp_lbl.setStyleSheet(f"color:{C['green'] if self.sec.is_2fa() else C['text3']};font-weight:600;")
+        is_on = self.sec.is_2fa()
+        self.totp_lbl.setText("✓ TOTP Enabled" if is_on else "✗ TOTP Disabled (password required)")
+        self.totp_lbl.setStyleSheet(f"color:{C['green'] if is_on else C['amber']};font-weight:600;")
+        self.tfa_toggle.setChecked(is_on)
+        self.tfa_toggle.setText("ON" if is_on else "OFF")
+        self.tfa_toggle.setStyleSheet(
+            f"QPushButton{{background:{C['green'] if is_on else C['text3']};color:white;"
+            f"border:none;border-radius:12px;padding:4px 14px;font-size:12px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{C['green'] if is_on else C['text2']};}}")
 
 
         # Load preference values

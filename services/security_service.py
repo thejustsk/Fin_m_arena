@@ -35,7 +35,12 @@ class SecurityService:
         s = self.repo.get_app()
         return s["totp_secret"] if s else None
 
+    def toggle_2fa(self, enabled):
+        """Enable or disable 2FA WITHOUT changing the secret key."""
+        self.repo.set_totp(self.get_secret(), bool(enabled))
+
     def setup_2fa(self):
+        """Generate NEW secret key and enable 2FA. Used during setup wizard."""
         if not HAS_TOTP:
             return None
         secret = pyotp.random_base32()

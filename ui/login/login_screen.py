@@ -100,7 +100,16 @@ class LoginScreen(QWidget):
 
         fl.addSpacing(12)
 
-        # TOTP input only
+        # Password input (shown when 2FA is off)
+        self.pw_input = QLineEdit()
+        self.pw_input.setPlaceholderText("Password")
+        self.pw_input.setEchoMode(QLineEdit.Password)
+        self.pw_input.setMinimumHeight(48)
+        self.pw_input.setStyleSheet(INPUT_STYLE)
+        self.pw_input.returnPressed.connect(self._try)
+        fl.addWidget(self.pw_input)
+
+        # TOTP input (shown when 2FA is on)
         self.totp = QLineEdit()
         self.totp.setPlaceholderText("6-digit code")
         self.totp.setMaxLength(6)
@@ -212,26 +221,46 @@ class LoginScreen(QWidget):
         self.lamp_widget.update()
         self.form.setVisible(self.lamp_on)
         if self.lamp_on:
-            self.sub.setText("Enter your 2FA code")
-            self.totp.setFocus()
+            is_2fa = self.sec.is_2fa()
+            self.pw_input.setVisible(not is_2fa)
+            self.totp.setVisible(is_2fa)
+            if is_2fa:
+                self.sub.setText("Enter your 2FA code")
+                self.totp.setFocus()
+            else:
+                self.sub.setText("Enter your password")
+                self.pw_input.setFocus()
         else:
             self.sub.setText("Pull the cord to log in")
             self.err.setText("")
             self.totp.clear()
+            self.pw_input.clear()
 
     # ══════════════════════════════════════════════
     # AUTHENTICATION — TOTP only
     # ══════════════════════════════════════════════
     def _try(self):
         self.err.setText("")
-        code = self.totp.text().strip()
-        if not code:
-            self.err.setText("Enter the 6-digit code")
-            self.totp.setFocus()
-            return
-        if not self.sec.verify_totp(code):
-            self.err.setText("Invalid 2FA code")
-            self.totp.clear()
-            self.totp.setFocus()
-            return
+        if self.sec.is_2fa():
+            code = self.totp.text().strip()
+            if not code:
+                self.err.setText("Enter the 6-digit code")
+                self.totp.setFocus()
+                return
+            if not self.sec.verify_totp(code):
+                self.err.setText("Invalid 2FA code")
+                self.totp.clear()
+                self.totp.setFocus()
+                return
+        else:
+            pw = self.pw_input.text().strip()
+            if not pw:
+                self.err.setText("Enter your password")
+                self.pw_input.setFocus()
+                return
+            if not self.sec.verify(pw):
+                self.err.setText("Invalid password")
+                self.pw_input.clear()
+                self.pw_input.setFocus()
+                return
         self.success.emit()
