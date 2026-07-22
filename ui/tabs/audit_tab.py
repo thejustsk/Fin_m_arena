@@ -1,16 +1,12 @@
 """Audit tab — Regular Transactions / Wealth Transactions.
 
-Each sub-tab gives full field-level editing (including amount & account —
-balances are derived live from `transactions`, so nothing needs to cascade),
-checkbox bulk-recategorize (category / need-want / pf_category), and an
-Insights view with custom-period trend charts (reusing the app's existing
-ChartView/Chart.js component).
+Each sub-tab gives full field-level editing, checkbox bulk-recategorize,
+and an Insights view with custom-period trend charts.
 
-"Wealth" transactions are ledger rows that a Wealth-tab action created
-(identified by being referenced as a linked_txn_id/trxn_id from loans,
-repayments, borrowed_loans, borrowed_loan_repayments, deposits_from_others,
-deposit_repayments_to_others, fixed_deposits, or mf_transactions). Everything
-else is a "Regular" transaction.
+"Wealth" transactions are ledger rows created by Wealth-tab actions
+(linked via linked_txn_id/trxn_id from loans, repayments, borrowed_loans,
+borrowed_loan_repayments, deposits, fixed_deposits, mf_transactions).
+Everything else is "Regular".
 """
 import json
 from datetime import date, timedelta
@@ -19,9 +15,10 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QStackedWidget, QMessageBox,
     QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFormLayout, QCheckBox
+    QFormLayout
 )
 from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtGui import QCursor
 
 from ui.theme import C
 from ui.sidebar import fmt_money
@@ -29,58 +26,50 @@ from ui.tabs.database_tab import _tab_btn_active, _tab_btn_inactive, _switch_tab
 from ui.tabs.wealth_tab import _metric_card, _confirm
 
 
-NEEDNWANT_LABELS = {None: "— Not Set —", 1: "Need", 0: "Want"}
-NEEDNWANT_VALUES = {v: k for k, v in NEEDNWANT_LABELS.items()}
+NEEDNWANT_LABELS = {None: "\u2014 Not Set", 1: "Need", 0: "Want"}
 
 
 def TODAY():
     return date.today().isoformat()
 
 
-# ═══════════════════════════════════════════════
-# Wealth-flavored chart template — same card styling/CSS/Chart.js version
-# as CHART_TEMPLATE in database_tab.py, relabeled for wealth-flow context.
-# ═══════════════════════════════════════════════
-
-WEALTH_CHART_TEMPLATE = CHART_TEMPLATE \
-    .replace("Expense by Category", "Flow by Function") \
-    .replace("Spending by Account", "Flow by Account") \
-    .replace("Daily Cash Flow", "Wealth Cash Flow Trend") \
-    .replace("Need vs Want", "Asset-Building vs Liability Flow") \
-    .replace("Need (₹__NEED__)", "Asset-Building (₹__NEED__)") \
-    .replace("Want (₹__WANT__)", "Liability Flow (₹__WANT__)")
+# ── Wealth chart template ──────────────────────────────────────────────────
+WEALTH_CHART_TEMPLATE = (
+    CHART_TEMPLATE
+    .replace("Expense by Category", "Flow by Function")
+    .replace("Spending by Account", "Flow by Account")
+    .replace("Daily Cash Flow", "Wealth Cash Flow Trend")
+    .replace("Need vs Want", "Asset-Building vs Liability Flow")
+    .replace("Need", "Asset-Building")
+    .replace("Want", "Liability Flow")
+)
 
 
 class _WealthChartView(ChartView):
-    """Same webengine/fallback plumbing as ChartView (inherited as-is) — only
-    the template swapped out, so no changes to the finalized database_tab.py
-    are needed. Kept local to this file rather than touching that module."""
-
-    def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db, asset_flow, liability_flow):
+    def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db,
+               asset_flow, liability_flow):
         if not self.view:
             return
-        import json as _json, tempfile
+        import tempfile
         from PyQt5.QtCore import QUrl
         html = WEALTH_CHART_TEMPLATE
-        html = html.replace("__CAT_L__", _json.dumps(cat_l))
-        html = html.replace("__CAT_D__", _json.dumps(cat_d))
-        html = html.replace("__ACCT_L__", _json.dumps(acct_l))
-        html = html.replace("__ACCT_D__", _json.dumps(acct_d))
-        html = html.replace("__TREND_L__", _json.dumps(trend_l))
-        html = html.replace("__TREND_CR__", _json.dumps(trend_cr))
-        html = html.replace("__TREND_DB__", _json.dumps(trend_db))
+        html = html.replace("__CAT_L__", json.dumps(cat_l))
+        html = html.replace("__CAT_D__", json.dumps(cat_d))
+        html = html.replace("__ACCT_L__", json.dumps(acct_l))
+        html = html.replace("__ACCT_D__", json.dumps(acct_d))
+        html = html.replace("__TREND_L__", json.dumps(trend_l))
+        html = html.replace("__TREND_CR__", json.dumps(trend_cr))
+        html = html.replace("__TREND_DB__", json.dumps(trend_db))
         html = html.replace("__NEED__", str(round(asset_flow, 2)))
         html = html.replace("__WANT__", str(round(liability_flow, 2)))
         tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8")
-        tmp.write(html); tmp.close()
+        tmp.write(html)
+        tmp.close()
         self.view.load(QUrl.fromLocalFile(tmp.name))
         self._tmp_file = tmp.name
 
 
-# ═══════════════════════════════════════════════
-# Wealth-link lookup — which wealth record (if any) a transaction belongs to
-# ═══════════════════════════════════════════════
-
+# ── Wealth-link lookup ─────────────────────────────────────────────────────
 _WEALTH_LINK_SQL = """
 SELECT l.trxn_id AS txn_id, 'Loan Given' AS grp, ('Loan given to ' || b.name) AS label
     FROM loans l JOIN borrowers b ON b.borrower_id=l.borrower_id WHERE l.trxn_id IS NOT NULL
@@ -114,15 +103,12 @@ SELECT m.linked_txn_id, ('MF ' || m.txn_type), ('MF ' || m.txn_type || ' — ' |
 
 
 def _wealth_link_map(db):
-    """Returns {txn_id: {"group": ..., "label": ...}} for every wealth-linked transaction."""
+    """Returns {txn_id: {"group": ..., "label": ...}} for wealth-linked transactions."""
     rows = db.execute(_WEALTH_LINK_SQL).fetchall()
     return {r["txn_id"]: {"group": r["grp"], "label": r["label"]} for r in rows}
 
 
-# ═══════════════════════════════════════════════
-# Date-range helpers
-# ═══════════════════════════════════════════════
-
+# ── Date-range helpers ─────────────────────────────────────────────────────
 def _month_bounds(d):
     d_from = d.replace(day=1)
     if d.month == 12:
@@ -142,78 +128,90 @@ def _quick_range(key):
         return _month_bounds(last_month_end)
     if key == "this_year":
         return date(today.year, 1, 1), date(today.year, 12, 31)
-    return date(2000, 1, 1), today  # "all"
+    return date(2000, 1, 1), today
 
 
-# ═══════════════════════════════════════════════
-# Transaction Edit Dialog — shared by both sub-tabs
-# ═══════════════════════════════════════════════
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Transaction Edit Dialog
+# ═══════════════════════════════════════════════════════════════════════════
 class TransactionEditDialog(QDialog):
     def __init__(self, tx, accounts_repo, lookups_repo, wealth_link=None, parent=None):
         super().__init__(parent)
         self.tx = tx
-        self.setWindowTitle("✏️  Edit Transaction")
+        self.setWindowTitle("\u270f\ufe0f  Edit Transaction")
         self.setMinimumWidth(520)
         lay = QVBoxLayout(self)
 
-        meta = QLabel(f"ID: {tx['id']}  ·  Created: {(tx.get('created_at') or '')[:16]}  ·  "
-                       f"Kind: {tx.get('transaction_kind') or 'REGULAR'}")
+        meta = QLabel(
+            f"ID: {tx['id']}  \u00b7  Created: {(tx.get('created_at') or '')[:16]}  \u00b7  "
+            f"Kind: {tx.get('transaction_kind') or 'REGULAR'}"
+        )
         meta.setStyleSheet(f"color:{C['text3']};font-size:11px;")
         meta.setWordWrap(True)
         lay.addWidget(meta)
         if wealth_link:
-            wl = QLabel(f"🔗 Linked to: {wealth_link['label']}")
+            wl = QLabel(f"\U0001f517 Linked to: {wealth_link['label']}")
             wl.setStyleSheet(f"color:{C['accent']};font-size:12px;font-weight:700;")
             lay.addWidget(wl)
 
-        note = QLabel("Changing amount or account is safe — balances recalculate automatically on next read.")
+        note = QLabel("Amount changes cascade to linked wealth records automatically.")
         note.setStyleSheet(f"color:{C['text3']};font-size:11px;font-style:italic;")
         note.setWordWrap(True)
         lay.addWidget(note)
 
         form = QFormLayout()
-        self.f_date = QDateEdit(QDate.fromString(tx["tx_date"], "yyyy-MM-dd")); self.f_date.setCalendarPopup(True)
+        self.f_date = QDateEdit(QDate.fromString(tx["tx_date"], "yyyy-MM-dd"))
+        self.f_date.setCalendarPopup(True)
+
         self.f_account = QComboBox()
         for a in accounts_repo.list_active():
             self.f_account.addItem(f"{a['display_name']} ({a['account_type']})", a["account_id"])
         idx = self.f_account.findData(tx["account_id"])
-        if idx >= 0: self.f_account.setCurrentIndex(idx)
+        if idx >= 0:
+            self.f_account.setCurrentIndex(idx)
 
-        self.f_type = QComboBox(); self.f_type.addItems(["DEBIT", "CREDIT"])
+        self.f_type = QComboBox()
+        self.f_type.addItems(["DEBIT", "CREDIT"])
         self.f_type.setCurrentText(tx["tx_type"])
 
-        self.f_amount = QDoubleSpinBox(); self.f_amount.setRange(0.01, 999999999); self.f_amount.setDecimals(2)
-        self.f_amount.setPrefix("₹ "); self.f_amount.setValue(tx["amount"])
+        self.f_amount = QDoubleSpinBox()
+        self.f_amount.setRange(0.01, 999999999)
+        self.f_amount.setDecimals(2)
+        self.f_amount.setPrefix("\u20b9 ")
+        self.f_amount.setValue(tx["amount"])
 
         self.f_category = QComboBox()
-        self.f_category.addItem("— None —", None)
+        self.f_category.addItem("\u2014 None \u2014", None)
         for c in lookups_repo.list_categories():
             self.f_category.addItem(c["display_name"], c["category_id"])
         idx = self.f_category.findData(tx.get("category"))
-        if idx >= 0: self.f_category.setCurrentIndex(idx)
+        if idx >= 0:
+            self.f_category.setCurrentIndex(idx)
 
         self.f_method = QComboBox()
         for m in lookups_repo.list_methods():
             self.f_method.addItem(m["display_name"], m["method_id"])
         idx = self.f_method.findData(tx.get("pay_method"))
-        if idx >= 0: self.f_method.setCurrentIndex(idx)
+        if idx >= 0:
+            self.f_method.setCurrentIndex(idx)
 
         self.f_person = QLineEdit(tx.get("person_org") or "")
         self.f_desc = QLineEdit(tx.get("description") or "")
 
         self.f_neednwant = QComboBox()
-        for val, label in [(None, "— Not Set —"), (1, "Need"), (0, "Want")]:
+        for val, label in [(None, "\u2014 Not Set"), (1, "Need"), (0, "Want")]:
             self.f_neednwant.addItem(label, val)
         idx = self.f_neednwant.findData(tx.get("neednwant") if tx.get("neednwant") in (0, 1) else None)
-        if idx >= 0: self.f_neednwant.setCurrentIndex(idx)
+        if idx >= 0:
+            self.f_neednwant.setCurrentIndex(idx)
 
         self.f_pf = QComboBox()
-        self.f_pf.addItem("— None —", None)
+        self.f_pf.addItem("\u2014 None \u2014", None)
         for pf in lookups_repo.list_pf_categories():
             self.f_pf.addItem(pf["display_name"], pf["pf_id"])
         idx = self.f_pf.findData(tx.get("pf_category"))
-        if idx >= 0: self.f_pf.setCurrentIndex(idx)
+        if idx >= 0:
+            self.f_pf.setCurrentIndex(idx)
 
         form.addRow("Date", self.f_date)
         form.addRow("Account", self.f_account)
@@ -228,13 +226,18 @@ class TransactionEditDialog(QDialog):
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
-        cancel = QPushButton("Cancel"); cancel.clicked.connect(self.reject)
-        save = QPushButton("💾 Save Changes"); save.setObjectName("primary"); save.clicked.connect(self.accept)
-        btn_row.addStretch(); btn_row.addWidget(cancel); btn_row.addWidget(save)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        save = QPushButton("\U0001f4be Save Changes")
+        save.setObjectName("primary")
+        save.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel)
+        btn_row.addWidget(save)
         lay.addLayout(btn_row)
 
     def changed_fields(self):
-        """Returns {field: (old, new)} for every field that actually changed."""
+        """Returns {field: (old, new)} for every field that changed."""
         out = {}
         checks = [
             ("tx_date", self.tx["tx_date"], self.f_date.date().toString("yyyy-MM-dd")),
@@ -254,10 +257,9 @@ class TransactionEditDialog(QDialog):
         return out
 
 
-# ═══════════════════════════════════════════════
-# Reusable Records + Insights skeleton (one instance for Regular, one for Wealth)
-# ═══════════════════════════════════════════════
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Audit Sub-Tab (one instance for Regular, one for Wealth)
+# ═══════════════════════════════════════════════════════════════════════════
 class _AuditSubTab(QWidget):
     def __init__(self, db, repos, services, wealth_mode, parent=None):
         super().__init__(parent)
@@ -267,8 +269,8 @@ class _AuditSubTab(QWidget):
         self.lu = repos["lookups"]
         self.audit = services["audit"]
         self.wealth_mode = wealth_mode
-        self._rows = []          # currently loaded+filtered transaction dicts
-        self._link_map = {}      # txn_id -> {"group","label"} (wealth mode only)
+        self._rows = []
+        self._link_map = {}
         self._build()
 
     def _build(self):
@@ -277,10 +279,12 @@ class _AuditSubTab(QWidget):
         lay.setSpacing(12)
 
         nav = QHBoxLayout()
-        self.btn_records = QPushButton("📋 Records")
-        self.btn_insights = QPushButton("📊 Insights")
+        self.btn_records = QPushButton("\U0001f4cb Records")
+        self.btn_insights = QPushButton("\U0001f4ca Insights")
         self._sub_btns = [self.btn_records, self.btn_insights]
         for b in self._sub_btns:
+            b.setMinimumHeight(32)
+            b.setCursor(QCursor(Qt.PointingHandCursor))
             nav.addWidget(b)
         nav.addStretch()
         lay.addLayout(nav)
@@ -306,27 +310,37 @@ class _AuditSubTab(QWidget):
         self.load_records()
         self.load_insights()
 
-    # ---------------------------------------------------------- RECORDS
+    # ───────────────────────── RECORDS ─────────────────────────────────
     def _build_records(self):
-        page = QWidget(); lay = QVBoxLayout(page); lay.setSpacing(10)
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(10)
 
-        filt = QFrame(); filt.setObjectName("card")
+        # Filter bar
+        filt = QFrame()
+        filt.setObjectName("card")
         filt_lay = QVBoxLayout(filt)
         row1 = QHBoxLayout()
-        self.f_from = QDateEdit(QDate.currentDate().addMonths(-1)); self.f_from.setCalendarPopup(True)
-        self.f_to = QDateEdit(QDate.currentDate()); self.f_to.setCalendarPopup(True)
-        row1.addWidget(QLabel("From")); row1.addWidget(self.f_from)
-        row1.addWidget(QLabel("To")); row1.addWidget(self.f_to)
+        self.f_from = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.f_from.setCalendarPopup(True)
+        self.f_to = QDateEdit(QDate.currentDate())
+        self.f_to.setCalendarPopup(True)
+        row1.addWidget(QLabel("From"))
+        row1.addWidget(self.f_from)
+        row1.addWidget(QLabel("To"))
+        row1.addWidget(self.f_to)
         for label, key in [("This Month", "this_month"), ("Last Month", "last_month"),
-                            ("This Year", "this_year"), ("All Time", "all")]:
-            b = QPushButton(label); b.setObjectName("pill")
-            b.clicked.connect(lambda _, k=key: self._apply_quick_range(k))
+                           ("This Year", "this_year"), ("All Time", "all")]:
+            b = QPushButton(label)
+            b.setObjectName("pill")
+            b.clicked.connect(lambda *, k=key: self._apply_quick_range(k))
             row1.addWidget(b)
         row1.addStretch()
         filt_lay.addLayout(row1)
 
         row2 = QHBoxLayout()
-        self.f_account_filter = QComboBox(); self.f_account_filter.addItem("All Accounts", None)
+        self.f_account_filter = QComboBox()
+        self.f_account_filter.addItem("All Accounts", None)
         for a in self.acc.list_active():
             self.f_account_filter.addItem(a["display_name"], a["account_id"])
         self.f_group_filter = QComboBox()
@@ -336,8 +350,10 @@ class _AuditSubTab(QWidget):
             self.f_group_filter.addItem("All Categories", None)
             for c in self.lu.list_categories():
                 self.f_group_filter.addItem(c["display_name"], c["category_id"])
-        self.f_search = QLineEdit(); self.f_search.setPlaceholderText("Search person / description…")
-        search_btn = QPushButton("🔍 Apply Filters"); search_btn.setObjectName("primary")
+        self.f_search = QLineEdit()
+        self.f_search.setPlaceholderText("Search person / description\u2026")
+        search_btn = QPushButton("\U0001f50d Apply Filters")
+        search_btn.setObjectName("primary")
         search_btn.clicked.connect(self.load_records)
         row2.addWidget(self.f_account_filter)
         row2.addWidget(self.f_group_filter)
@@ -347,34 +363,43 @@ class _AuditSubTab(QWidget):
         lay.addWidget(filt)
 
         # Bulk toolbar
-        bulk = QFrame(); bulk.setObjectName("card")
+        bulk = QFrame()
+        bulk.setObjectName("card")
         bulk_lay = QHBoxLayout(bulk)
         self.bulk_count_lbl = QLabel("0 selected")
         self.bulk_count_lbl.setStyleSheet(f"font-weight:700;color:{C['text2']};")
         bulk_lay.addWidget(self.bulk_count_lbl)
-        self.bulk_category = QComboBox(); self.bulk_category.addItem("— No Change —", "__nochange__")
+        self.bulk_category = QComboBox()
+        self.bulk_category.addItem("\u2014 No Change \u2014", "__nochange__")
         for c in self.lu.list_categories():
             self.bulk_category.addItem(c["display_name"], c["category_id"])
         self.bulk_neednwant = QComboBox()
-        for val, label in [("__nochange__", "— No Change —"), (1, "Need"), (0, "Want"), ("__clear__", "Clear (Not Set)")]:
+        for val, label in [("__nochange__", "\u2014 No Change \u2014"), (1, "Need"), (0, "Want"),
+                           ("__clear__", "Clear (Not Set)")]:
             self.bulk_neednwant.addItem(label, val)
-        self.bulk_pf = QComboBox(); self.bulk_pf.addItem("— No Change —", "__nochange__")
+        self.bulk_pf = QComboBox()
+        self.bulk_pf.addItem("\u2014 No Change \u2014", "__nochange__")
         for pf in self.lu.list_pf_categories():
             self.bulk_pf.addItem(pf["display_name"], pf["pf_id"])
         self.bulk_pf.addItem("Clear (Not Set)", "__clear__")
-        self.bulk_apply_btn = QPushButton("✅ Apply to Selected"); self.bulk_apply_btn.setObjectName("primary")
+        self.bulk_apply_btn = QPushButton("\u2705 Apply to Selected")
+        self.bulk_apply_btn.setObjectName("primary")
         self.bulk_apply_btn.setEnabled(False)
         self.bulk_apply_btn.clicked.connect(self._apply_bulk)
-        bulk_lay.addWidget(QLabel("Category:")); bulk_lay.addWidget(self.bulk_category)
-        bulk_lay.addWidget(QLabel("Need/Want:")); bulk_lay.addWidget(self.bulk_neednwant)
-        bulk_lay.addWidget(QLabel("PF Category:")); bulk_lay.addWidget(self.bulk_pf)
+        bulk_lay.addWidget(QLabel("Category:"))
+        bulk_lay.addWidget(self.bulk_category)
+        bulk_lay.addWidget(QLabel("Need/Want:"))
+        bulk_lay.addWidget(self.bulk_neednwant)
+        bulk_lay.addWidget(QLabel("PF Category:"))
+        bulk_lay.addWidget(self.bulk_pf)
         bulk_lay.addStretch()
         bulk_lay.addWidget(self.bulk_apply_btn)
         lay.addWidget(bulk)
 
+        # Table
         self.table = QTableWidget()
-        cols = ["✓", "Date", "Account", "Type", "Amount", "Category", "Person / Desc",
-                "Method", "Need/Want", "PF Cat"]
+        cols = ["\u2713", "Date", "Account", "Type", "Amount", "Category",
+                "Person / Desc", "Method", "Need/Want", "PF Cat"]
         if self.wealth_mode:
             cols.append("Linked To")
         cols.append("")
@@ -385,7 +410,6 @@ class _AuditSubTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
         self.table.itemChanged.connect(self._on_check_changed)
         lay.addWidget(self.table, 1)
-
         return page
 
     def _apply_quick_range(self, key):
@@ -400,14 +424,14 @@ class _AuditSubTab(QWidget):
         account_id = self.f_account_filter.currentData()
         rows = self.tx.list_filters(account_id=account_id, date_from=d_from, date_to=d_to, limit=5000)
 
-        self._link_map = _wealth_link_map(self.db) if self.wealth_mode else {}
+        self._link_map = _wealth_link_map(self.db)
         if self.wealth_mode:
             rows = [r for r in rows if r["id"] in self._link_map]
             group = self.f_group_filter.currentData()
             if group:
                 rows = [r for r in rows if self._link_map.get(r["id"], {}).get("group") == group]
         else:
-            wealth_ids = set(_wealth_link_map(self.db).keys())
+            wealth_ids = set(self._link_map.keys())
             rows = [r for r in rows if r["id"] not in wealth_ids]
             cat = self.f_group_filter.currentData()
             if cat:
@@ -454,18 +478,19 @@ class _AuditSubTab(QWidget):
             amt_item = QTableWidgetItem(fmt_money(r["amount"]))
             amt_item.setForeground(Qt.darkGreen if r["tx_type"] == "CREDIT" else Qt.darkRed)
             self.table.setItem(i, 4, amt_item)
-            self.table.setItem(i, 5, QTableWidgetItem(r.get("cat_name") or "—"))
+            self.table.setItem(i, 5, QTableWidgetItem(r.get("cat_name") or "\u2014"))
             desc = r.get("person_org") or r.get("description") or ""
             self.table.setItem(i, 6, QTableWidgetItem(desc))
             self.table.setItem(i, 7, QTableWidgetItem(r.get("method_name") or ""))
             self.table.setItem(i, 8, QTableWidgetItem(NEEDNWANT_LABELS.get(
-                r.get("neednwant") if r.get("neednwant") in (0, 1) else None, "—")))
-            self.table.setItem(i, 9, QTableWidgetItem((r.get("pf_category") or "—").replace("_", " ").title()))
+                r.get("neednwant") if r.get("neednwant") in (0, 1) else None, "\u2014")))
+            self.table.setItem(i, 9, QTableWidgetItem(
+                (r.get("pf_category") or "\u2014").replace("_", " ").title()))
             if self.wealth_mode:
                 link = self._link_map.get(r["id"], {})
                 self.table.setItem(i, wealth_col, QTableWidgetItem(link.get("label", "")))
-            edit_btn = QPushButton("✏️ Edit")
-            edit_btn.clicked.connect(lambda _, tid=r["id"]: self._open_edit(tid))
+            edit_btn = QPushButton("\u270f\ufe0f Edit")
+            edit_btn.clicked.connect(lambda *, tid=r["id"]: self._open_edit(tid))
             self.table.setCellWidget(i, edit_col, edit_btn)
         self.table.blockSignals(False)
         self._update_bulk_count()
@@ -486,7 +511,7 @@ class _AuditSubTab(QWidget):
         n = len(self._checked_ids())
         self.bulk_count_lbl.setText(f"{n} selected")
         self.bulk_apply_btn.setEnabled(n > 0)
-        self.bulk_apply_btn.setText(f"✅ Apply to {n} Selected" if n else "✅ Apply to Selected")
+        self.bulk_apply_btn.setText(f"\u2705 Apply to {n} Selected" if n else "\u2705 Apply to Selected")
 
     def _open_edit(self, tx_id):
         tx = self.tx.get(tx_id)
@@ -502,8 +527,51 @@ class _AuditSubTab(QWidget):
             self.tx.update(tx_id, **update_kw)
             for field, (old, new) in changes.items():
                 self.audit.log(tx_id, field, old, new, reason="Manual edit via Audit tab")
+            # Cascade amount changes to linked wealth records
+            if self.wealth_mode and "amount" in changes:
+                self._cascade_amount(tx_id, changes["amount"][1])
             self.load_records()
-            QMessageBox.information(self, "Saved", f"Updated {len(changes)} field(s) for this transaction.")
+            QMessageBox.information(self, "Saved", f"Updated {len(changes)} field(s).")
+
+    def _cascade_amount(self, tx_id, new_amount):
+        """Push edited transaction amount into the linked wealth table."""
+        link = self._link_map.get(tx_id)
+        if not link:
+            return
+        grp = link["group"]
+        try:
+            if grp == "Loan Given":
+                self.db.execute("UPDATE loans SET loan_amount=? WHERE trxn_id=?", (new_amount, tx_id))
+            elif grp == "Loan Taken":
+                self.db.execute("UPDATE borrowed_loans SET principal_amount=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "Loan Repayment":
+                self.db.execute("UPDATE repayments SET amount_paid=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "EMI Payment":
+                self.db.execute("UPDATE borrowed_loan_repayments SET amount_paid=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "Deposit Received":
+                self.db.execute("UPDATE deposits_from_others SET principal_amount=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "Deposit Repayment":
+                self.db.execute("UPDATE deposit_repayments_to_others SET amount_paid=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "FD Deposit":
+                self.db.execute("UPDATE fixed_deposits SET principal_amount=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp.startswith("MF "):
+                row = self.db.execute("SELECT nav FROM mf_transactions WHERE linked_txn_id=?",
+                                      (tx_id,)).fetchone()
+                if row:
+                    nav = row["nav"]
+                    units = round(new_amount / nav, 4) if nav > 0 else 0
+                    self.db.execute(
+                        "UPDATE mf_transactions SET amount=?, units=? WHERE linked_txn_id=?",
+                        (new_amount, units, tx_id))
+            self.db.commit()
+        except Exception as e:
+            print(f"[WARN] Cascade failed: {e}")
 
     def _apply_bulk(self):
         ids = self._checked_ids()
@@ -521,10 +589,10 @@ class _AuditSubTab(QWidget):
             updates["pf_category"] = None if pf_val == "__clear__" else pf_val
         if not updates:
             QMessageBox.information(self, "Nothing to Apply",
-                                     "Pick at least one field to change before applying.")
+                                    "Pick at least one field to change.")
             return
         if not _confirm(self, "Bulk Update",
-                         f"Apply these changes to {len(ids)} selected transaction(s)?"):
+                        f"Apply these changes to {len(ids)} selected transaction(s)?"):
             return
         for tid in ids:
             tx = self.tx.get(tid)
@@ -541,23 +609,32 @@ class _AuditSubTab(QWidget):
         self.load_records()
         QMessageBox.information(self, "Updated", f"{len(ids)} transaction(s) updated.")
 
-    # ---------------------------------------------------------- INSIGHTS
+    # ───────────────────────── INSIGHTS ────────────────────────────────
     def _build_insights(self):
-        page = QWidget(); lay = QVBoxLayout(page); lay.setSpacing(10)
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(10)
 
         row = QHBoxLayout()
-        self.i_from = QDateEdit(QDate.currentDate().addMonths(-1)); self.i_from.setCalendarPopup(True)
-        self.i_to = QDateEdit(QDate.currentDate()); self.i_to.setCalendarPopup(True)
-        row.addWidget(QLabel("From")); row.addWidget(self.i_from)
-        row.addWidget(QLabel("To")); row.addWidget(self.i_to)
+        self.i_from = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.i_from.setCalendarPopup(True)
+        self.i_to = QDateEdit(QDate.currentDate())
+        self.i_to.setCalendarPopup(True)
+        row.addWidget(QLabel("From"))
+        row.addWidget(self.i_from)
+        row.addWidget(QLabel("To"))
+        row.addWidget(self.i_to)
         for label, key in [("This Month", "this_month"), ("Last Month", "last_month"),
-                            ("This Year", "this_year"), ("All Time", "all")]:
-            b = QPushButton(label); b.setObjectName("pill")
-            b.clicked.connect(lambda _, k=key: self._apply_insight_range(k))
+                           ("This Year", "this_year"), ("All Time", "all")]:
+            b = QPushButton(label)
+            b.setObjectName("pill")
+            b.clicked.connect(lambda *, k=key: self._apply_insight_range(k))
             row.addWidget(b)
-        apply_btn = QPushButton("Apply"); apply_btn.setObjectName("primary")
+        apply_btn = QPushButton("Apply")
+        apply_btn.setObjectName("primary")
         apply_btn.clicked.connect(self.load_insights)
-        row.addStretch(); row.addWidget(apply_btn)
+        row.addStretch()
+        row.addWidget(apply_btn)
         lay.addLayout(row)
 
         self.stats_row = QHBoxLayout()
@@ -577,7 +654,8 @@ class _AuditSubTab(QWidget):
         d_from = self.i_from.date().toString("yyyy-MM-dd")
         d_to = self.i_to.date().toString("yyyy-MM-dd")
         rows = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=20000)
-        link_map = _wealth_link_map(self.db)
+        # Reuse cached link map if available
+        link_map = self._link_map if self._link_map else _wealth_link_map(self.db)
         if self.wealth_mode:
             rows = [r for r in rows if r["id"] in link_map]
         else:
@@ -585,9 +663,11 @@ class _AuditSubTab(QWidget):
 
         credits = sum(r["amount"] for r in rows if r["tx_type"] == "CREDIT")
         debits = sum(r["amount"] for r in rows if r["tx_type"] == "DEBIT")
+
         while self.stats_row.count():
             item = self.stats_row.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
+            if item.widget():
+                item.widget().deleteLater()
         for card in [
             _metric_card("Total Credits", fmt_money(credits), C["green"]),
             _metric_card("Total Debits", fmt_money(debits), C["red"]),
@@ -629,10 +709,9 @@ class _AuditSubTab(QWidget):
                     asset_flow += r["amount"]
                 if grp in liability_groups and r["tx_type"] == "CREDIT":
                     liability_flow += r["amount"]
-            cat_labels = list(grp_totals.keys())
-            cat_data = [round(v, 2) for v in grp_totals.values()]
             self.chart_view.render(
-                cat_labels, cat_data, all_accts, acct_totals, trend_labels,
+                list(grp_totals.keys()), [round(v, 2) for v in grp_totals.values()],
+                all_accts, acct_totals, trend_labels,
                 [round(trend_cr.get(d, 0), 2) for d in all_dates],
                 [round(trend_db.get(d, 0), 2) for d in all_dates],
                 round(asset_flow, 2), round(liability_flow, 2))
@@ -645,19 +724,22 @@ class _AuditSubTab(QWidget):
             need = sum(r["amount"] for r in rows if r.get("neednwant") == 1 and r["tx_type"] == "DEBIT")
             want = sum(r["amount"] for r in rows if r.get("neednwant") == 0 and r["tx_type"] == "DEBIT")
             self.chart_view.render(
-                list(cats.keys()), [round(v, 2) for v in cats.values()], all_accts, acct_totals,
-                trend_labels, [round(trend_cr.get(d, 0), 2) for d in all_dates],
-                [round(trend_db.get(d, 0), 2) for d in all_dates], round(need, 2), round(want, 2))
+                list(cats.keys()), [round(v, 2) for v in cats.values()],
+                all_accts, acct_totals, trend_labels,
+                [round(trend_cr.get(d, 0), 2) for d in all_dates],
+                [round(trend_db.get(d, 0), 2) for d in all_dates],
+                round(need, 2), round(want, 2))
 
 
-# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
 # AUDIT TAB
-# ═══════════════════════════════════════════════
-
+# ═══════════════════════════════════════════════════════════════════════════
 class AuditTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
         super().__init__(parent)
-        self.db = db; self.repos = repos; self.services = services
+        self.db = db
+        self.repos = repos
+        self.services = services
         self._build()
 
     def _build(self):
@@ -665,18 +747,20 @@ class AuditTab(QWidget):
         outer.setContentsMargins(32, 24, 32, 24)
         outer.setSpacing(14)
 
-        heading = QLabel("Audit")
+        heading = QLabel("\U0001f50d  Audit")
         heading.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
         outer.addWidget(heading)
-        sub = QLabel("Edit any transaction field, bulk recategorize, and explore trends for any period.")
+        sub = QLabel("Edit any transaction field, bulk recategorize, and explore trends.")
         sub.setStyleSheet(f"color:{C['text3']};font-size:12px;")
         outer.addWidget(sub)
 
         nav = QHBoxLayout()
-        self.btn_regular = QPushButton("📋 Regular Transactions")
-        self.btn_wealth = QPushButton("💼 Wealth Transactions")
+        self.btn_regular = QPushButton("\U0001f4cb Regular Transactions")
+        self.btn_wealth = QPushButton("\U0001f4bc Wealth Transactions")
         self._top_btns = [self.btn_regular, self.btn_wealth]
         for b in self._top_btns:
+            b.setMinimumHeight(34)
+            b.setCursor(QCursor(Qt.PointingHandCursor))
             nav.addWidget(b)
         nav.addStretch()
         outer.addLayout(nav)
