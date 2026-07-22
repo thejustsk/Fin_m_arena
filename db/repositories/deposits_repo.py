@@ -51,3 +51,33 @@ class DepositsRepo:
     def update_status(self, did, status):
         self.db.execute("UPDATE deposits_from_others SET status=? WHERE deposit_id=?", (status, did))
         self.db.commit()
+
+    def recalc_status(self, deposit_id):
+        """Recalculate deposit status. Same algo as FDOthersPage._check_repaid."""
+        dep = self.get_deposit(deposit_id)
+        if not dep or dep["status"] in ("CLOSED", "REPAID"):
+            return
+        total = self.total_repaid(deposit_id)
+        rate = dep.get("interest_rate") or 0
+        if not rate:
+            cv = max(dep["principal_amount"] - total, 0)
+        else:
+            from datetime import date as _date
+            from services.loan_service import LoanService
+            sd = _date.fromisoformat(dep["deposit_date"])
+            dd = dep.get("expected_return_date")
+            months = max(1, round((_date.fromisoformat(dd) - sd).days / 30.44)) if dd else 12
+            payments = self.get_repayments(deposit_id)
+            analysis = LoanService.loan_analysis(
+                dep["principal_amount"], rate, months, "ANNUAL",
+                total, dep["deposit_date"], payments=payments,
+                method=dep.get("interest_method") or "SIMPLE"
+            )
+            cv = analysis["current_value"]
+        if cv <= 0 and total > 0:
+            self.db.execute("UPDATE deposits_from_others SET status='REPAID' WHERE deposit_id=?",
+                            (deposit_id,))
+        elif total > 0:
+            self.db.execute("UPDATE deposits_from_others SET status='PARTIALLY_PAID' WHERE deposit_id=?",
+                            (deposit_id,))
+        self.db.commit()

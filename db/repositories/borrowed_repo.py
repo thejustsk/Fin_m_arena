@@ -54,6 +54,10 @@ class BorrowedRepo:
         self.db.execute("UPDATE borrowed_loans SET status=? WHERE loan_id=?", (status, loan_id))
         self.db.commit()
 
+    def recalc_status(self, loan_id):
+        """Recalculate status — same algo as _sync_status used by add_repayment."""
+        self._sync_status(loan_id)
+
     def get_repayments(self, loan_id):
         return _rows(self.db.execute(
             "SELECT * FROM borrowed_loan_repayments WHERE loan_id=? ORDER BY payment_date",

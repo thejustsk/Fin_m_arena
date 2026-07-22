@@ -68,6 +68,9 @@ class MainWindow(QMainWindow):
         # Connect Home tab's quick-access signal
         self._tabs["home"].go.connect(self._nav)
 
+        # Connect Audit tab's data-changed signal to refresh all tabs
+        self._tabs["audit"].set_refresh_callback(self._refresh_all_tabs)
+
         layout.addWidget(self.stack)
 
         # Start with sidebar collapsed
@@ -86,6 +89,15 @@ class MainWindow(QMainWindow):
                     btn.setText(f" {icon}")
 
         self.sidebar.select_home()
+
+    def _refresh_all_tabs(self):
+        """Called by AuditTab when data changes — refresh all visible tabs."""
+        for tab in self._tabs.values():
+            if hasattr(tab, "refresh"):
+                try:
+                    tab.refresh()
+                except Exception as e:
+                    print(f"Refresh error: {e}")
 
     def _nav(self, key):
         idx = self._tab_map.get(key, 0)

@@ -92,3 +92,15 @@ class LoansRepo:
     def update_status(self, loan_id, status):
         self.db.execute("UPDATE loans SET status=? WHERE loan_id=?", (status, loan_id))
         self.db.commit()
+
+    def recalc_status(self, loan_id):
+        """Recalculate loan status from current payments. Same algo as add_repayment."""
+        loan = self.get_loan(loan_id)
+        if not loan or loan["status"] in ("CLOSED", "CLEARED"):
+            return
+        total = self.total_repaid(loan_id)
+        if total >= loan["loan_amount"]:
+            self.db.execute("UPDATE loans SET status='CLOSED' WHERE loan_id=?", (loan_id,))
+        elif total > 0:
+            self.db.execute("UPDATE loans SET status='PARTIALLY_PAID' WHERE loan_id=?", (loan_id,))
+        self.db.commit()

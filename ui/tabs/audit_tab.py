@@ -264,6 +264,7 @@ class _AuditSubTab(QWidget):
     def __init__(self, db, repos, services, wealth_mode, parent=None):
         super().__init__(parent)
         self.db = db
+        self.repos = repos
         self.tx = repos["transactions"]
         self.acc = repos["accounts"]
         self.lu = repos["lookups"]
@@ -530,7 +531,14 @@ class _AuditSubTab(QWidget):
             # Cascade amount changes to linked wealth records
             if self.wealth_mode and "amount" in changes:
                 self._cascade_amount(tx_id, changes["amount"][1])
+                self._recalc_status(tx_id)
             self.load_records()
+            # Notify parent to refresh other tabs
+            parent_tab = self.parent()
+            while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
+                parent_tab = parent_tab.parent()
+            if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
+                parent_tab._notify_data_changed()
             QMessageBox.information(self, "Saved", f"Updated {len(changes)} field(s).")
 
     def _cascade_amount(self, tx_id, new_amount):
@@ -572,6 +580,40 @@ class _AuditSubTab(QWidget):
             self.db.commit()
         except Exception as e:
             print(f"[WARN] Cascade failed: {e}")
+
+    def _recalc_status(self, tx_id):
+        """Recalculate linked wealth record status using the same algo as each tab's repo."""
+        link = self._link_map.get(tx_id)
+        if not link:
+            return
+        grp = link["group"]
+        try:
+            if grp in ("Loan Given", "Loan Repayment"):
+                if grp == "Loan Given":
+                    row = self.db.execute("SELECT loan_id FROM loans WHERE trxn_id=?", (tx_id,)).fetchone()
+                else:
+                    row = self.db.execute("SELECT loan_id FROM repayments WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row:
+                    self.repos["loans"].recalc_status(row["loan_id"])
+
+            elif grp in ("Loan Taken", "EMI Payment"):
+                if grp == "Loan Taken":
+                    row = self.db.execute("SELECT loan_id FROM borrowed_loans WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                else:
+                    row = self.db.execute("SELECT loan_id FROM borrowed_loan_repayments WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row:
+                    self.repos["borrowed"].recalc_status(row["loan_id"])
+
+            elif grp in ("Deposit Received", "Deposit Repayment"):
+                if grp == "Deposit Received":
+                    row = self.db.execute("SELECT deposit_id FROM deposits_from_others WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                else:
+                    row = self.db.execute("SELECT deposit_id FROM deposit_repayments_to_others WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row:
+                    self.repos["deposits"].recalc_status(row["deposit_id"])
+        except Exception as e:
+            print(f"[WARN] Status recalc failed: {e}")
+
 
     def _apply_bulk(self):
         ids = self._checked_ids()
@@ -741,6 +783,14 @@ class AuditTab(QWidget):
         self.repos = repos
         self.services = services
         self._build()
+
+    def set_refresh_callback(self, callback):
+        """Set callback to refresh all tabs when data changes."""
+        self._refresh_all = callback
+
+    def _notify_data_changed(self):
+        if hasattr(self, '_refresh_all') and self._refresh_all:
+            self._refresh_all()
 
     def _build(self):
         outer = QVBoxLayout(self)
