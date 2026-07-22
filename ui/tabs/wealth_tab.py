@@ -25,6 +25,11 @@ MDOT = "\u00b7"
 def TODAY():
     return date.today().isoformat()
 
+# Updated badge helper
+def _is_updated(row):
+    """Check if a row has been edited (updated_at is set)."""
+    return bool(row.get("updated_at"))
+
 
 # ── Workers ────────────────────────────────────────────────────────────────
 class _NavWorker(QThread):
@@ -352,7 +357,7 @@ class WealthCard(QFrame):
     clicked = _Signal(str)  # item_id
 
     def __init__(self, item_id, title, subtitle, amount_text, badge_text, badge_color,
-                 progress_pct=None, extra_line=None, parent=None):
+                 progress_pct=None, extra_line=None, updated=False, parent=None):
         super().__init__(parent)
         self.item_id = item_id
         self.expanded = False
@@ -382,6 +387,9 @@ class WealthCard(QFrame):
         right_col.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self._badge_lbl = _badge(badge_text, badge_color)
         right_col.addWidget(self._badge_lbl, 0, Qt.AlignRight)
+        if updated:
+            upd_lbl = _badge("Updated", C["accent"])
+            right_col.addWidget(upd_lbl, 0, Qt.AlignRight)
         a = QLabel(amount_text)
         a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
         a.setAlignment(Qt.AlignRight)
@@ -822,6 +830,45 @@ class _FunctionPage(QWidget):
                 else:
                     w.collapse()
 
+    # ── Lazy loading support (uses settings preferences) ──
+    def _get_batch_size(self):
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='complete_page_size'").fetchone()
+            return int(r[0]) if r else 150
+        except Exception:
+            return 150
+
+    def _get_scroll_trigger(self):
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='scroll_trigger_px'").fetchone()
+            return int(r[0]) if r else 400
+        except Exception:
+            return 400
+
+    def _init_lazy_scroll(self):
+        """Connect scroll area scrollbar to lazy loading."""
+        scroll = self._list_lay.parentWidget().parentWidget()
+        if isinstance(scroll, QScrollArea):
+            scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
+    def _on_scroll(self, value):
+        """Load next batch when scrolled near bottom."""
+        scroll = self.sender()
+        if not scroll:
+            return
+        if value >= scroll.maximum() - self._get_scroll_trigger():
+            self._render_next_batch()
+
+    def _render_next_batch(self):
+        """Render next batch of cards from _pending_cards."""
+        if not hasattr(self, '_pending_cards') or not self._pending_cards:
+            return
+        batch_size = self._get_batch_size()
+        batch = self._pending_cards[:batch_size]
+        self._pending_cards = self._pending_cards[batch_size:]
+        for card in batch:
+            self._list_lay.addWidget(card)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 #  LOANS I GIVE
@@ -1118,6 +1165,7 @@ class LoansGivePage(_FunctionPage):
             empty.setAlignment(Qt.AlignCenter)
             self._list_lay.addWidget(empty)
             return
+        all_cards = []
         for l in loans:
             a = self._analysis(l)
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
@@ -1138,6 +1186,7 @@ class LoansGivePage(_FunctionPage):
                 amount_text=fmt_money(l["loan_amount"]) + "  Principal",
                 badge_text=l["status"], badge_color=color,
                 progress_pct=pct, extra_line=extra,
+                updated=_is_updated(l),
             )
             card.clicked.connect(self._toggle_card)
 
@@ -1188,6 +1237,8 @@ class LoansGivePage(_FunctionPage):
                                        (data["Loan Amount"], loan["trxn_id"]))
                     self.db.commit()
                     self.repos["loans"].recalc_status(_lid)
+                    self.db.execute("UPDATE loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
+                    self.db.commit()
                     self.load_list()
                 return _save
 
@@ -1225,6 +1276,8 @@ class LoansGivePage(_FunctionPage):
                                            (data["amount"], data["date"], rep_data["linked_txn_id"]))
                         self.db.commit()
                         self.repos["loans"].recalc_status(_lid)
+                        self.db.execute("UPDATE loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
+                        self.db.commit()
                         self.load_list()
                     return _save
                 return _on_rep_edit
@@ -1233,7 +1286,7 @@ class LoansGivePage(_FunctionPage):
             rep_section = _repayment_section(
                 repayments, "amount_paid", "payment_date",
                 accent_color=color,
-                on_edit=_make_rep_edit(lid)
+                on_edit=_make_rep_edit(lid) if l["status"] not in ("CLOSED",) else None
             )
             card.add_expand_widget(rep_section)
 
@@ -1743,6 +1796,7 @@ class LoansTakePage(_FunctionPage):
             empty.setAlignment(Qt.AlignCenter)
             self._list_lay.addWidget(empty)
             return
+        all_cards = []
         for l in loans:
             a = self._analysis(l)
             color = status_color(l["status"])
@@ -1770,6 +1824,7 @@ class LoansTakePage(_FunctionPage):
                 amount_text=fmt_money(l["principal_amount"]) + "  Principal",
                 badge_text=l["status"], badge_color=color,
                 progress_pct=pct, extra_line=extra,
+                updated=_is_updated(l),
             )
             card.clicked.connect(self._toggle_card)
 
@@ -1833,6 +1888,8 @@ class LoansTakePage(_FunctionPage):
                                        (data["Principal"], loan["linked_txn_id"]))
                     self.db.commit()
                     self.repos["borrowed"].recalc_status(_lid)
+                    self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
+                    self.db.commit()
                     self.load_list()
                 return _save
 
@@ -1870,6 +1927,8 @@ class LoansTakePage(_FunctionPage):
                                            (data["amount"], data["date"], rep_data["linked_txn_id"]))
                         self.db.commit()
                         self.repos["borrowed"].recalc_status(_lid)
+                        self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE loan_id=?", (TODAY(), _lid))
+                        self.db.commit()
                         self.load_list()
                     return _save
                 return _on_rep_edit
@@ -1878,7 +1937,7 @@ class LoansTakePage(_FunctionPage):
             rep_section = _repayment_section(
                 repayments, "amount_paid", "payment_date",
                 accent_color=color,
-                on_edit=_make_lt_rep_edit(lid)
+                on_edit=_make_lt_rep_edit(lid) if l["status"] not in ("CLOSED",) else None
             )
             card.add_expand_widget(rep_section)
 
@@ -1939,7 +1998,16 @@ class LoansTakePage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            self._list_lay.addWidget(card)
+            all_cards.append(card)
+
+        # Lazy loading
+        if all_cards:
+            first_batch = all_cards[:self._get_batch_size()]
+            self._pending_cards = all_cards[self._get_batch_size():]
+            for c in first_batch:
+                self._list_lay.addWidget(c)
+            if self._pending_cards:
+                self._init_lazy_scroll()
 
     def _mark_closed(self, loan_id):
         if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
@@ -2099,6 +2167,7 @@ class FDGivePage(_FunctionPage):
             empty.setAlignment(Qt.AlignCenter)
             self._list_lay.addWidget(empty)
             return
+        all_cards = []
         for fd in fds:
             pct = FDService.progress(fd["start_date"], fd["maturity_date"])
             color = status_color(fd["status"])
@@ -2152,13 +2221,28 @@ class FDGivePage(_FunctionPage):
 
             def _make_fd_save(_fid):
                 def _save(data):
+                    # Recalculate maturity amount
+                    p = data["Principal"]
+                    r = data["Interest Rate"]
+                    sd = data["Start Date"]
+                    md = data["Maturity Date"]
+                    mthd = fd.get("interest_method") or "COMPOUND"
+                    freq = fd.get("interest_type") or "QUARTERLY"
+                    if mthd == "SIMPLE":
+                        from datetime import datetime as _dt
+                        years = (_dt.strptime(md, "%Y-%m-%d") - _dt.strptime(sd, "%Y-%m-%d")).days / 365.25
+                        mat_amt = round(p * (1 + r / 100 * years), 2)
+                    else:
+                        mat_amt = FDService.maturity(p, r, sd, md, freq)
                     self.db.execute(
-                        "UPDATE fixed_deposits SET principal_amount=?, interest_rate=?, start_date=?, maturity_date=? WHERE fd_id=?",
-                        (data["Principal"], data["Interest Rate"], data["Start Date"], data["Maturity Date"], _fid))
+                        "UPDATE fixed_deposits SET principal_amount=?, interest_rate=?, start_date=?, maturity_date=?, maturity_amount=? WHERE fd_id=?",
+                        (p, r, sd, md, mat_amt, _fid))
                     fd_rec = self.repos["fd"].get(_fid)
                     if fd_rec and fd_rec.get("linked_txn_id"):
                         self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
                                        (data["Principal"], fd_rec["linked_txn_id"]))
+                    self.db.commit()
+                    self.db.execute("UPDATE fixed_deposits SET updated_at=? WHERE fd_id=?", (TODAY(), _fid))
                     self.db.commit()
                     self.load_list()
                 return _save
@@ -2196,7 +2280,16 @@ class FDGivePage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            self._list_lay.addWidget(card)
+            all_cards.append(card)
+
+        # Lazy loading
+        if all_cards:
+            first_batch = all_cards[:self._get_batch_size()]
+            self._pending_cards = all_cards[self._get_batch_size():]
+            for c in first_batch:
+                self._list_lay.addWidget(c)
+            if self._pending_cards:
+                self._init_lazy_scroll()
 
     def _mark_matured(self, fd_id):
         if _confirm(self, "Mark Matured", "Mark this FD as matured?"):
@@ -2586,6 +2679,7 @@ class FDOthersPage(_FunctionPage):
             empty.setAlignment(Qt.AlignCenter)
             self._list_lay.addWidget(empty)
             return
+        all_cards = []
         for d in deps:
             a = self._analysis(d)
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
@@ -2606,6 +2700,7 @@ class FDOthersPage(_FunctionPage):
                 amount_text=fmt_money(d["principal_amount"]) + "  Principal",
                 badge_text=badge_text, badge_color=color,
                 progress_pct=pct, extra_line=extra,
+                updated=_is_updated(d),
             )
             card.clicked.connect(self._toggle_card)
             did = d["deposit_id"]
@@ -2658,6 +2753,8 @@ class FDOthersPage(_FunctionPage):
                                        (data["Principal"], dep["linked_txn_id"]))
                     self.db.commit()
                     self.repos["deposits"].recalc_status(_did)
+                    self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE deposit_id=?", (TODAY(), _did))
+                    self.db.commit()
                     self.load_list()
                 return _save
 
@@ -2695,6 +2792,8 @@ class FDOthersPage(_FunctionPage):
                                            (data["amount"], data["date"], rep_data["linked_txn_id"]))
                         self.db.commit()
                         self.repos["deposits"].recalc_status(_did)
+                        self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE deposit_id=?", (TODAY(), _did))
+                        self.db.commit()
                         self.load_list()
                     return _save
                 return _on_rep_edit
@@ -2703,7 +2802,7 @@ class FDOthersPage(_FunctionPage):
             rep_section = _repayment_section(
                 repayments, "amount_paid", "payment_date",
                 accent_color=color,
-                on_edit=_make_fo_rep_edit(did)
+                on_edit=_make_fo_rep_edit(did) if d["status"] not in ("CLOSED",) else None
             )
             card.add_expand_widget(rep_section)
 
@@ -2759,7 +2858,16 @@ class FDOthersPage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            self._list_lay.addWidget(card)
+            all_cards.append(card)
+
+        # Lazy loading
+        if all_cards:
+            first_batch = all_cards[:self._get_batch_size()]
+            self._pending_cards = all_cards[self._get_batch_size():]
+            for c in first_batch:
+                self._list_lay.addWidget(c)
+            if self._pending_cards:
+                self._init_lazy_scroll()
 
     def _mark_closed(self, deposit_id):
         if _confirm(self, "Mark Closed", "Mark this deposit as fully returned/closed?"):
@@ -3355,6 +3463,7 @@ class MFPage(_FunctionPage):
             empty.setAlignment(Qt.AlignCenter)
             self._list_lay.addWidget(empty)
             return
+        all_cards = []
         for it in items:
             ret = it["return_pct"]
             color = C["green"] if ret >= 0 else C["red"]
@@ -3431,7 +3540,16 @@ class MFPage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            self._list_lay.addWidget(card)
+            all_cards.append(card)
+
+        # Lazy loading
+        if all_cards:
+            first_batch = all_cards[:self._get_batch_size()]
+            self._pending_cards = all_cards[self._get_batch_size():]
+            for c in first_batch:
+                self._list_lay.addWidget(c)
+            if self._pending_cards:
+                self._init_lazy_scroll()
 
 
 # ══════════════════════════════════════════════════════════════════════════

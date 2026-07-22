@@ -298,6 +298,10 @@ def run_migrations(db):
         ("borrowed_loans", "amort_tenure", "INTEGER"),
         ("mf_schemes", "launch_date", "TEXT"),
         ("mf_schemes", "api_scheme_code", "TEXT"),
+        ("loans", "updated_at", "TEXT"),
+        ("borrowed_loans", "updated_at", "TEXT"),
+        ("deposits_from_others", "updated_at", "TEXT"),
+        ("fixed_deposits", "updated_at", "TEXT"),
     ]
     for table, col, typedef in _safe_cols:
         try:
