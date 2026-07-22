@@ -2469,11 +2469,54 @@ class MFPage(_FunctionPage):
     def __init__(self, repos, services, parent=None):
         self._nav_cache = {}
         self._nav_fetched = False
+        self._nav_worker = None
+        self._loading_dlg = None
         super().__init__(repos, services, parent)
+        self._start_background_nav_fetch()
 
     def refresh(self):
         """Override: don't fetch NAVs on tab open, only update dropdowns."""
         self._refresh_entry_dropdowns()
+
+    def _start_background_nav_fetch(self):
+        """Start fetching NAVs silently in background on app open."""
+        all_schemes = self.repos["mf"].list_schemes()
+        to_fetch = [(s["scheme_id"], s["api_scheme_code"])
+                    for s in all_schemes if s.get("api_scheme_code")]
+        if not to_fetch:
+            self._nav_fetched = True
+            return
+        self._nav_worker = _FetchNavsWorker(to_fetch, self)
+        self._nav_worker.finished.connect(self._on_navs_fetched)
+        self._nav_worker.start()
+
+    def _on_navs_fetched(self, results):
+        """Called when background NAV fetch completes."""
+        self._nav_cache.update(results)
+        self._nav_fetched = True
+        self._nav_worker = None
+        # Close loading popup if user switched to MF during fetch
+        if self._loading_dlg:
+            self._loading_dlg.accept()
+            self._loading_dlg = None
+            self._build_list_data()
+
+    def _make_loading_dlg(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Loading")
+        dlg.setMinimumWidth(300)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowCloseButtonHint)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        icon = QLabel("\U0001f4c8")
+        icon.setStyleSheet("font-size:32px;")
+        icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon)
+        msg = QLabel("Fetching latest NAV...")
+        msg.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
+        msg.setAlignment(Qt.AlignCenter)
+        lay.addWidget(msg)
+        return dlg
 
     def _sort_options(self):
         return ["Return %", "Scheme Name", "Invested", "Current Value"]
@@ -2711,22 +2754,71 @@ class MFPage(_FunctionPage):
         self.mf_sell_units.setMaximum(max(h["units"], 0))
 
     def _auto_fetch_buy_nav(self):
-        """Auto-fill NAV from cache or saved API link when scheme is selected."""
-        sid = self.mf_buy_scheme.get_data()
+        """Auto-fill NAV: cache first, then async fetch from saved API link."""
+        try:
+            sid = self.mf_buy_scheme.get_data()
+        except (AttributeError, RuntimeError):
+            return
         if not sid:
             return
-        nav = self._last_nav(sid)
-        if nav > 0:
-            self.mf_buy_nav.setValue(nav)
+        # Cache hit → instant
+        if sid in self._nav_cache and self._nav_cache[sid] > 0:
+            self.mf_buy_nav.setValue(self._nav_cache[sid])
+            return
+        # Try last transaction NAV as immediate fill
+        txns = self.repos["mf"].list_txns(sid)
+        if txns:
+            self.mf_buy_nav.setValue(txns[-1]["nav"])
+        # Async fetch from API if linked
+        scheme = self.repos["mf"].get_scheme(sid)
+        api_code = scheme.get("api_scheme_code") if scheme else None
+        if api_code:
+            url = f"https://api.mfapi.in/mf/{api_code}/latest"
+            w = _NavWorker(url, self)
+            w.result.connect(lambda data, _sid=sid: self._on_buy_nav(_sid, data))
+            w.start()
+
+    def _on_buy_nav(self, sid, data):
+        try:
+            rows = data.get("data") or [] if isinstance(data, dict) else []
+            if rows:
+                nav = float(rows[0]["nav"])
+                self._nav_cache[sid] = nav
+                self.mf_buy_nav.setValue(nav)
+        except Exception:
+            pass
 
     def _auto_fetch_sell_nav(self):
-        """Auto-fill NAV from cache or saved API link when scheme is selected."""
-        sid = self.mf_sell_scheme.get_data()
+        """Auto-fill NAV: cache first, then async fetch from saved API link."""
+        try:
+            sid = self.mf_sell_scheme.get_data()
+        except (AttributeError, RuntimeError):
+            return
         if not sid:
             return
-        nav = self._last_nav(sid)
-        if nav > 0:
-            self.mf_sell_nav.setValue(nav)
+        if sid in self._nav_cache and self._nav_cache[sid] > 0:
+            self.mf_sell_nav.setValue(self._nav_cache[sid])
+            return
+        txns = self.repos["mf"].list_txns(sid)
+        if txns:
+            self.mf_sell_nav.setValue(txns[-1]["nav"])
+        scheme = self.repos["mf"].get_scheme(sid)
+        api_code = scheme.get("api_scheme_code") if scheme else None
+        if api_code:
+            url = f"https://api.mfapi.in/mf/{api_code}/latest"
+            w = _NavWorker(url, self)
+            w.result.connect(lambda data, _sid=sid: self._on_sell_nav(_sid, data))
+            w.start()
+
+    def _on_sell_nav(self, sid, data):
+        try:
+            rows = data.get("data") or [] if isinstance(data, dict) else []
+            if rows:
+                nav = float(rows[0]["nav"])
+                self._nav_cache[sid] = nav
+                self.mf_sell_nav.setValue(nav)
+        except Exception:
+            pass
 
     def _fetch_nav_buy(self):
         dlg = NavFetchDialog(initial_query=self.mf_buy_scheme.currentText(), parent=self)
@@ -2756,6 +2848,12 @@ class MFPage(_FunctionPage):
         except (AttributeError, RuntimeError):
             pass
         self._update_holdings()
+        # Auto-fill NAV for currently selected schemes
+        try:
+            if self.mf_buy_scheme.get_data():
+                self._auto_fetch_buy_nav()
+        except (AttributeError, RuntimeError):
+            pass
 
     def _log_purchase(self):
         sid = self.mf_buy_scheme.get_data()
@@ -2902,48 +3000,18 @@ class MFPage(_FunctionPage):
 
     # ── List ──
     def load_list(self):
-        """Fetch NAVs once on first open, then use cache."""
-        if not self._nav_fetched:
-            self._nav_fetched = True
-            all_schemes = self.repos["mf"].list_schemes()
-            to_fetch = [(s["scheme_id"], s["api_scheme_code"])
-                        for s in all_schemes if s.get("api_scheme_code")]
-            if to_fetch:
-                self._fetch_navs_and_load(to_fetch)
-                return
-        self._build_list_data()
-
-    def _fetch_navs_and_load(self, to_fetch):
-        """Show loading popup, fetch NAVs in background, then load list."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Loading")
-        dlg.setMinimumWidth(320)
-        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowCloseButtonHint)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(24, 20, 24, 20)
-        icon_lbl = QLabel("\U0001f4c8")
-        icon_lbl.setStyleSheet("font-size:32px;")
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        lay.addWidget(icon_lbl)
-        msg = QLabel(f"Fetching latest NAV for {len(to_fetch)} scheme{'s' if len(to_fetch)!=1 else ''}...")
-        msg.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
-        msg.setAlignment(Qt.AlignCenter)
-        lay.addWidget(msg)
-        hint = QLabel("This only happens once per session")
-        hint.setStyleSheet(f"color:{C['text3']};font-size:11px;")
-        hint.setAlignment(Qt.AlignCenter)
-        lay.addWidget(hint)
-        dlg.show()
-
-        worker = _FetchNavsWorker(to_fetch, self)
-
-        def on_done(results):
-            self._nav_cache.update(results)
-            dlg.accept()
+        """Smart load: use cache if ready, show popup if still fetching."""
+        if self._nav_fetched:
             self._build_list_data()
-
-        worker.finished.connect(on_done)
-        worker.start()
+        elif self._nav_worker and self._nav_worker.isRunning():
+            # Background fetch still running — show popup
+            if not self._loading_dlg:
+                self._loading_dlg = self._make_loading_dlg()
+                self._loading_dlg.show()
+        else:
+            # No worker (no linked schemes) — just build
+            self._nav_fetched = True
+            self._build_list_data()
 
     def _build_list_data(self):
         """Build MF list data using cached/fetched NAVs."""
