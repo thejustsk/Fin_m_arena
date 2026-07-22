@@ -47,6 +47,31 @@ class _NavWorker(QThread):
             self.error.emit(str(e))
 
 
+class _FetchNavsWorker(QThread):
+    """Background worker to fetch latest NAVs for all linked schemes."""
+    finished = _Signal(dict)  # {scheme_id: nav_value}
+
+    def __init__(self, scheme_codes, parent=None):
+        """scheme_codes: list of (scheme_id, api_scheme_code)"""
+        super().__init__(parent)
+        self._items = scheme_codes
+
+    def run(self):
+        import urllib.request
+        result = {}
+        for sid, code in self._items:
+            try:
+                url = f"https://api.mfapi.in/mf/{code}/latest"
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    data = _json.loads(resp.read().decode())
+                rows = data.get("data") or [] if isinstance(data, dict) else []
+                if rows:
+                    result[sid] = float(rows[0]["nav"])
+            except Exception:
+                pass
+        self.finished.emit(result)
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 def _add_months(d, months):
     m = d.month - 1 + int(months)
@@ -690,24 +715,6 @@ class _FunctionPage(QWidget):
             else "Descending (Z\u2192A). Click to reverse."
         )
         self._render_list()
-
-    def _auto_fetch_buy_nav(self):
-        """Auto-fill NAV when a scheme is selected in Purchase form."""
-        sid = self.mf_buy_scheme.get_data()
-        if not sid:
-            return
-        nav = self._last_nav(sid)
-        if nav > 0:
-            self.mf_buy_nav.setValue(nav)
-
-    def _auto_fetch_sell_nav(self):
-        """Auto-fill NAV when a scheme is selected in Redemption form."""
-        sid = self.mf_sell_scheme.get_data()
-        if not sid:
-            return
-        nav = self._last_nav(sid)
-        if nav > 0:
-            self.mf_sell_nav.setValue(nav)
 
     def _refresh_entry_dropdowns(self):
         pass
@@ -2461,12 +2468,16 @@ class MFPage(_FunctionPage):
 
     def __init__(self, repos, services, parent=None):
         self._nav_cache = {}
+        self._nav_fetched = False
         super().__init__(repos, services, parent)
+
+    def refresh(self):
+        """Override: don't fetch NAVs on tab open, only update dropdowns."""
+        self._refresh_entry_dropdowns()
 
     def _sort_options(self):
         return ["Return %", "Scheme Name", "Invested", "Current Value"]
 
-    # ── Entry ──
     def _build_entry(self):
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -2699,6 +2710,24 @@ class MFPage(_FunctionPage):
         self.mf_holdings_lbl.setText(f"You hold {h['units']:,.4f} units in this scheme.")
         self.mf_sell_units.setMaximum(max(h["units"], 0))
 
+    def _auto_fetch_buy_nav(self):
+        """Auto-fill NAV from cache or saved API link when scheme is selected."""
+        sid = self.mf_buy_scheme.get_data()
+        if not sid:
+            return
+        nav = self._last_nav(sid)
+        if nav > 0:
+            self.mf_buy_nav.setValue(nav)
+
+    def _auto_fetch_sell_nav(self):
+        """Auto-fill NAV from cache or saved API link when scheme is selected."""
+        sid = self.mf_sell_scheme.get_data()
+        if not sid:
+            return
+        nav = self._last_nav(sid)
+        if nav > 0:
+            self.mf_sell_nav.setValue(nav)
+
     def _fetch_nav_buy(self):
         dlg = NavFetchDialog(initial_query=self.mf_buy_scheme.currentText(), parent=self)
         if dlg.exec_() == QDialog.Accepted and dlg.result_nav:
@@ -2710,12 +2739,22 @@ class MFPage(_FunctionPage):
             self.mf_sell_nav.setValue(dlg.result_nav)
 
     def _refresh_entry_dropdowns(self):
+        try:
+            self.mf_buy_scheme.blockSignals(True)
+            self.mf_sell_scheme.blockSignals(True)
+        except (AttributeError, RuntimeError):
+            return
         self.mf_buy_scheme.clear_items()
         self.mf_sell_scheme.clear_items()
         for s in self.repos["mf"].list_schemes():
             label = f"{s['amc_name']} \u2014 {s['scheme_name']}"
             self.mf_buy_scheme.add_item(label, s["scheme_id"])
             self.mf_sell_scheme.add_item(label, s["scheme_id"])
+        try:
+            self.mf_buy_scheme.blockSignals(False)
+            self.mf_sell_scheme.blockSignals(False)
+        except (AttributeError, RuntimeError):
+            pass
         self._update_holdings()
 
     def _log_purchase(self):
@@ -2833,22 +2872,23 @@ class MFPage(_FunctionPage):
                 "UPDATE mf_schemes SET amc_name=?, scheme_name=?, scheme_type=?, folio_number=?, api_scheme_code=? WHERE scheme_id=?",
                 (a, n, stype.currentText(), folio.text().strip() or None, new_code[0] or None, scheme["scheme_id"]))
             self.db.commit()
-            self._nav_cache.pop(scheme["scheme_id"], None)  # clear cached NAV
-            self._refresh_entry_dropdowns()
-            self.load_list()
+            self._nav_cache.pop(scheme["scheme_id"], None)
+            if hasattr(self, 'mf_buy_scheme'):
+                self._refresh_entry_dropdowns()
+            self._build_list_data()
             QMessageBox.information(self, "Updated", f"Scheme '{n}' updated successfully.")
 
     def _last_nav(self, scheme_id):
         if scheme_id in self._nav_cache:
             return self._nav_cache[scheme_id]
-        # Try auto-fetch from saved API scheme code
+        # Try auto-fetch from saved API scheme code (with short timeout)
         scheme = self.repos["mf"].get_scheme(scheme_id)
         api_code = scheme.get("api_scheme_code") if scheme else None
         if api_code:
             try:
                 import urllib.request
                 url = f"https://api.mfapi.in/mf/{api_code}/latest"
-                with urllib.request.urlopen(url, timeout=5) as resp:
+                with urllib.request.urlopen(url, timeout=3) as resp:
                     data = _json.loads(resp.read().decode())
                 rows = data.get("data") or [] if isinstance(data, dict) else []
                 if rows:
@@ -2856,12 +2896,57 @@ class MFPage(_FunctionPage):
                     self._nav_cache[scheme_id] = nav
                     return nav
             except Exception:
-                pass
+                pass  # fall through to txn-based NAV
         txns = self.repos["mf"].list_txns(scheme_id)
         return txns[-1]["nav"] if txns else 0
 
     # ── List ──
     def load_list(self):
+        """Fetch NAVs once on first open, then use cache."""
+        if not self._nav_fetched:
+            self._nav_fetched = True
+            all_schemes = self.repos["mf"].list_schemes()
+            to_fetch = [(s["scheme_id"], s["api_scheme_code"])
+                        for s in all_schemes if s.get("api_scheme_code")]
+            if to_fetch:
+                self._fetch_navs_and_load(to_fetch)
+                return
+        self._build_list_data()
+
+    def _fetch_navs_and_load(self, to_fetch):
+        """Show loading popup, fetch NAVs in background, then load list."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Loading")
+        dlg.setMinimumWidth(320)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowCloseButtonHint)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        icon_lbl = QLabel("\U0001f4c8")
+        icon_lbl.setStyleSheet("font-size:32px;")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon_lbl)
+        msg = QLabel(f"Fetching latest NAV for {len(to_fetch)} scheme{'s' if len(to_fetch)!=1 else ''}...")
+        msg.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
+        msg.setAlignment(Qt.AlignCenter)
+        lay.addWidget(msg)
+        hint = QLabel("This only happens once per session")
+        hint.setStyleSheet(f"color:{C['text3']};font-size:11px;")
+        hint.setAlignment(Qt.AlignCenter)
+        lay.addWidget(hint)
+        dlg.show()
+
+        worker = _FetchNavsWorker(to_fetch, self)
+
+        def on_done(results):
+            self._nav_cache.update(results)
+            dlg.accept()
+            self._build_list_data()
+
+        worker.finished.connect(on_done)
+        worker.start()
+
+    def _build_list_data(self):
+        """Build MF list data using cached/fetched NAVs."""
         schemes = self.repos["mf"].list_schemes()
         self._list_data = []
         for s in schemes:
@@ -2974,7 +3059,7 @@ class MFDetailDialog(QDialog):
         btn_row.addStretch()
         if on_edit:
             edit_btn = QPushButton("\u270f\ufe0f  Edit Scheme")
-            edit_btn.clicked.connect(lambda: (on_edit(), self.accept()))
+            edit_btn.clicked.connect(lambda checked=False, _cb=on_edit: (_cb(), self.accept()))
             btn_row.addWidget(edit_btn)
         ok = QPushButton("Close")
         ok.clicked.connect(self.accept)
