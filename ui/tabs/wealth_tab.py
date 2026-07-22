@@ -1,12 +1,10 @@
-"""Wealth tab — 5 top-level pages with Entry + Searchable/Sortable List."""
+"""Wealth tab — 5 top-level pages with expandable inline cards (Notes-tab pattern)."""
 import json as _json
 from datetime import date, datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QDateEdit, QDoubleSpinBox, QSpinBox, QFrame, QScrollArea,
-    QStackedWidget, QMessageBox, QDialog, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QFormLayout, QProgressBar, QListWidget,
-    QTabWidget, QSizePolicy
+    QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
@@ -52,7 +50,6 @@ class _FetchNavsWorker(QThread):
     finished = _Signal(dict)  # {scheme_id: nav_value}
 
     def __init__(self, scheme_codes, parent=None):
-        """scheme_codes: list of (scheme_id, api_scheme_code)"""
         super().__init__(parent)
         self._items = scheme_codes
 
@@ -82,19 +79,33 @@ def _add_months(d, months):
     return date(y, m, min(d.day, dim[m - 1]))
 
 
-def status_color(role, status):
+def _hex_rgba(hex_color, alpha):
+    """Convert hex color to rgba string."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def status_color(status):
+    """Unified status → color mapping across all 5 sub-tabs.
+    
+    ACTIVE          → Indigo  (#4F46E5) — money is in play
+    PARTIALLY_PAID  → Amber   (#D97706) — partial progress
+    OVERDUE         → Red     (#DC2626) — past deadline
+    REPAID          → Green   (#059669) — fully done
+    MATURED         → Green   (#059669) — FD ready
+    CLOSED/WITHDRAWN/PREMATURE_WITHDRAWN → Gray (#667085) — archived
+    """
     status = (status or "").upper()
     if status == "OVERDUE":
         return C["red"]
     if status == "PARTIALLY_PAID":
         return C["amber"]
-    if status == "REPAID":
+    if status in ("REPAID", "MATURED"):
         return C["green"]
-    if status in ("CLOSED", "MATURED", "WITHDRAWN", "CLEARED"):
-        return C["green"] if role in ("asset", "loan") else C["text3"]
-    if role == "loan":
-        return C["accent"]   # ACTIVE → purple
-    return C["green"] if role == "asset" else C["accent"]
+    if status in ("CLOSED", "WITHDRAWN", "CLEARED", "PREMATURE_WITHDRAWN"):
+        return C["text3"]
+    return C["accent"]  # ACTIVE and fallback
 
 
 def _clear_layout(layout):
@@ -138,57 +149,22 @@ def _badge(text, color):
     return lbl
 
 
-def _wealth_card(title, subtitle, amount_text, badge_text, badge_color,
-                 on_click=None, progress_pct=None, extra_line=None):
-    card = QFrame()
-    hc = badge_color.lstrip("#")
-    r, g, b = int(hc[0:2], 16), int(hc[2:4], 16), int(hc[4:6], 16)
-    card.setStyleSheet(
-        f"QFrame{{background:rgba({r},{g},{b},0.06);border:1.5px solid {badge_color};border-radius:12px;}}"
-        f"QFrame:hover{{background:rgba({r},{g},{b},0.10);border-color:{badge_color};}}"
-        f"QLabel{{background:transparent;border:none;outline:none;}}"
-    )
-    if on_click:
-        card.setCursor(QCursor(Qt.PointingHandCursor))
-    lay = QVBoxLayout(card)
-    lay.setContentsMargins(16, 12, 16, 12)
-    lay.setSpacing(6)
-    top = QHBoxLayout()
-    t = QLabel(title)
-    t.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
-    top.addWidget(t, 1)
-    top.addWidget(_badge(badge_text, badge_color))
-    lay.addLayout(top)
-    mid = QHBoxLayout()
-    s = QLabel(subtitle)
-    s.setStyleSheet(f"font-size:12px;color:{C['text3']};")
-    s.setWordWrap(True)
-    mid.addWidget(s, 1)
-    a = QLabel(amount_text)
-    a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
-    mid.addWidget(a)
-    lay.addLayout(mid)
-    if progress_pct is not None:
-        bar_bg = QFrame()
-        bar_bg.setFixedHeight(6)
-        bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:3px;")
-        bl = QHBoxLayout(bar_bg)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(0)
-        bf = QFrame()
-        pct = max(0, min(100, int(progress_pct)))
-        bf.setStyleSheet(f"background:{badge_color};border-radius:3px;")
-        bl.addWidget(bf, pct)
-        bl.addStretch(max(1, 100 - pct))
-        lay.addWidget(bar_bg)
-    if extra_line:
-        e = QLabel(extra_line)
-        e.setTextFormat(Qt.RichText)
-        e.setStyleSheet(f"font-size:11px;color:{C['text3']};")
-        lay.addWidget(e)
-    if on_click:
-        card.mousePressEvent = lambda ev, cb=on_click: cb()
-    return card
+def _kv_row(pairs):
+    """HBox of label:value mini-columns."""
+    row = QHBoxLayout()
+    row.setSpacing(20)
+    for label, value in pairs:
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        l = QLabel(str(label))
+        l.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;text-transform:uppercase;letter-spacing:0.3px;")
+        v = QLabel(str(value))
+        v.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        col.addWidget(l)
+        col.addWidget(v)
+        row.addLayout(col)
+    row.addStretch()
+    return row
 
 
 def _account_combo(repo):
@@ -270,7 +246,6 @@ def _fill_stats_row(row_layout, cards):
 
 
 def _simple_add_dialog(parent, title, label="Name", placeholder="Full name"):
-    """Simple dialog to add a named entity. Returns trimmed name string or None."""
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
     dlg.setMinimumWidth(360)
@@ -295,13 +270,12 @@ def _simple_add_dialog(parent, title, label="Name", placeholder="Full name"):
 
 
 def _entity_row(combo, add_callback):
-    """SearchableCombo + [＋] Add button in a QHBoxLayout."""
     row = QHBoxLayout()
     row.setSpacing(6)
     add_btn = QPushButton("\uff0b Add New")
     add_btn.setFixedHeight(38)
     add_btn.setMinimumWidth(90)
-    add_btn.setFocusPolicy(Qt.NoFocus)          # Tab skips this button
+    add_btn.setFocusPolicy(Qt.NoFocus)
     add_btn.setToolTip("Add new")
     add_btn.setCursor(QCursor(Qt.PointingHandCursor))
     add_btn.clicked.connect(add_callback)
@@ -316,160 +290,27 @@ def _entity_row(combo, add_callback):
     return row
 
 
-# ── Card-rendering helpers (replace tables in detail dialogs) ─────────
-_CARD_SS = (f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
-            f"border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
+# ── Button styles ──────────────────────────────────────────────────────────
+def _accent_btn_css(accent=None):
+    """Accent-styled button: white bg, accent border + text. Uses card's color."""
+    accent = accent or C["accent"]
+    return (f"QPushButton{{background:{C['surface']};color:{accent};"
+            f"border:1.5px solid {accent};border-radius:8px;"
+            f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{_hex_rgba(accent, 0.08)};}}")
 
 
-def _card_scroll(card_widgets, empty_msg="No data yet."):
-    """Wrap a list of QFrame cards in a scroll area."""
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QFrame.NoFrame)
-    inner = QWidget()
-    lay = QVBoxLayout(inner)
-    lay.setSpacing(6)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setAlignment(Qt.AlignTop)
-    if not card_widgets:
-        lbl = QLabel(empty_msg)
-        lbl.setStyleSheet(f"color:{C['text3']};padding:16px;font-size:12px;")
-        lbl.setAlignment(Qt.AlignCenter)
-        lay.addWidget(lbl)
-    else:
-        for w in card_widgets:
-            lay.addWidget(w)
-    scroll.setWidget(inner)
-    return scroll
+def _accent_save_css(accent=None):
+    """Accent-styled save button: solid accent bg, white text."""
+    accent = accent or C["accent"]
+    hover = _hex_rgba(accent, 0.85)
+    return (f"QPushButton{{background:{accent};color:white;border:none;"
+            f"border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{hover};}}")
 
 
-def _kv_pairs(pairs):
-    """HBox of label:value mini-columns."""
-    row = QHBoxLayout()
-    row.setSpacing(20)
-    for label, value in pairs:
-        col = QVBoxLayout()
-        col.setSpacing(1)
-        l = QLabel(str(label))
-        l.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;text-transform:uppercase;letter-spacing:0.3px;")
-        v = QLabel(str(value))
-        v.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        col.addWidget(l)
-        col.addWidget(v)
-        row.addLayout(col)
-    row.addStretch()
-    return row
-
-
-def _repayment_cards(repayments, amount_key, date_key, empty_msg="No repayments logged yet."):
-    """Render repayment list as cards."""
-    cards = []
-    for r in repayments:
-        card = QFrame()
-        card.setStyleSheet(_CARD_SS)
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(12, 8, 12, 8)
-        cl.setSpacing(4)
-        hdr = QHBoxLayout()
-        d = QLabel(r.get(date_key, ""))
-        d.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        a = QLabel(fmt_money(r[amount_key]))
-        a.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['accent']};")
-        a.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        hdr.addWidget(d)
-        hdr.addStretch()
-        hdr.addWidget(a)
-        cl.addLayout(hdr)
-        desc = r.get("description") or ""
-        if desc:
-            dl = QLabel(desc)
-            dl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;")
-            dl.setWordWrap(True)
-            cl.addWidget(dl)
-        cards.append(card)
-    return _card_scroll(cards, empty_msg)
-
-
-def _amort_cards(schedule):
-    """Render amortization schedule as cards."""
-    cards = []
-    for row in schedule:
-        card = QFrame()
-        card.setStyleSheet(_CARD_SS)
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(12, 8, 12, 8)
-        cl.setSpacing(4)
-        hdr = QLabel(f"Month {row['month']}")
-        hdr.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        cl.addWidget(hdr)
-        cl.addLayout(_kv_pairs([
-            ("EMI", fmt_money(row["emi"])),
-            ("Principal", fmt_money(row["principal"])),
-            ("Interest", fmt_money(row["interest"])),
-            ("Balance", fmt_money(row["balance"])),
-        ]))
-        cards.append(card)
-    return _card_scroll(cards)
-
-
-def _amort_actuals_cards(rows):
-    """Render amortization + actual payments as cards."""
-    cards = []
-    for rw in rows:
-        card = QFrame()
-        card.setStyleSheet(_CARD_SS)
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(12, 8, 12, 8)
-        cl.setSpacing(4)
-        hdr = QHBoxLayout()
-        title = QLabel(f"Month {rw['month']} {MDOT} {rw['date']}")
-        title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        hdr.addWidget(title)
-        hdr.addStretch()
-        sc = {"Paid": C["green"], "Extra Paid": C["accent"], "Partially Paid": C["amber"],
-              "Missed": C["red"], "Upcoming": C["text3"]}
-        hdr.addWidget(_badge(rw["status"], sc.get(rw["status"], C["text3"])))
-        cl.addLayout(hdr)
-        cl.addLayout(_kv_pairs([
-            ("Planned EMI", fmt_money(rw["p_emi"])),
-            ("Actual Paid", fmt_money(rw["a_paid"])),
-        ]))
-        cl.addLayout(_kv_pairs([
-            ("Planned Bal", fmt_money(rw["p_bal"])),
-            ("Actual Bal", fmt_money(rw["a_bal"])),
-        ]))
-        cards.append(card)
-    return _card_scroll(cards)
-
-
-def _mf_txn_cards(txns):
-    """Render MF transaction list as cards."""
-    cards = []
-    for tx in txns:
-        card = QFrame()
-        card.setStyleSheet(_CARD_SS)
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(12, 8, 12, 8)
-        cl.setSpacing(4)
-        hdr = QHBoxLayout()
-        title = QLabel(f"{tx['txn_type']} {MDOT} {tx['txn_date']}")
-        title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        hdr.addWidget(title)
-        hdr.addStretch()
-        amt = QLabel(fmt_money(tx["amount"]))
-        amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['accent']};")
-        hdr.addWidget(amt)
-        cl.addLayout(hdr)
-        cl.addLayout(_kv_pairs([
-            ("NAV", f"{tx['nav']:,.4f}"),
-            ("Units", f"{tx['units']:,.4f}"),
-        ]))
-        cards.append(card)
-    return _card_scroll(cards)
-
-
+# ── Export helper ───────────────────────────────────────────────────────────
 def _export_detail_to_pdf(parent, title, status, info_pairs, analysis_pairs, sections=None):
-    """Show save dialog and generate a detail PDF."""
     from PyQt5.QtWidgets import QFileDialog
     safe = "".join(c for c in title if c.isalnum() or c in " -_")[:60]
     filepath, _ = QFileDialog.getSaveFileName(
@@ -499,90 +340,337 @@ def _export_detail_to_pdf(parent, title, status, info_pairs, analysis_pairs, sec
             "Failed to generate PDF. Make sure reportlab is installed:\npip install reportlab")
 
 
-# ── NAV fetch dialog (MF) ──────────────────────────────────────────────────
-class NavFetchDialog(QDialog):
-    def __init__(self, initial_query="", parent=None):
+# ══════════════════════════════════════════════════════════════════════════
+#  EXPANDABLE WEALTH CARD (Notes-tab pattern)
+# ══════════════════════════════════════════════════════════════════════════
+class WealthCard(QFrame):
+    """Expandable card matching the Notes tab pattern.
+    
+    Card shows: title, subtitle, amount, badge, progress bar, extra line.
+    Clicking the card expands it to show: details, repayments, edit form.
+    """
+    clicked = _Signal(str)  # item_id
+
+    def __init__(self, item_id, title, subtitle, amount_text, badge_text, badge_color,
+                 progress_pct=None, extra_line=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("\U0001f50e Fetch Latest NAV")
-        self.setMinimumWidth(480)
-        self.result_nav = None
-        self.result_name = None
-        self._matches = []
-        lay = QVBoxLayout(self)
-        row = QHBoxLayout()
-        self.query_box = QLineEdit(initial_query)
-        self.query_box.setPlaceholderText("Scheme name, e.g. Parag Parikh Flexi Cap")
-        search_btn = QPushButton("Search")
-        search_btn.setObjectName("primary")
-        search_btn.clicked.connect(self._search)
-        row.addWidget(self.query_box, 1)
-        row.addWidget(search_btn)
-        lay.addLayout(row)
-        self.results = QListWidget()
-        self.results.itemDoubleClicked.connect(self._pick)
-        lay.addWidget(self.results)
-        info = QLabel("Double-click a scheme to fetch its latest NAV. Requires internet access.")
-        info.setStyleSheet(f"color:{C['text3']};font-size:11px;")
-        lay.addWidget(info)
-        btn_row = QHBoxLayout()
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        btn_row.addStretch()
-        btn_row.addWidget(cancel)
-        lay.addLayout(btn_row)
-        if initial_query:
-            self._search()
+        self.item_id = item_id
+        self.expanded = False
+        self.accent_color = badge_color
 
-    def _search(self):
-        q = self.query_box.text().strip()
-        if not q:
-            return
-        self.results.clear()
-        self.results.addItem("Searching...")
-        import urllib.parse
-        url = f"https://api.mfapi.in/mf/search?q={urllib.parse.quote(q)}"
-        self._worker = _NavWorker(url, self)
-        self._worker.result.connect(self._on_search_result)
-        self._worker.error.connect(lambda e: (self.results.clear(), self.results.addItem(f"Error: {e}")))
-        self._worker.start()
-
-    def _on_search_result(self, data):
-        self.results.clear()
-        if not data:
-            self.results.addItem("No matches found.")
-            return
-        matches = data[:30] if isinstance(data, list) else []
-        for m in matches:
-            self.results.addItem(f"{m.get('schemeName', '?')}  [{m.get('schemeCode', '?')}]")
-        self._matches = matches
-
-    def _pick(self, item):
-        idx = self.results.row(item)
-        if not self._matches or idx >= len(self._matches):
-            return
-        m = self._matches[idx]
-        self.results.addItem("Fetching latest NAV...")
-        import urllib.parse
-        url = f"https://api.mfapi.in/mf/{m['schemeCode']}/latest"
-        self._nav_worker = _NavWorker(url, self)
-        self._nav_worker.result.connect(lambda data: self._on_nav_result(data, m))
-        self._nav_worker.error.connect(
-            lambda e: QMessageBox.warning(self, "Fetch Failed", f"Couldn't fetch NAV ({e}).")
+        # Style: accent-colored border + tinted background
+        bg = _hex_rgba(badge_color, 0.06)
+        hover_bg = _hex_rgba(badge_color, 0.10)
+        self.setStyleSheet(
+            f"QFrame{{background:{bg};border:1.5px solid {badge_color};border-radius:12px;}}"
+            f"QFrame:hover{{background:{hover_bg};border-color:{badge_color};}}"
+            f"QLabel{{background:transparent;border:none;outline:none;}}"
         )
-        self._nav_worker.start()
+        self.setCursor(QCursor(Qt.PointingHandCursor))
 
-    def _on_nav_result(self, data, m):
-        rows = data.get("data") or [] if isinstance(data, dict) else []
-        nav = float(rows[0]["nav"]) if rows else None
-        if nav is None:
-            QMessageBox.warning(self, "No Data", "No NAV data available.")
-            return
-        self.result_nav = nav
-        self.result_name = m.get("schemeName")
-        self.accept()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(8)
+
+        # ── Row 1: Title + Badge + Principal (right side below badge) ──
+        top = QHBoxLayout()
+        left_col = QVBoxLayout()
+        left_col.setSpacing(2)
+        t = QLabel(title)
+        t.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
+        left_col.addWidget(t)
+        self._badge_lbl = _badge(badge_text, badge_color)
+        left_col.addWidget(self._badge_lbl)
+        top.addLayout(left_col, 1)
+        # Principal value right-aligned
+        a = QLabel(amount_text)
+        a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
+        a.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        top.addWidget(a)
+        lay.addLayout(top)
+
+        # ── Row 2: Subtitle ──
+        s = QLabel(subtitle)
+        s.setStyleSheet(f"font-size:12px;color:{C['text3']};line-height:1.4;")
+        s.setWordWrap(True)
+        lay.addWidget(s)
+
+        # ── Row 3: Progress bar ──
+        if progress_pct is not None:
+            bar_bg = QFrame()
+            bar_bg.setFixedHeight(6)
+            bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:3px;")
+            bl = QHBoxLayout(bar_bg)
+            bl.setContentsMargins(0, 0, 0, 0)
+            bl.setSpacing(0)
+            bf = QFrame()
+            pct = max(0, min(100, int(progress_pct)))
+            bf.setStyleSheet(f"background:{badge_color};border-radius:3px;")
+            bl.addWidget(bf, pct)
+            bl.addStretch(max(1, 100 - pct))
+            lay.addWidget(bar_bg)
+
+        # ── Row 5: Extra line (outstanding, interest, etc.) ──
+        if extra_line:
+            e = QLabel(extra_line)
+            e.setTextFormat(Qt.RichText)
+            e.setStyleSheet(f"font-size:11px;color:{C['text3']};")
+            lay.addWidget(e)
+
+        # ── Expand area (hidden initially) ──
+        self._expand_area = QWidget()
+        self._expand_area.setStyleSheet("background:transparent;border:none;")
+        self._expand_lay = QVBoxLayout(self._expand_area)
+        self._expand_lay.setContentsMargins(0, 8, 0, 0)
+        self._expand_lay.setSpacing(8)
+        self._expand_area.hide()
+        lay.addWidget(self._expand_area)
+
+    def add_expand_widget(self, widget):
+        self._expand_lay.addWidget(widget)
+
+    def add_expand_layout(self, layout):
+        self._expand_lay.addLayout(layout)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.item_id)
+        event.accept()
+
+    def expand(self):
+        self.expanded = True
+        self._expand_area.show()
+
+    def collapse(self):
+        self.expanded = False
+        self._expand_area.hide()
 
 
-# ── Base function page (Entry + List) ──────────────────────────────────────
+def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=None):
+    """Single repayment row — click to expand, shows edit area with card's accent style."""
+    accent = accent_color or C["accent"]
+    card = QFrame()
+    card._rep_expanded = False
+    card.setStyleSheet(
+        f"QFrame{{background:{_hex_rgba(accent, 0.05)};border:1px solid {_hex_rgba(accent, 0.2)};border-radius:8px;}}"
+        f"QFrame:hover{{border-color:{accent};}}"
+        f"QLabel{{background:transparent;border:none;}}"
+    )
+    if on_edit:
+        card.setCursor(QCursor(Qt.PointingHandCursor))
+    cl = QVBoxLayout(card)
+    cl.setContentsMargins(12, 8, 12, 8)
+    cl.setSpacing(4)
+    hdr = QHBoxLayout()
+    d = QLabel(rep.get(date_key, ""))
+    d.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+    a = QLabel(fmt_money(rep[amount_key]))
+    a.setStyleSheet(f"font-size:15px;font-weight:800;color:{accent};")
+    a.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    hdr.addWidget(d)
+    hdr.addStretch()
+    hdr.addWidget(a)
+    cl.addLayout(hdr)
+    desc = rep.get("description") or ""
+    if desc:
+        dl = QLabel(desc)
+        dl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;")
+        dl.setWordWrap(True)
+        cl.addWidget(dl)
+
+    # Expand area: edit button + edit form (hidden by default)
+    expand_area = QWidget()
+    expand_area.setStyleSheet("background:transparent;border:none;")
+    ea_lay = QVBoxLayout(expand_area)
+    ea_lay.setContentsMargins(0, 4, 0, 0)
+    ea_lay.setSpacing(6)
+
+    if on_edit:
+        # Edit form
+        edit_frame = QFrame()
+        edit_frame.setStyleSheet(
+            f"QFrame{{background:transparent;border:1.5px solid {accent};border-radius:6px;}}"
+            f"QLabel{{background:transparent;border:none;}}"
+            f"QLineEdit, QDoubleSpinBox, QDateEdit{{"
+            f"border:1.5px solid {_hex_rgba(accent, 0.3)};border-radius:6px;padding:5px 8px;"
+            f"background:{C['surface']};}}"
+            f"QLineEdit:focus, QDoubleSpinBox:focus, QDateEdit:focus{{border-color:{accent};}}"
+        )
+        ef_lay = QVBoxLayout(edit_frame)
+        ef_lay.setContentsMargins(10, 8, 10, 8)
+        ef_lay.setSpacing(6)
+        e_title = QLabel("\u270f\ufe0f Edit Repayment")
+        e_title.setStyleSheet(f"font-size:12px;font-weight:700;color:{accent};")
+        ef_lay.addWidget(e_title)
+        e_form = QFormLayout()
+        e_form.setSpacing(4)
+        e_amt = QDoubleSpinBox()
+        e_amt.setRange(0, 99999999)
+        e_amt.setDecimals(2)
+        e_amt.setPrefix("\u20b9 ")
+        e_amt.setValue(rep[amount_key])
+        e_date = QDateEdit(QDate.fromString(rep.get(date_key, ""), "yyyy-MM-dd"))
+        e_date.setCalendarPopup(True)
+        e_desc = QLineEdit(rep.get("description") or "")
+        e_desc.setPlaceholderText("Description (optional)")
+        e_form.addRow("Amount", e_amt)
+        e_form.addRow("Date", e_date)
+        e_form.addRow("Description", e_desc)
+        ef_lay.addLayout(e_form)
+        e_btns = QHBoxLayout()
+        e_save = QPushButton("\U0001f4be Save")
+        e_save.setStyleSheet(_accent_save_css(accent))
+        e_cancel = QPushButton("Cancel")
+        e_cancel.setStyleSheet(_accent_btn_css(accent))
+        e_btns.addStretch()
+        e_btns.addWidget(e_cancel)
+        e_btns.addWidget(e_save)
+        ef_lay.addLayout(e_btns)
+        ea_lay.addWidget(edit_frame)
+        edit_frame.hide()
+
+        def _save_edit():
+            data = {
+                "amount": round(e_amt.value(), 2),
+                "date": e_date.date().toString("yyyy-MM-dd"),
+                "description": e_desc.text().strip() or None,
+            }
+            on_edit(data)
+
+        e_save.clicked.connect(_save_edit)
+        e_cancel.clicked.connect(lambda: (edit_frame.hide(), setattr(card, '_rep_expanded', False)))
+
+    expand_area.hide()
+    cl.addWidget(expand_area)
+
+    def _toggle_expand():
+        if card._rep_expanded:
+            expand_area.hide()
+            card._rep_expanded = False
+        else:
+            expand_area.show()
+            card._rep_expanded = True
+
+    if on_edit:
+        card.mousePressEvent = lambda ev: _toggle_expand()
+
+    return card
+
+
+def _repayment_section(repayments, amount_key, date_key, empty_msg="No repayments logged yet.",
+                        accent_color=None, on_edit=None):
+    """VBox of repayment cards for an expanded detail area."""
+    container = QWidget()
+    container.setStyleSheet("background:transparent;border:none;")
+    lay = QVBoxLayout(container)
+    lay.setSpacing(6)
+    lay.setContentsMargins(0, 0, 0, 0)
+    if not repayments:
+        lbl = QLabel(empty_msg)
+        lbl.setStyleSheet(f"color:{C['text3']};padding:8px;font-size:12px;")
+        lbl.setAlignment(Qt.AlignCenter)
+        lay.addWidget(lbl)
+    else:
+        for r in repayments:
+            card = _make_repayment_card(r, amount_key, date_key,
+                                         accent_color=accent_color,
+                                         on_edit=(lambda _r=r: on_edit(_r)) if on_edit else None)
+            lay.addWidget(card)
+    return container
+
+
+def _build_edit_form(fields, on_save, on_cancel, accent_color=None):
+    """Build an inline edit form for a card's fields.
+    
+    fields: list of (label, "text"|"number"|"rate"|"combo"|"date", current_value, options_or_None)
+    Returns: QFrame (hidden by default)
+    """
+    accent = accent_color or C["accent"]
+    form_frame = QFrame()
+    form_frame.setStyleSheet(
+        f"QFrame{{background:transparent;border:1.5px solid {accent};border-radius:8px;}}"
+        f"QLabel{{background:transparent;border:none;}}"
+        f"QLineEdit, QDoubleSpinBox, QComboBox, QDateEdit{{"
+        f"border:1.5px solid {_hex_rgba(accent, 0.3)};border-radius:6px;padding:6px 10px;"
+        f"background:{C['surface']};}}"
+        f"QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus, QDateEdit:focus{{"
+        f"border-color:{accent};}}"
+    )
+    fl = QVBoxLayout(form_frame)
+    fl.setContentsMargins(12, 10, 12, 10)
+    fl.setSpacing(6)
+    title_lbl = QLabel("\u270f\ufe0f Edit Details")
+    title_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{accent};")
+    fl.addWidget(title_lbl)
+    form = QFormLayout()
+    form.setSpacing(6)
+    widgets = {}
+    for label, ftype, value, opts in fields:
+        if ftype == "text":
+            w = QLineEdit(str(value or ""))
+        elif ftype == "number":
+            w = QDoubleSpinBox()
+            w.setRange(0, 999999999)
+            w.setDecimals(2)
+            w.setPrefix("\u20b9 ")
+            w.setValue(float(value or 0))
+        elif ftype == "rate":
+            w = QDoubleSpinBox()
+            w.setRange(0, 100)
+            w.setDecimals(2)
+            w.setSuffix(" %")
+            w.setValue(float(value or 0))
+        elif ftype == "combo":
+            w = QComboBox()
+            for olbl, oval in opts:
+                w.addItem(olbl, oval)
+            idx = w.findData(value)
+            if idx >= 0:
+                w.setCurrentIndex(idx)
+        elif ftype == "date":
+            w = QDateEdit(QDate.fromString(str(value or ""), "yyyy-MM-dd"))
+            w.setCalendarPopup(True)
+        else:
+            w = QLineEdit(str(value or ""))
+        form.addRow(label, w)
+        widgets[label] = (w, ftype)
+    fl.addLayout(form)
+    btn_row = QHBoxLayout()
+    save_btn = QPushButton("\U0001f4be Save Changes")
+    save_btn.setStyleSheet(_accent_save_css(accent))
+    cancel_btn = QPushButton("Cancel")
+    cancel_btn.setStyleSheet(_accent_btn_css(accent))
+    btn_row.addStretch()
+    btn_row.addWidget(cancel_btn)
+    btn_row.addWidget(save_btn)
+    fl.addLayout(btn_row)
+    form_frame.hide()
+
+    def _get_values():
+        result = {}
+        for lbl, (w, ftype) in widgets.items():
+            if ftype == "text":
+                result[lbl] = w.text().strip() or None
+            elif ftype in ("number", "rate"):
+                result[lbl] = w.value()
+            elif ftype == "combo":
+                result[lbl] = w.currentData()
+            elif ftype == "date":
+                result[lbl] = w.date().toString("yyyy-MM-dd")
+        return result
+
+    def _save():
+        on_save(_get_values())
+        form_frame.hide()
+
+    cancel_btn.clicked.connect(lambda: (form_frame.hide(), on_cancel()))
+    save_btn.clicked.connect(_save)
+
+    return form_frame
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  BASE FUNCTION PAGE
+# ══════════════════════════════════════════════════════════════════════════
 class _FunctionPage(QWidget):
     ICON = "\U0001f4b0"
     TITLE = "Function"
@@ -595,7 +683,6 @@ class _FunctionPage(QWidget):
         self._list_data = []
         self._build_skeleton()
 
-    # ── skeleton ──
     def _build_skeleton(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 8, 0, 0)
@@ -603,7 +690,6 @@ class _FunctionPage(QWidget):
         hdr = QLabel(f"{self.ICON}  {self.TITLE}")
         hdr.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
         lay.addWidget(hdr)
-        # sub-nav: Entry | List
         nav = QHBoxLayout()
         nav.setSpacing(8)
         self.btn_entry = QPushButton("\uff0b Entry")
@@ -616,7 +702,7 @@ class _FunctionPage(QWidget):
         nav.addStretch()
         lay.addLayout(nav)
         self.sub_stack = QStackedWidget()
-        lay.addWidget(self.sub_stack, 1)
+        lay.addWidget(self.sub_stack)
         self.sub_stack.addWidget(self._build_entry())
         self.sub_stack.addWidget(self._build_list())
         self.btn_entry.clicked.connect(lambda: self._goto(0))
@@ -647,7 +733,6 @@ class _FunctionPage(QWidget):
         scroll.setWidget(inner)
         return scroll, v
 
-    # ── override in subclass ──
     def _build_entry(self):
         return QWidget()
 
@@ -656,7 +741,6 @@ class _FunctionPage(QWidget):
         lay = QVBoxLayout(page)
         self._stats_row = QHBoxLayout()
         lay.addLayout(self._stats_row)
-        # filter row: sort + direction + search
         fr = QHBoxLayout()
         fr.setSpacing(8)
         sort_lbl = QLabel("Sort by:")
@@ -664,7 +748,6 @@ class _FunctionPage(QWidget):
         self._sort_cb = QComboBox()
         self._sort_cb.addItems(self._sort_options())
         self._sort_cb.currentIndexChanged.connect(self._on_sort_changed)
-        # sort direction toggle
         self._sort_asc = True
         self._sort_order_btn = QPushButton("\u25b2")
         self._sort_order_btn.setFixedSize(38, 38)
@@ -697,7 +780,6 @@ class _FunctionPage(QWidget):
         return ["Status", "ID"]
 
     def _on_sort_changed(self):
-        """Reset direction to default for the chosen sort field, then render."""
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
         self._sort_asc = not ("Date" in mode or "date" in mode)
         self._sort_order_btn.setText("\u25b2" if self._sort_asc else "\u25bc")
@@ -724,6 +806,20 @@ class _FunctionPage(QWidget):
 
     def _render_list(self):
         pass
+
+    def _toggle_card(self, item_id):
+        """Toggle expand/collapse for a WealthCard. Only one expanded at a time."""
+        for i in range(self._list_lay.count()):
+            item = self._list_lay.itemAt(i)
+            w = item.widget()
+            if isinstance(w, WealthCard):
+                if w.item_id == item_id:
+                    if w.expanded:
+                        w.collapse()
+                    else:
+                        w.expand()
+                else:
+                    w.collapse()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -765,7 +861,6 @@ class LoansGivePage(_FunctionPage):
         self._search_input.setPlaceholderText("\U0001f50d Search by name\u2026")
         self._search_input.textChanged.connect(self._render_list)
         self._search_input.setClearButtonEnabled(True)
-        # Print button
         print_btn = QPushButton("\U0001f5a8 Print Pending")
         print_btn.setFocusPolicy(Qt.NoFocus)
         print_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -788,7 +883,7 @@ class LoansGivePage(_FunctionPage):
         lay = QVBoxLayout(page)
         self.lg_stack, _ = _build_subnav(lay, ["Give Loan", "Log Repayment"])
 
-        # ── Give Loan ──
+        # Give Loan
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.lg_loan_borrower = SearchableCombo(placeholder="Search borrower\u2026")
@@ -826,7 +921,7 @@ class LoansGivePage(_FunctionPage):
         f1.addRow("", give_btn)
         self.lg_stack.addWidget(p1)
 
-        # ── Log Repayment ──
+        # Log Repayment
         p2 = QWidget()
         f2 = QFormLayout(p2)
         self.lg_rep_loan = SearchableCombo(placeholder="Search loan\u2026")
@@ -875,7 +970,6 @@ class LoansGivePage(_FunctionPage):
         for b in self.repos["loans"].list_borrowers():
             self.lg_loan_borrower.add_item(b["name"], b["borrower_id"])
         self.lg_rep_loan.clear_items()
-        # order: OVERDUE → ACTIVE → PARTIALLY_PAID; exclude CLOSED/CLEARED/REPAID
         rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2}
         loans = [l for l in self.repos["loans"].list_loans()
                  if l["status"] not in ("CLOSED", "CLEARED", "REPAID")]
@@ -986,9 +1080,12 @@ class LoansGivePage(_FunctionPage):
 
     # ── List ──
     def load_list(self):
-        # normalize CLEARED → CLOSED
         self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")
         self.repos["loans"].sync_overdue()
+        # Recalc all non-closed loans for comprehensive status
+        for l in self.repos["loans"].list_loans():
+            if l["status"] not in ("CLOSED",):
+                self.repos["loans"].recalc_status(l["loan_id"])
         self._list_data = self.repos["loans"].list_loans()
         self._render_list()
 
@@ -998,7 +1095,6 @@ class LoansGivePage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         loans = list(self._list_data)
-        # stats from full data
         total_pending = sum(
             max(l["loan_amount"] - self.repos["loans"].total_repaid(l["loan_id"]), 0)
             for l in loans if l["status"] != "CLOSED"
@@ -1010,11 +1106,9 @@ class LoansGivePage(_FunctionPage):
             _metric_card("Total Loans", str(len(loans))),
         ])
 
-        # search
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
             loans = [l for l in loans if search in l["borrower_name"].lower()]
-        # sort (always ascending, then flip if direction is descending)
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
         rank = {"OVERDUE": 0, "ACTIVE": 1, "PARTIALLY_PAID": 2, "REPAID": 3, "CLOSED": 4}
         if mode == "Status":
@@ -1027,7 +1121,6 @@ class LoansGivePage(_FunctionPage):
             loans.sort(key=lambda l: l["due_date"] or "zzz")
         if not getattr(self, "_sort_asc", True):
             loans.reverse()
-        # render
         if not loans:
             empty = QLabel("No matching loans." if search else "No loans given yet.")
             empty.setStyleSheet(f"color:{C['text3']};padding:20px;")
@@ -1037,28 +1130,178 @@ class LoansGivePage(_FunctionPage):
         for l in loans:
             a = self._analysis(l)
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
-            color = status_color("loan", l["status"])
+            color = status_color(l["status"])
             mth = l.get("interest_method") or "SIMPLE"
             mth_tag = "SI" if mth == "SIMPLE" else "CI"
-            rate_tag = f"{l.get('interest_rate') or 0}% {mth_tag}" if (l.get("interest_rate") or 0) > 0 else "Interest-Free"
+            rate_tag = f"{l.get('interest_rate') or 0}% {mth_tag}" if (l.get('interest_rate') or 0) > 0 else "Interest-Free"
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(a['current_value'])}</span>  "
                      f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
                      f"<span style='font-size:11px;color:{C['text3']};'>"
                      f"Interest: {fmt_money(a['total_interest_accrued'])}  {MDOT}  "
                      f"Paid: {fmt_money(a['total_paid'])}</span>")
-            card = _wealth_card(
+            card = WealthCard(
+                item_id=l["loan_id"],
                 title=l["borrower_name"],
                 subtitle=f"Given {l['start_date']} {MDOT} Due {l['due_date'] or EM_DASH} {MDOT} {rate_tag}",
                 amount_text=fmt_money(l["loan_amount"]) + "  Principal",
                 badge_text=l["status"], badge_color=color,
                 progress_pct=pct, extra_line=extra,
-                on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
+            card.clicked.connect(self._toggle_card)
+
+            # ── Expanded detail area ──
+            lid = l["loan_id"]
+
+            # Detail info using kv layout
+            detail_info = QLabel()
+            detail_info.setTextFormat(Qt.RichText)
+            detail_info.setText(
+                f"<table style='font-size:13px;color:{C['text2']};' cellpadding='3'>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Rate</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{l.get('interest_rate') or 0}% {mth_tag}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Start</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{l['start_date']}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Due Date</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{l['due_date'] or EM_DASH}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Outstanding</td>"
+                f"<td style='font-weight:800;color:{color};'>{fmt_money(a['current_value'])}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Total Expected</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fmt_money(a['total_expected'])}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Interest</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fmt_money(a['total_interest_accrued'])}</td></tr>"
+                f"</table>"
+                + (f"<div style='font-size:12px;color:{C['text3']};font-style:italic;padding-top:4px;'>Note: {l['description']}</div>" if l.get("description") else "")
+            )
+            detail_info.setWordWrap(True)
+            card.add_expand_widget(detail_info)
+
+            # Edit form
+            fields = [
+                ("Loan Amount", "number", l["loan_amount"], None),
+                ("Interest Rate", "rate", l.get("interest_rate") or 0, None),
+                ("Interest Method", "combo", l.get("interest_method") or "SIMPLE",
+                 [("Simple Interest", "SIMPLE"), ("Compound Interest", "COMPOUND")]),
+                ("Due Date", "date", l.get("due_date"), None),
+                ("Description", "text", l.get("description"), None),
+            ]
+
+            def _make_lg_save(_lid, _card=card):
+                def _save(data):
+                    self.db.execute(
+                        "UPDATE loans SET loan_amount=?, interest_rate=?, interest_method=?, due_date=?, description=? WHERE loan_id=?",
+                        (data["Loan Amount"], data["Interest Rate"], data["Interest Method"],
+                         data["Due Date"], data["Description"], _lid))
+                    loan = self.repos["loans"].get_loan(_lid)
+                    if loan and loan.get("trxn_id"):
+                        self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
+                                       (data["Loan Amount"], loan["trxn_id"]))
+                    self.db.commit()
+                    self.repos["loans"].recalc_status(_lid)
+                    self.load_list()
+                return _save
+
+            edit_form = _build_edit_form(fields, _make_lg_save(lid), lambda: None,
+                                         accent_color=color)
+            edit_btn = QPushButton("\u270f\ufe0f Edit Details")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(_accent_btn_css(color))
+            edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
+            card.add_expand_widget(edit_btn)
+            card.add_expand_widget(edit_form)
+
+            # Divider
+            div = QFrame()
+            div.setFixedHeight(1)
+            div.setStyleSheet(f"background:{C['border2']};")
+            card.add_expand_widget(div)
+
+            # Repayments
+            rep_header = QLabel("\U0001f4b0 Repayment History")
+            rep_header.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};padding-top:2px;")
+            card.add_expand_widget(rep_header)
+
+            def _make_rep_edit(_lid):
+                def _on_rep_edit(rep_data):
+                    def _save(data):
+                        self.db.execute(
+                            "UPDATE repayments SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
+                            (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))
+                        if rep_data.get("linked_txn_id"):
+                            self.db.execute("UPDATE transactions SET amount=?, tx_date=? WHERE id=?",
+                                           (data["amount"], data["date"], rep_data["linked_txn_id"]))
+                        self.db.commit()
+                        self.repos["loans"].recalc_status(_lid)
+                        self.load_list()
+                    return _save
+                return _on_rep_edit
+
+            repayments = self.repos["loans"].get_repayments(lid)
+            rep_section = _repayment_section(
+                repayments, "amount_paid", "payment_date",
+                accent_color=color,
+                on_edit=_make_rep_edit(lid)
+            )
+            card.add_expand_widget(rep_section)
+
+            # Print button
+            def _make_print(_l=l, _a=a):
+                def _print():
+                    info = [
+                        ("Borrower", _l["borrower_name"]),
+                        ("Principal", fmt_money(_l["loan_amount"])),
+                        ("Rate", f"{_l.get('interest_rate') or 0}%"),
+                        ("Method", _l.get("interest_method") or "SIMPLE"),
+                        ("Start", _l["start_date"]),
+                        ("Due", _l.get("due_date") or EM_DASH),
+                    ]
+                    analysis = [
+                        ("Outstanding", fmt_money(_a["current_value"])),
+                        ("Total Paid", fmt_money(_a["total_paid"])),
+                        ("Interest Accrued", fmt_money(_a["total_interest_accrued"])),
+                    ]
+                    reps = self.repos["loans"].get_repayments(_l["loan_id"])
+                    sections = []
+                    if reps:
+                        rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
+                                  "description": r.get("description") or ""} for r in reps]
+                        sections.append({"title": "Repayment Log", "color": "#059669",
+                                         "type": "repayment", "data": rdata})
+                    _export_detail_to_pdf(self, f"Loan to {_l['borrower_name']}", _l["status"],
+                                          info, analysis, sections)
+                return _print
+
+            btn_row = QHBoxLayout()
+            print_btn = QPushButton("\U0001f5a8 Print PDF")
+            print_btn.setFixedHeight(28)
+            print_btn.setFocusPolicy(Qt.NoFocus)
+            print_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            print_btn.setStyleSheet(_accent_btn_css(color))
+            print_btn.clicked.connect(_make_print())
+            btn_row.addWidget(print_btn)
+            btn_row.addStretch()
+            card.add_expand_layout(btn_row)
+
+            # Mark as Closed for REPAID
+            if l["status"] == "REPAID":
+                close_btn = QPushButton("\u2705 Mark as Closed")
+                close_btn.setObjectName("primary")
+                close_btn.setFixedHeight(28)
+                close_btn.setFocusPolicy(Qt.NoFocus)
+                close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.clicked.connect(lambda _, _lid=lid: self._mark_closed_lg(_lid))
+                card.add_expand_widget(close_btn)
+
             self._list_lay.addWidget(card)
 
+    def _mark_closed_lg(self, loan_id):
+        if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
+            self.repos["loans"].update_status(loan_id, "CLOSED")
+            self.load_list()
+
     def _print_pending(self):
-        """Print all non-closed pendings for a selected borrower."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Print Pendings")
         dlg.setMinimumWidth(400)
@@ -1084,7 +1327,6 @@ class LoansGivePage(_FunctionPage):
         if not bid:
             return
         borrower_name = combo.currentText()
-        # get all non-closed loans for this borrower
         all_loans = self.repos["loans"].list_loans()
         borrower_loans = [l for l in all_loans
                           if l["borrower_id"] == bid and l["status"] not in ("CLOSED", "CLEARED")]
@@ -1106,20 +1348,6 @@ class LoansGivePage(_FunctionPage):
         _export_detail_to_pdf(self, f"Pendings from {borrower_name}", "ACTIVE",
                               info, analysis, sections)
 
-    def _open_detail(self, loan_id):
-        loan = self.repos["loans"].get_loan(loan_id)
-        if not loan:
-            return
-        repayments = self.repos["loans"].get_repayments(loan_id)
-        dlg = LoanDetailDialog(
-            role="give", title=f"Loan to {loan['borrower_name']}",
-            principal=loan["loan_amount"], status=loan["status"],
-            start_date=loan["start_date"], due_date=loan["due_date"],
-            description=loan.get("description"), repayments=repayments,
-            amount_key="amount_paid", date_key="payment_date", parent=self
-        )
-        dlg.exec_()
-
 
 # ══════════════════════════════════════════════════════════════════════════
 #  LOANS I TAKE
@@ -1134,9 +1362,7 @@ class LoansTakePage(_FunctionPage):
     def _sort_options(self):
         return ["Status", "Lender", "Amount", "Due Date"]
 
-    # ── helpers ───────────────────────────────────────────────────────
     def _loan_months(self, loan):
-        """Derive tenure in months from start_date / due_date."""
         sd = date.fromisoformat(loan["start_date"])
         dd = loan.get("due_date")
         if dd:
@@ -1145,7 +1371,6 @@ class LoansTakePage(_FunctionPage):
         return 12
 
     def _analysis(self, loan):
-        """Run analysis for a given loan dict — handles EMI and Non-EMI."""
         total_paid = self.repos["borrowed"].total_repaid(loan["loan_id"])
         emi_type = loan.get("emi_type") or "EMI"
         if emi_type == "NON_EMI":
@@ -1163,13 +1388,13 @@ class LoansTakePage(_FunctionPage):
             months, freq, total_paid, loan["start_date"], method=method
         )
 
-    # ── Entry ─────────────────────────────────────────────────────────
+    # ── Entry ──
     def _build_entry(self):
         page = QWidget()
         lay = QVBoxLayout(page)
         self.lt_stack, _ = _build_subnav(lay, ["Take Loan", "Log EMI Payment"])
 
-        # ── Take Loan (EMI) ──
+        # Take Loan
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.lt_loan_lender = SearchableCombo(placeholder="Search lender\u2026")
@@ -1226,7 +1451,7 @@ class LoansTakePage(_FunctionPage):
         self.lt_stack.addWidget(p1)
         self._update_emi()
 
-        # ── Log EMI Payment ──
+        # Log EMI Payment
         p2 = QWidget()
         f2 = QFormLayout(p2)
         self.lt_rep_loan = SearchableCombo(placeholder="Search loan\u2026")
@@ -1234,7 +1459,6 @@ class LoansTakePage(_FunctionPage):
         self.lt_rep_info_lbl.setStyleSheet(f"color:{C['text3']};font-weight:600;font-size:11px;")
         self.lt_rep_info_lbl.setWordWrap(True)
         self.lt_rep_loan.currentIndexChanged.connect(self._on_rep_loan_changed)
-        # amount type selector
         self.lt_rep_type = QComboBox()
         self.lt_rep_type.addItems(["Updated EMI", "Original EMI", "Full Pay", "Custom"])
         self.lt_rep_type.currentIndexChanged.connect(self._on_rep_type_changed)
@@ -1277,15 +1501,12 @@ class LoansTakePage(_FunctionPage):
         QMessageBox.information(self, "Added", f"'{name}' added as a lender.")
 
     def _toggle_freq_visible(self):
-        """Enable/disable compounding based on interest method."""
         is_compound = self.lt_loan_method_type.currentIndex() == 1
         self.lt_loan_freq.setEnabled(is_compound)
         self._update_emi()
 
     def _toggle_emi_type(self):
-        """Show/hide EMI-specific fields based on repayment type."""
         is_emi = self.lt_emi_type.currentIndex() == 0
-        # Keep tenure visible for both (needed for overdue detection + due date)
         self.lt_emi_preview.setVisible(is_emi)
         if not is_emi:
             self.lt_loan_freq.setEnabled(False)
@@ -1323,7 +1544,6 @@ class LoansTakePage(_FunctionPage):
         self._on_rep_loan_changed()
 
     def _on_rep_loan_changed(self):
-        """Refresh info label + pre-fill amount when loan selection changes."""
         lid = self.lt_rep_loan.get_data()
         if not lid:
             self.lt_rep_info_lbl.setText("")
@@ -1341,7 +1561,6 @@ class LoansTakePage(_FunctionPage):
         self._on_rep_type_changed()
 
     def _on_rep_type_changed(self):
-        """Auto-fill amount based on selected type."""
         mode = self.lt_rep_type.currentText()
         lid = self.lt_rep_loan.get_data()
         if not lid:
@@ -1363,7 +1582,7 @@ class LoansTakePage(_FunctionPage):
         elif mode == "Full Pay":
             self.lt_rep_amount.setValue(a["full_payoff"])
             self.lt_rep_amount.setEnabled(False)
-        else:  # Custom
+        else:
             self.lt_rep_amount.setValue(0)
             self.lt_rep_amount.setEnabled(True)
 
@@ -1441,7 +1660,6 @@ class LoansTakePage(_FunctionPage):
         self.lt_rep_desc.clear()
         self._refresh_entry_dropdowns()
         self.load_list()
-        # check if now REPAID
         loan = self.repos["borrowed"].get_loan(lid)
         if loan and loan["status"] == "REPAID":
             QMessageBox.information(self, "Loan Fully Repaid",
@@ -1449,9 +1667,13 @@ class LoansTakePage(_FunctionPage):
         else:
             QMessageBox.information(self, "Payment Logged", f"{desc_extra} payment recorded successfully.")
 
-    # ── List ──────────────────────────────────────────────────────────
+    # ── List ──
     def load_list(self):
         self.repos["borrowed"].sync_overdue()
+        # Recalc all non-closed loans for comprehensive status
+        for l in self.repos["borrowed"].list_loans():
+            if l["status"] not in ("CLOSED",):
+                self.repos["borrowed"].recalc_status(l["loan_id"])
         self._list_data = self.repos["borrowed"].list_loans()
         self._render_list()
 
@@ -1471,7 +1693,8 @@ class LoansTakePage(_FunctionPage):
             _metric_card("Active Loans", str(len(active))),
             _metric_card("Total Loans", str(len(loans))),
         ])
-        # ── loan alerts: upcoming EMIs + overdue ──
+
+        # Alerts
         today_str = date.today().isoformat()
         soon_str = _add_months(date.today(), 1).isoformat()
         alerts = []
@@ -1479,9 +1702,9 @@ class LoansTakePage(_FunctionPage):
             due = l.get("due_date")
             a2 = self._analysis(l)
             if l["status"] == "OVERDUE":
-                alerts.append(f"⚠️ {l['lender_name']} — OVERDUE — Outstanding: {fmt_money(a2['current_value'])}")
+                alerts.append(f"\u26a0\ufe0f {l['lender_name']} \u2014 OVERDUE \u2014 Outstanding: {fmt_money(a2['current_value'])}")
             elif due and today_str <= due <= soon_str and a2.get("original_emi", 0) > 0:
-                alerts.append(f"🔔 {l['lender_name']} — EMI due {due} — {fmt_money(a2['original_emi'])}")
+                alerts.append(f"\U0001f514 {l['lender_name']} \u2014 EMI due {due} \u2014 {fmt_money(a2['original_emi'])}")
         if alerts:
             alert_box = QFrame()
             alert_box.setStyleSheet(
@@ -1494,6 +1717,7 @@ class LoansTakePage(_FunctionPage):
             for a_txt in alerts:
                 al.addWidget(QLabel(a_txt))
             self._list_lay.addWidget(alert_box)
+
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
             loans = [l for l in loans if search in l["lender_name"].lower()]
@@ -1517,14 +1741,16 @@ class LoansTakePage(_FunctionPage):
             return
         for l in loans:
             a = self._analysis(l)
-            color = status_color("liability", l["status"])
+            color = status_color(l["status"])
             mth = l.get("interest_method") or "COMPOUND"
             mth_tag = "SI" if mth == "SIMPLE" else "CI"
             freq_tag = l.get("interest_type") or "ANNUAL"
             freq_short = {"ANNUAL": "Ann", "QUARTERLY": "Qtr", "SEMI_ANNUAL": "Semi"}.get(freq_tag, "")
             ci_extra = f" {freq_short}" if mth == "COMPOUND" else ""
+            emi_type = l.get("emi_type") or "EMI"
+            emi_str = f"EMI {fmt_money(a['original_emi'])}" if emi_type == "EMI" else "Non-EMI"
             sub = (f"Rate {l['interest_rate']}% {mth_tag}{ci_extra} {MDOT} "
-                   f"EMI {fmt_money(a['original_emi'])} {MDOT} Due {l['due_date'] or EM_DASH}")
+                   f"{emi_str} {MDOT} Due {l['due_date'] or EM_DASH}")
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(a['current_value'])}</span>  "
@@ -1533,199 +1759,183 @@ class LoansTakePage(_FunctionPage):
                      f"Updated EMI: {fmt_money(a['updated_emi'])}  {MDOT}  "
                      f"Paid: {fmt_money(a['total_paid'])}  {MDOT}  "
                      f"Interest: {fmt_money(a['total_interest_accrued'])}</span>")
-            card = _wealth_card(
-                title=l["lender_name"], subtitle=sub,
+            card = WealthCard(
+                item_id=l["loan_id"],
+                title=l["lender_name"],
+                subtitle=sub,
                 amount_text=fmt_money(l["principal_amount"]) + "  Principal",
                 badge_text=l["status"], badge_color=color,
                 progress_pct=pct, extra_line=extra,
-                on_click=lambda lid=l["loan_id"]: self._open_detail(lid)
             )
+            card.clicked.connect(self._toggle_card)
+
+            lid = l["loan_id"]
+
+            # Expanded detail
+            detail_info = QLabel()
+            detail_info.setTextFormat(Qt.RichText)
+            mth_label = "Simple" if mth == "SIMPLE" else f"Compound ({freq_tag})"
+            detail_info.setText(
+                f"<table style='font-size:13px;color:{C['text2']};' cellpadding='3'>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Method</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{mth_label}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Start</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{l['start_date']}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Due Date</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{l['due_date'] or EM_DASH}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Outstanding</td>"
+                f"<td style='font-weight:800;color:{color};'>{fmt_money(a['current_value'])}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Total Expected</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fmt_money(a['total_expected'])}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Interest</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fmt_money(a['total_interest_accrued'])}</td></tr>"
+                f"</table>"
+                + (f"<div style='font-size:12px;color:{C['text3']};font-style:italic;padding-top:4px;'>Note: {l['description']}</div>" if l.get("description") else "")
+            )
+            detail_info.setWordWrap(True)
+            card.add_expand_widget(detail_info)
+
+            # Edit form
+            fields = [
+                ("Principal", "number", l["principal_amount"], None),
+                ("Interest Rate", "rate", l.get("interest_rate") or 0, None),
+                ("Interest Method", "combo", l.get("interest_method") or "COMPOUND",
+                 [("Simple Interest", "SIMPLE"), ("Compound Interest", "COMPOUND")]),
+                ("Due Date", "date", l.get("due_date"), None),
+                ("Description", "text", l.get("description"), None),
+            ]
+
+            def _make_lt_save(_lid, _l=l):
+                def _save(data):
+                    emi_type_inner = _l.get("emi_type") or "EMI"
+                    kw = {
+                        "principal_amount": data["Principal"],
+                        "interest_rate": data["Interest Rate"],
+                        "interest_method": data["Interest Method"],
+                        "due_date": data["Due Date"],
+                        "description": data["Description"],
+                    }
+                    if emi_type_inner == "EMI":
+                        freq = _l.get("interest_type") or "ANNUAL"
+                        new_emi = LoanService.emi(data["Principal"], data["Interest Rate"],
+                                                  self._loan_months(_l), freq, data["Interest Method"])
+                        kw["emi_amount"] = new_emi
+                    sets = ", ".join(f"{k}=?" for k in kw)
+                    vals = list(kw.values()) + [_lid]
+                    self.db.execute(f"UPDATE borrowed_loans SET {sets} WHERE loan_id=?", vals)
+                    loan = self.repos["borrowed"].get_loan(_lid)
+                    if loan and loan.get("linked_txn_id"):
+                        self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
+                                       (data["Principal"], loan["linked_txn_id"]))
+                    self.db.commit()
+                    self.repos["borrowed"].recalc_status(_lid)
+                    self.load_list()
+                return _save
+
+            edit_form = _build_edit_form(fields, _make_lt_save(lid), lambda: None,
+                                         accent_color=color)
+            edit_btn = QPushButton("\u270f\ufe0f Edit Details")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(_accent_btn_css(color))
+            edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
+            card.add_expand_widget(edit_btn)
+            card.add_expand_widget(edit_form)
+
+            # Divider
+            div = QFrame()
+            div.setFixedHeight(1)
+            div.setStyleSheet(f"background:{C['border2']};")
+            card.add_expand_widget(div)
+
+            # Repayments
+            rep_header = QLabel("\U0001f4b0 Repayment History")
+            rep_header.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};padding-top:2px;")
+            card.add_expand_widget(rep_header)
+
+            def _make_lt_rep_edit(_lid):
+                def _on_rep_edit(rep_data):
+                    def _save(data):
+                        self.db.execute(
+                            "UPDATE borrowed_loan_repayments SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
+                            (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))
+                        if rep_data.get("linked_txn_id"):
+                            self.db.execute("UPDATE transactions SET amount=?, tx_date=? WHERE id=?",
+                                           (data["amount"], data["date"], rep_data["linked_txn_id"]))
+                        self.db.commit()
+                        self.repos["borrowed"].recalc_status(_lid)
+                        self.load_list()
+                    return _save
+                return _on_rep_edit
+
+            repayments = self.repos["borrowed"].get_repayments(lid)
+            rep_section = _repayment_section(
+                repayments, "amount_paid", "payment_date",
+                accent_color=color,
+                on_edit=_make_lt_rep_edit(lid)
+            )
+            card.add_expand_widget(rep_section)
+
+            # Mark Closed button (only for REPAID)
+            if l["status"] == "REPAID":
+                close_btn = QPushButton("\u2705 Mark as Closed")
+                close_btn.setObjectName("primary")
+                close_btn.setFixedHeight(28)
+                close_btn.setFocusPolicy(Qt.NoFocus)
+                close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.clicked.connect(lambda _, _lid=lid: self._mark_closed(_lid))
+                card.add_expand_widget(close_btn)
+
+            # Print
+            def _make_lt_print(_l=l, _a=a):
+                def _print():
+                    reps = self.repos["borrowed"].get_repayments(_l["loan_id"])
+                    mthd = _l.get("interest_method") or "COMPOUND"
+                    freq = _l.get("interest_type") or "ANNUAL"
+                    mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
+                    info = [
+                        ("Lender", _l["lender_name"]),
+                        ("Principal", fmt_money(_l["principal_amount"])),
+                        ("Rate", f"{_l['interest_rate']}%"),
+                        ("Method", mth_label),
+                        ("Start", _l["start_date"]),
+                        ("Due", _l.get("due_date") or EM_DASH),
+                    ]
+                    if emi_type == "EMI":
+                        info.insert(4, ("EMI", fmt_money(_a["original_emi"])))
+                    analysis = [
+                        ("Outstanding", fmt_money(_a["current_value"])),
+                        ("Total Paid", fmt_money(_a["total_paid"])),
+                        ("Interest Accrued", fmt_money(_a["total_interest_accrued"])),
+                    ]
+                    sections = []
+                    if reps:
+                        rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
+                                  "description": r.get("description") or ""} for r in reps]
+                        sections.append({"title": "Repayment Log", "color": "#059669",
+                                         "type": "repayment", "data": rdata})
+                    _export_detail_to_pdf(self, f"Loan from {_l['lender_name']}", _l["status"],
+                                          info, analysis, sections)
+                return _print
+
+            btn_row = QHBoxLayout()
+            print_btn = QPushButton("\U0001f5a8 Print PDF")
+            print_btn.setFixedHeight(28)
+            print_btn.setFocusPolicy(Qt.NoFocus)
+            print_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            print_btn.setStyleSheet(_accent_btn_css(color))
+            print_btn.clicked.connect(_make_lt_print())
+            btn_row.addWidget(print_btn)
+            btn_row.addStretch()
+            card.add_expand_layout(btn_row)
+
             self._list_lay.addWidget(card)
 
-    def _open_detail(self, loan_id):
-        loan = self.repos["borrowed"].get_loan(loan_id)
-        if not loan:
-            return
-        repayments = self.repos["borrowed"].get_repayments(loan_id)
-        a = self._analysis(loan)
-        emi_type = loan.get("emi_type") or "EMI"
-        mthd = loan.get("interest_method") or "COMPOUND"
-        freq = loan.get("interest_type") or "ANNUAL"
-        months = self._loan_months(loan)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Loan from {loan['lender_name']}")
-        dlg.setMinimumWidth(560)
-        lay = QVBoxLayout(dlg)
-
-        # header
-        hdr = QHBoxLayout()
-        t = QLabel(f"Loan from {loan['lender_name']}")
-        t.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
-        hdr.addWidget(t, 1)
-        hdr.addWidget(_badge(loan["status"], status_color("liability", loan["status"])))
-        lay.addLayout(hdr)
-
-        # info
-        mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
-        emi_info = f"  {MDOT}  EMI: {fmt_money(a['original_emi'])}" if emi_type == "EMI" else ""
-        tenure_info = f"  {MDOT}  Tenure: {months} months"
-        info = QLabel(
-            f"Principal: {fmt_money(loan['principal_amount'])}  {MDOT}  "
-            f"Rate: {loan['interest_rate']}%  {mth_label}{emi_info}\n"
-            f"Start: {loan['start_date']}  {MDOT}  Due: {loan['due_date'] or EM_DASH}{tenure_info}"
-        )
-        info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
-
-        # analysis
-        a_lbl = QLabel(
-            f"Outstanding: {fmt_money(a['current_value'])}  {MDOT}  "
-            f"Current Value: {fmt_money(a['current_value'])}\n"
-            f"Total Paid: {fmt_money(a['total_paid'])}  {MDOT}  "
-            f"Interest Accrued: {fmt_money(a['total_interest_accrued'])}"
-        )
-        a_lbl.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;padding:6px 0;")
-        a_lbl.setWordWrap(True)
-        lay.addWidget(a_lbl)
-
-        if loan.get("description"):
-            d = QLabel(loan["description"])
-            d.setStyleSheet(f"color:{C['text2']};font-size:12px;font-style:italic;")
-            d.setWordWrap(True)
-            lay.addWidget(d)
-
-        # repayment log
-        lay.addWidget(_repayment_cards(repayments, "amount_paid", "payment_date"), 1)
-
-        # buttons
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        if loan["status"] == "REPAID":
-            close_btn = QPushButton("\u2705 Mark as Closed")
-            close_btn.setObjectName("primary")
-            close_btn.clicked.connect(lambda: self._mark_closed(loan_id, dlg))
-            btn_row.addWidget(close_btn)
-        pbtn = QPushButton("\U0001f5a8  Print PDF")
-        pbtn.clicked.connect(lambda: self._print_take_loan(loan, a, repayments))
-        btn_row.addWidget(pbtn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(dlg.accept)
-        btn_row.addWidget(ok)
-        lay.addLayout(btn_row)
-        dlg.exec_()
-
-    def _plan_closure_and_close(self, loan, a, detail_dlg):
-        pass  # removed
-
-    def _create_plan_and_close(self, loan, a, detail_dlg):
-        pass  # removed
-
-    def _mark_closed(self, loan_id, dlg=None):
+    def _mark_closed(self, loan_id):
         if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
             self.repos["borrowed"].update_status(loan_id, "CLOSED")
             self.load_list()
-            if dlg:
-                dlg.accept()
-            return True
-        return False
-
-    def _print_take_loan(self, loan, a, repayments):
-        emi_type = loan.get("emi_type") or "EMI"
-        mthd = loan.get("interest_method") or "COMPOUND"
-        freq = loan.get("interest_type") or "ANNUAL"
-        mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
-        info = [
-            ("Principal", fmt_money(loan["principal_amount"])),
-            ("Rate", f"{loan['interest_rate']}%"),
-            ("Method", mth_label),
-            ("Start", loan["start_date"]),
-            ("Due", loan.get("due_date") or EM_DASH),
-        ]
-        if emi_type == "EMI":
-            info.insert(3, ("EMI", fmt_money(a["original_emi"])))
-        analysis = [
-            ("Outstanding", fmt_money(a["current_value"])),
-            ("Current Value", fmt_money(a["current_value"])),
-            ("Total Paid", fmt_money(a["total_paid"])),
-            ("Interest Accrued", fmt_money(a["total_interest_accrued"])),
-        ]
-        sections = []
-        if repayments:
-            rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
-                      "description": r.get("description") or ""} for r in repayments]
-            sections.append({"title": "Repayment Log", "color": "#059669",
-                             "type": "repayment", "data": rdata})
-        _export_detail_to_pdf(self, f"Loan from {loan['lender_name']}", loan["status"],
-                              info, analysis, sections)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-#  LOAN DETAIL DIALOG (shared by Give + Take + Deposits)
-# ══════════════════════════════════════════════════════════════════════════
-class LoanDetailDialog(QDialog):
-    def __init__(self, role, title, principal, status, start_date, due_date, description,
-                 repayments, amount_key, date_key, amortization=None, emi=None, rate=None,
-                 on_mark_closed=None, on_print=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumWidth(560)
-        lay = QVBoxLayout(self)
-        hdr = QHBoxLayout()
-        t = QLabel(title)
-        t.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
-        hdr.addWidget(t, 1)
-        color = status_color("loan" if role == "give" else "liability", status)
-        hdr.addWidget(_badge(status, color))
-        lay.addLayout(hdr)
-        info_bits = [
-            f"Principal: {fmt_money(principal)}",
-            f"Start: {start_date}",
-            f"Due: {due_date or EM_DASH}",
-        ]
-        if rate is not None:
-            info_bits.insert(1, f"Rate: {rate}%")
-        if emi is not None:
-            info_bits.insert(2, f"EMI: {fmt_money(emi)}")
-        info = QLabel(f" {MDOT} ".join(info_bits))
-        info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
-        if description:
-            d = QLabel(description)
-            d.setStyleSheet(f"color:{C['text2']};font-size:12px;font-style:italic;")
-            d.setWordWrap(True)
-            lay.addWidget(d)
-        total_paid = sum(r[amount_key] for r in repayments)
-        summary = QLabel(
-            f"Total Repaid: {fmt_money(total_paid)}  {MDOT}  Remaining: {fmt_money(max(principal - total_paid, 0))}"
-        )
-        summary.setStyleSheet(f"color:{C['text']};font-weight:700;font-size:12px;padding-top:6px;")
-        lay.addWidget(summary)
-        if amortization:
-            tabs = QTabWidget()
-            tabs.addTab(_repayment_cards(repayments, amount_key, date_key), "Repayment Log")
-            tabs.addTab(_amort_cards(amortization), "Amortization Schedule")
-            lay.addWidget(tabs, 1)
-        else:
-            lay.addWidget(_repayment_cards(repayments, amount_key, date_key), 1)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        if on_mark_closed and status == "REPAID":
-            close_btn = QPushButton("\u2705 Mark as Closed")
-            close_btn.setObjectName("primary")
-            close_btn.clicked.connect(lambda: (on_mark_closed(), self.accept()))
-            btn_row.addWidget(close_btn)
-        if on_print:
-            pbtn = QPushButton("\U0001f5a8  Print PDF")
-            pbtn.clicked.connect(on_print)
-            btn_row.addWidget(pbtn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(self.accept)
-        btn_row.addWidget(ok)
-        lay.addLayout(btn_row)
-
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1738,7 +1948,6 @@ class FDGivePage(_FunctionPage):
     def _sort_options(self):
         return ["Status", "Account", "Maturity Date"]
 
-    # ── Entry (single form, no sub-nav needed) ──
     def _build_entry(self):
         page = QWidget()
         f = QFormLayout(page)
@@ -1801,7 +2010,6 @@ class FDGivePage(_FunctionPage):
                 freq_label = self.fd_freq.currentText().lower()
                 self.fd_maturity_preview.setText(f"Estimated Maturity: {fmt_money(amt)} ({freq_label} compounding)")
             else:
-                # simple interest
                 from datetime import datetime as _dt
                 years = (_dt.strptime(m, "%Y-%m-%d") - _dt.strptime(s, "%Y-%m-%d")).days / 365.25
                 amt = round(p * (1 + r / 100 * years), 2)
@@ -1870,7 +2078,7 @@ class FDGivePage(_FunctionPage):
         if search:
             fds = [f for f in fds if search in (f["account_name"] or "").lower()]
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
-        rank = {"ACTIVE": 0, "MATURED": 1, "WITHDRAWN": 2}
+        rank = {"ACTIVE": 0, "MATURED": 1, "WITHDRAWN": 2, "PREMATURE_WITHDRAWN": 3}
         if mode == "Status":
             fds.sort(key=lambda f: rank.get(f["status"], 9))
         elif mode == "Account":
@@ -1887,149 +2095,140 @@ class FDGivePage(_FunctionPage):
             return
         for fd in fds:
             pct = FDService.progress(fd["start_date"], fd["maturity_date"])
-            fd_colors = {"ACTIVE": C["accent"], "MATURED": C["green"],
-                         "WITHDRAWN": C["text3"], "PREMATURE_WITHDRAWN": C["text3"]}
-            color = fd_colors.get(fd["status"], C["text3"])
+            color = status_color(fd["status"])
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(fd['maturity_amount'] or fd['principal_amount'])}</span>  "
                      f"<span style='font-size:11px;color:{C['text3']};'>Maturity Value</span><br>"
                      f"<span style='font-size:11px;color:{C['text3']};'>"
                      f"{pct:.0f}% elapsed</span>")
-            card = _wealth_card(
+            card = WealthCard(
+                item_id=fd["fd_id"],
                 title=fd["account_name"] or "Fixed Deposit",
                 subtitle=f"{fd['interest_rate']}% {MDOT} {fd['start_date']} \u2192 {fd['maturity_date']}",
                 amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
                 badge_text=fd["status"], badge_color=color, progress_pct=pct,
                 extra_line=extra,
-                on_click=lambda fid=fd["fd_id"]: self._open_detail(fid)
             )
-            self._list_lay.addWidget(card)
+            card.clicked.connect(self._toggle_card)
 
-    def _open_detail(self, fd_id):
-        fd = self.repos["fd"].get(fd_id)
-        if not fd:
-            return
-        dlg = FDDetailDialog(
-            fd, on_mark_matured=lambda: self._mark_matured(fd_id),
-            on_mark_withdrawn=lambda acc, method, fee=0, net=0: self._mark_withdrawn(fd_id, acc, method, fee, net),
-            accounts_repo=self.repos["accounts"], lookups_repo=self.repos["lookups"], parent=self
-        )
-        dlg.exec_()
+            fid = fd["fd_id"]
+
+            # Detail info
+            mthd = fd.get("interest_method") or "COMPOUND"
+            freq = fd.get("interest_type") or "QUARTERLY"
+            mth_label = "Simple" if mthd == "SIMPLE" else f"Compound ({freq})"
+            detail_info = QLabel()
+            detail_info.setTextFormat(Qt.RichText)
+            detail_info.setText(
+                f"<table style='font-size:13px;color:{C['text2']};' cellpadding='3'>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Method</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{mth_label}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Rate</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fd['interest_rate']}%</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Start</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fd['start_date']}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Maturity</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fd['maturity_date']}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Maturity Amt</td>"
+                f"<td style='font-weight:800;color:{color};'>{fmt_money(fd['maturity_amount'] or 0)}</td></tr>"
+                f"</table>"
+            )
+            detail_info.setWordWrap(True)
+            card.add_expand_widget(detail_info)
+
+            # Edit form
+            fields = [
+                ("Principal", "number", fd["principal_amount"], None),
+                ("Interest Rate", "rate", fd.get("interest_rate") or 0, None),
+                ("Maturity Date", "date", fd.get("maturity_date"), None),
+            ]
+
+            def _make_fd_save(_fid):
+                def _save(data):
+                    self.db.execute(
+                        "UPDATE fixed_deposits SET principal_amount=?, interest_rate=?, maturity_date=? WHERE fd_id=?",
+                        (data["Principal"], data["Interest Rate"], data["Maturity Date"], _fid))
+                    fd_rec = self.repos["fd"].get(_fid)
+                    if fd_rec and fd_rec.get("linked_txn_id"):
+                        self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
+                                       (data["Principal"], fd_rec["linked_txn_id"]))
+                    self.db.commit()
+                    self.load_list()
+                return _save
+
+            edit_form = _build_edit_form(fields, _make_fd_save(fid), lambda: None,
+                                         accent_color=color)
+            edit_btn = QPushButton("\u270f\ufe0f Edit Details")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(_accent_btn_css(color))
+            edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
+            card.add_expand_widget(edit_btn)
+            card.add_expand_widget(edit_form)
+
+            # Action buttons
+            btn_row = QHBoxLayout()
+            if fd["status"] == "ACTIVE" and pct >= 100:
+                m_btn = QPushButton("\u2705 Mark Matured")
+                m_btn.setObjectName("primary")
+                m_btn.setFixedHeight(28)
+                m_btn.setFocusPolicy(Qt.NoFocus)
+                m_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                m_btn.clicked.connect(lambda _, _fid=fid: self._mark_matured(_fid))
+                btn_row.addWidget(m_btn)
+            if fd["status"] in ("ACTIVE", "MATURED"):
+                w_btn = QPushButton("\U0001f4b5 Mark Withdrawn")
+                w_btn.setFixedHeight(28)
+                w_btn.setFocusPolicy(Qt.NoFocus)
+                w_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                w_btn.setStyleSheet(_accent_btn_css(color))
+                w_btn.clicked.connect(lambda _, _fid=fid: self._mark_withdrawn(_fid))
+                btn_row.addWidget(w_btn)
+            btn_row.addStretch()
+            card.add_expand_layout(btn_row)
+
+            self._list_lay.addWidget(card)
 
     def _mark_matured(self, fd_id):
         if _confirm(self, "Mark Matured", "Mark this FD as matured?"):
             self.repos["fd"].update_status(fd_id, "MATURED")
             self.load_list()
-            return True
-        return False
 
-    def _mark_withdrawn(self, fd_id, account_id, method_id, fee=0, net=0):
+    def _mark_withdrawn(self, fd_id):
         fd = self.repos["fd"].get(fd_id)
         if not fd:
-            return False
-        amount = net if net > 0 else max((fd["maturity_amount"] or fd["principal_amount"]) - fee, 0)
-        _log_ledger_txn(
-            self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
-            tx_type="CREDIT", amount=amount, person_org=None,
-            description="FD premature withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
-            category_names=("Investment", "Finance")
-        )
-        self.repos["fd"].update_status(fd_id, "PREMATURE_WITHDRAWN")
-        self.load_list()
-        return True
-
-
-# ══════════════════════════════════════════════════════════════════════════
-#  FD DETAIL DIALOG
-# ══════════════════════════════════════════════════════════════════════════
-class FDDetailDialog(QDialog):
-    def __init__(self, fd, on_mark_matured, on_mark_withdrawn, accounts_repo, lookups_repo, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Fixed Deposit Detail")
-        self.setMinimumWidth(440)
-        self.fd = fd
-        self._on_matured = on_mark_matured
-        self._on_withdrawn = on_mark_withdrawn
-        self.accounts_repo = accounts_repo
-        self.lookups_repo = lookups_repo
-        lay = QVBoxLayout(self)
-        hdr = QHBoxLayout()
-        t = QLabel(fd["account_name"] or "Fixed Deposit")
-        t.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
-        hdr.addWidget(t, 1)
-        hdr.addWidget(_badge(fd["status"], status_color("asset", fd["status"])))
-        lay.addLayout(hdr)
-        pct = FDService.progress(fd["start_date"], fd["maturity_date"])
-        pb = QProgressBar()
-        pb.setRange(0, 100)
-        pb.setValue(int(pct))
-        pb.setTextVisible(True)
-        pb.setFormat(f"{pct:.0f}% of tenure elapsed")
-        lay.addWidget(pb)
-        info = QLabel(
-            f"Principal: {fmt_money(fd['principal_amount'])}  {MDOT}  Rate: {fd['interest_rate']}%  {MDOT}  "
-            f"Maturity Amount: {fmt_money(fd['maturity_amount'] or 0)}\n"
-            f"Start: {fd['start_date']}  {MDOT}  Maturity: {fd['maturity_date']}"
-        )
-        info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
-        info.setWordWrap(True)
-        lay.addWidget(info)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        if fd["status"] == "ACTIVE" and pct >= 100:
-            m_btn = QPushButton("\u2705 Mark Matured")
-            m_btn.setObjectName("primary")
-            m_btn.clicked.connect(self._do_matured)
-            btn_row.addWidget(m_btn)
-        if fd["status"] in ("ACTIVE", "MATURED"):
-            w_btn = QPushButton("\U0001f4b5 Mark Withdrawn (credit maturity amount)")
-            w_btn.clicked.connect(self._do_withdrawn)
-            btn_row.addWidget(w_btn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(self.accept)
-        btn_row.addWidget(ok)
-        lay.addLayout(btn_row)
-
-    def _do_matured(self):
-        if self._on_matured():
-            self.accept()
-
-    def _do_withdrawn(self):
+            return
         dlg = QDialog(self)
         dlg.setWindowTitle("Withdraw FD")
         dlg.setMinimumWidth(420)
         f = QFormLayout(dlg)
-        acc_cb = _account_combo(self.accounts_repo)
-        idx = acc_cb.findData(self.fd["bank_account_id"])
+        acc_cb = _account_combo(self.repos["accounts"])
+        idx = acc_cb.findData(fd["bank_account_id"])
         if idx >= 0:
             acc_cb.setCurrentIndex(idx)
-        method_cb = _method_combo(self.lookups_repo)
-        # withdrawal date
+        method_cb = _method_combo(self.repos["lookups"])
         wd_date = QDateEdit(QDate.currentDate())
         wd_date.setCalendarPopup(True)
-        # fee
         fee_spin = QDoubleSpinBox()
         fee_spin.setRange(0, 999999)
         fee_spin.setPrefix("\u20b9 ")
         fee_spin.setDecimals(2)
-        fee_spin.setValue(0)
-        # preview
         net_lbl = QLabel("")
         net_lbl.setStyleSheet(f"color:{C['green']};font-weight:800;font-size:13px;")
         net_lbl.setWordWrap(True)
 
         def update_net():
             wd = wd_date.date().toPyDate()
-            sd = date.fromisoformat(self.fd["start_date"])
+            sd = date.fromisoformat(fd["start_date"])
             days = max((wd - sd).days, 0)
-            p = self.fd["principal_amount"]
-            r = self.fd["interest_rate"] or 0
-            freq = self.fd.get("interest_type") or "QUARTERLY"
-            mthd = self.fd.get("interest_method") or "COMPOUND"
+            p = fd["principal_amount"]
+            r = fd["interest_rate"] or 0
+            freq = fd.get("interest_type") or "QUARTERLY"
+            mthd = fd.get("interest_method") or "COMPOUND"
             if mthd == "SIMPLE":
                 interest = round(p * r / 100 * days / 365.25, 2)
             else:
-                # compound up to withdrawal date
                 years = days / 365.25
                 periods = {"ANNUAL": 1, "SEMI_ANNUAL": 2, "QUARTERLY": 4}.get(freq, 4)
                 rate_per = r / (100 * periods)
@@ -2048,7 +2247,6 @@ class FDDetailDialog(QDialog):
         wd_date.dateChanged.connect(update_net)
         fee_spin.valueChanged.connect(update_net)
         update_net()
-
         f.addRow("Withdrawal Date", wd_date)
         f.addRow("Credit Into *", acc_cb)
         f.addRow("Method *", method_cb)
@@ -2066,12 +2264,12 @@ class FDDetailDialog(QDialog):
         f.addRow("", row)
         if dlg.exec_() == QDialog.Accepted:
             wd = wd_date.date().toPyDate()
-            sd = date.fromisoformat(self.fd["start_date"])
+            sd = date.fromisoformat(fd["start_date"])
             days = max((wd - sd).days, 0)
-            p = self.fd["principal_amount"]
-            r = self.fd["interest_rate"] or 0
-            freq = self.fd.get("interest_type") or "QUARTERLY"
-            mthd = self.fd.get("interest_method") or "COMPOUND"
+            p = fd["principal_amount"]
+            r = fd["interest_rate"] or 0
+            freq = fd.get("interest_type") or "QUARTERLY"
+            mthd = fd.get("interest_method") or "COMPOUND"
             if mthd == "SIMPLE":
                 interest = round(p * r / 100 * days / 365.25, 2)
             else:
@@ -2082,8 +2280,14 @@ class FDDetailDialog(QDialog):
                 interest = round(p * ((1 + rate_per) ** n - 1), 2) if n > 0 else 0
             fee = fee_spin.value()
             net = max(p + interest - fee, 0)
-            if self._on_withdrawn(acc_cb.currentData(), method_cb.currentData(), fee, net):
-                self.accept()
+            _log_ledger_txn(
+                self.repos["transactions"], self.db, account_id=acc_cb.currentData(),
+                pay_method=method_cb.currentData(), tx_type="CREDIT", amount=net, person_org=None,
+                description="FD premature withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
+                category_names=("Investment", "Finance")
+            )
+            self.repos["fd"].update_status(fd_id, "PREMATURE_WITHDRAWN")
+            self.load_list()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2096,13 +2300,12 @@ class FDOthersPage(_FunctionPage):
     def _sort_options(self):
         return ["Status", "Depositor", "Amount", "Return Date"]
 
-    # ── Entry ──
     def _build_entry(self):
         page = QWidget()
         lay = QVBoxLayout(page)
         self.fo_stack, _ = _build_subnav(lay, ["Record Deposit", "Log Repayment"])
 
-        # ── Record Deposit ──
+        # Record Deposit
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.fo_dep_depositor = SearchableCombo(placeholder="Search depositor\u2026")
@@ -2152,7 +2355,7 @@ class FDOthersPage(_FunctionPage):
         f1.addRow("", take_btn)
         self.fo_stack.addWidget(p1)
 
-        # ── Log Repayment ──
+        # Log Repayment
         p2 = QWidget()
         f2 = QFormLayout(p2)
         self.fo_rep_deposit = SearchableCombo(placeholder="Search deposit\u2026")
@@ -2297,7 +2500,6 @@ class FDOthersPage(_FunctionPage):
         )
         self.fo_rep_amount.setValue(0)
         self.fo_rep_desc.clear()
-        self._check_repaid(did)
         self._refresh_entry_dropdowns()
         self.load_list()
         dep = self.repos["deposits"].get_deposit(did)
@@ -2309,8 +2511,36 @@ class FDOthersPage(_FunctionPage):
 
     # ── List ──
     def load_list(self):
+        # Recalc all non-closed deposits for comprehensive status
+        for d in self.repos["deposits"].list_deposits():
+            if d["status"] not in ("CLOSED",):
+                self.repos["deposits"].recalc_status(d["deposit_id"])
         self._list_data = self.repos["deposits"].list_deposits()
         self._render_list()
+
+    def _analysis(self, dep):
+        total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
+        months = self._dep_months(dep)
+        method = dep.get("interest_method") or "SIMPLE"
+        rate = dep.get("interest_rate") or 0
+        if not rate:
+            cv = max(dep["principal_amount"] - total_paid, 0)
+            return {"current_value": cv, "original_emi": 0, "updated_emi": 0,
+                    "full_payoff": cv, "total_expected": dep["principal_amount"],
+                    "total_paid": total_paid, "total_interest_accrued": 0,
+                    "months_elapsed": 0, "months_remaining": 0}
+        payments = self.repos["deposits"].get_repayments(dep["deposit_id"])
+        return LoanService.loan_analysis(
+            dep["principal_amount"], rate, months, "ANNUAL",
+            total_paid, dep["deposit_date"], payments=payments, method=method
+        )
+
+    def _dep_months(self, dep):
+        sd = date.fromisoformat(dep["deposit_date"])
+        dd = dep.get("expected_return_date")
+        if dd:
+            return max(1, round((date.fromisoformat(dd) - sd).days / 30.44))
+        return 12
 
     def _render_list(self):
         if not hasattr(self, "_list_lay"):
@@ -2353,14 +2583,7 @@ class FDOthersPage(_FunctionPage):
             a = self._analysis(d)
             pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
             interest_free = not d["interest_rate"]
-            if d["status"] == "CLOSED":
-                color = C["text3"]
-            elif d["status"] == "REPAID":
-                color = C["green"]
-            elif a["total_paid"] > 0 and a["current_value"] > 0:
-                color = C["amber"]
-            else:
-                color = C["accent"]
+            color = status_color(d["status"])
             interest_tag = "Interest-Free" if interest_free else f"{d['interest_rate']}%"
             status_tag = d["status"]
             badge_text = f"{interest_tag} | {status_tag}"
@@ -2370,93 +2593,168 @@ class FDOthersPage(_FunctionPage):
                      f"<span style='font-size:11px;color:{C['text3']};'>"
                      f"Interest: {fmt_money(a['total_interest_accrued'])}  {MDOT}  "
                      f"Paid: {fmt_money(a['total_paid'])}</span>")
-            card = _wealth_card(
+            card = WealthCard(
+                item_id=d["deposit_id"],
                 title=d["depositor_name"],
                 subtitle=f"Deposited {d['deposit_date']} {MDOT} Return {d['expected_return_date'] or EM_DASH}",
                 amount_text=fmt_money(d["principal_amount"]) + "  Principal",
                 badge_text=badge_text, badge_color=color,
                 progress_pct=pct, extra_line=extra,
-                on_click=lambda did=d["deposit_id"]: self._open_detail(did)
             )
-            self._list_lay.addWidget(card)
+            card.clicked.connect(self._toggle_card)
 
-    def _open_detail(self, deposit_id):
-        dep = self.repos["deposits"].get_deposit(deposit_id)
-        if not dep:
-            return
-        repayments = self.repos["deposits"].get_repayments(deposit_id)
-        a = self._analysis(dep)
-        def print_dep():
-            info = [
-                ("Principal", fmt_money(dep["principal_amount"])),
-                ("Rate", f"{dep.get('interest_rate') or 0}%"),
-                ("Method", dep.get("interest_method") or "SIMPLE"),
-                ("Deposit Date", dep["deposit_date"]),
-                ("Return Date", dep.get("expected_return_date") or EM_DASH),
+            did = d["deposit_id"]
+
+            # Detail
+            mthd = d.get("interest_method") or "SIMPLE"
+            mth_label = "Simple" if mthd == "SIMPLE" else "Compound"
+            detail_info = QLabel()
+            detail_info.setTextFormat(Qt.RichText)
+            detail_info.setText(
+                f"<table style='font-size:13px;color:{C['text2']};' cellpadding='3'>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Method</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{mth_label}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Rate</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{d.get('interest_rate') or 0}%</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Deposit</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{d['deposit_date']}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Return</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{d['expected_return_date'] or EM_DASH}</td></tr>"
+                f"<tr><td style='color:{C['text3']};font-weight:600;'>Outstanding</td>"
+                f"<td style='font-weight:800;color:{color};'>{fmt_money(a['current_value'])}</td>"
+                f"<td style='color:{C['text3']};font-weight:600;padding-left:16px;'>Total Expected</td>"
+                f"<td style='font-weight:700;color:{C['text']};'>{fmt_money(a['total_expected'])}</td></tr>"
+                f"</table>"
+                + (f"<div style='font-size:12px;color:{C['text3']};font-style:italic;padding-top:4px;'>Note: {d['description']}</div>" if d.get("description") else "")
+            )
+            detail_info.setWordWrap(True)
+            card.add_expand_widget(detail_info)
+
+            # Edit form
+            fields = [
+                ("Principal", "number", d["principal_amount"], None),
+                ("Interest Rate", "rate", d.get("interest_rate") or 0, None),
+                ("Interest Method", "combo", d.get("interest_method") or "SIMPLE",
+                 [("Simple Interest", "SIMPLE"), ("Compound Interest", "COMPOUND")]),
+                ("Return Date", "date", d.get("expected_return_date"), None),
+                ("Description", "text", d.get("description"), None),
             ]
-            analysis = [
-                ("Outstanding", fmt_money(a["current_value"])),
-                ("Total Paid", fmt_money(a["total_paid"])),
-                ("Interest Accrued", fmt_money(a["total_interest_accrued"])),
-            ]
-            sections = []
-            if repayments:
-                rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
-                          "description": r.get("description") or ""} for r in repayments]
-                sections.append({"title": "Repayment Log", "color": "#059669",
-                                 "type": "repayment", "data": rdata})
-            _export_detail_to_pdf(self, f"Deposit from {dep['depositor_name']}", dep["status"],
-                                  info, analysis, sections)
-        dlg = LoanDetailDialog(
-            role="take", title=f"Deposit from {dep['depositor_name']}",
-            principal=dep["principal_amount"], status=dep["status"],
-            start_date=dep["deposit_date"], due_date=dep["expected_return_date"],
-            description=dep.get("description"), repayments=repayments,
-            amount_key="amount_paid", date_key="payment_date",
-            on_mark_closed=lambda: self._mark_closed(deposit_id),
-            on_print=print_dep, parent=self
-        )
-        dlg.exec_()
+
+            def _make_fo_save(_did, _d=d):
+                def _save(data):
+                    rate = data["Interest Rate"] if _d.get("interest_rate") is not None else None
+                    imethod = data["Interest Method"]
+                    self.db.execute(
+                        "UPDATE deposits_from_others SET principal_amount=?, interest_rate=?, interest_method=?, expected_return_date=?, description=? WHERE deposit_id=?",
+                        (data["Principal"], rate, imethod, data["Return Date"], data["Description"], _did))
+                    dep = self.repos["deposits"].get_deposit(_did)
+                    if dep and dep.get("linked_txn_id"):
+                        self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
+                                       (data["Principal"], dep["linked_txn_id"]))
+                    self.db.commit()
+                    self.repos["deposits"].recalc_status(_did)
+                    self.load_list()
+                return _save
+
+            edit_form = _build_edit_form(fields, _make_fo_save(did), lambda: None,
+                                         accent_color=color)
+            edit_btn = QPushButton("\u270f\ufe0f Edit Details")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(_accent_btn_css(color))
+            edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
+            card.add_expand_widget(edit_btn)
+            card.add_expand_widget(edit_form)
+
+            # Divider
+            div = QFrame()
+            div.setFixedHeight(1)
+            div.setStyleSheet(f"background:{C['border2']};")
+            card.add_expand_widget(div)
+
+            # Repayments
+            rep_header = QLabel("\U0001f4b0 Repayment History")
+            rep_header.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};padding-top:2px;")
+            card.add_expand_widget(rep_header)
+
+            def _make_fo_rep_edit(_did):
+                def _on_rep_edit(rep_data):
+                    def _save(data):
+                        self.db.execute(
+                            "UPDATE deposit_repayments_to_others SET amount_paid=?, payment_date=?, description=? WHERE repayment_id=?",
+                            (data["amount"], data["date"], data["description"], rep_data["repayment_id"]))
+                        if rep_data.get("linked_txn_id"):
+                            self.db.execute("UPDATE transactions SET amount=?, tx_date=? WHERE id=?",
+                                           (data["amount"], data["date"], rep_data["linked_txn_id"]))
+                        self.db.commit()
+                        self.repos["deposits"].recalc_status(_did)
+                        self.load_list()
+                    return _save
+                return _on_rep_edit
+
+            repayments = self.repos["deposits"].get_repayments(did)
+            rep_section = _repayment_section(
+                repayments, "amount_paid", "payment_date",
+                accent_color=color,
+                on_edit=_make_fo_rep_edit(did)
+            )
+            card.add_expand_widget(rep_section)
+
+            # Mark Closed button (only for REPAID)
+            if d["status"] == "REPAID":
+                close_btn = QPushButton("\u2705 Mark as Closed")
+                close_btn.setObjectName("primary")
+                close_btn.setFixedHeight(28)
+                close_btn.setFocusPolicy(Qt.NoFocus)
+                close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.clicked.connect(lambda _, _did=did: self._mark_closed(_did))
+                card.add_expand_widget(close_btn)
+
+            # Print
+            def _make_fo_print(_d=d, _a=a):
+                def _print():
+                    reps = self.repos["deposits"].get_repayments(_d["deposit_id"])
+                    info = [
+                        ("Depositor", _d["depositor_name"]),
+                        ("Principal", fmt_money(_d["principal_amount"])),
+                        ("Rate", f"{_d.get('interest_rate') or 0}%"),
+                        ("Method", _d.get("interest_method") or "SIMPLE"),
+                        ("Deposit Date", _d["deposit_date"]),
+                        ("Return Date", _d.get("expected_return_date") or EM_DASH),
+                    ]
+                    analysis = [
+                        ("Outstanding", fmt_money(_a["current_value"])),
+                        ("Total Paid", fmt_money(_a["total_paid"])),
+                        ("Interest Accrued", fmt_money(_a["total_interest_accrued"])),
+                    ]
+                    sections = []
+                    if reps:
+                        rdata = [{"date": r.get("payment_date", ""), "amount": r["amount_paid"],
+                                  "description": r.get("description") or ""} for r in reps]
+                        sections.append({"title": "Repayment Log", "color": "#059669",
+                                         "type": "repayment", "data": rdata})
+                    _export_detail_to_pdf(self, f"Deposit from {_d['depositor_name']}", _d["status"],
+                                          info, analysis, sections)
+                return _print
+
+            btn_row = QHBoxLayout()
+            print_btn = QPushButton("\U0001f5a8 Print PDF")
+            print_btn.setFixedHeight(28)
+            print_btn.setFocusPolicy(Qt.NoFocus)
+            print_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            print_btn.setStyleSheet(_accent_btn_css(color))
+            print_btn.clicked.connect(_make_fo_print())
+            btn_row.addWidget(print_btn)
+            btn_row.addStretch()
+            card.add_expand_layout(btn_row)
+
+            self._list_lay.addWidget(card)
 
     def _mark_closed(self, deposit_id):
         if _confirm(self, "Mark Closed", "Mark this deposit as fully returned/closed?"):
             self.repos["deposits"].update_status(deposit_id, "CLOSED")
             self.load_list()
-            return True
-        return False
-
-    # ── analysis helper ──
-    def _dep_months(self, dep):
-        sd = date.fromisoformat(dep["deposit_date"])
-        dd = dep.get("expected_return_date")
-        if dd:
-            return max(1, round((date.fromisoformat(dd) - sd).days / 30.44))
-        return 12
-
-    def _analysis(self, dep):
-        total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
-        months = self._dep_months(dep)
-        method = dep.get("interest_method") or "SIMPLE"
-        rate = dep.get("interest_rate") or 0
-        if not rate:
-            cv = max(dep["principal_amount"] - total_paid, 0)
-            return {"current_value": cv, "original_emi": 0, "updated_emi": 0,
-                    "full_payoff": cv, "total_expected": dep["principal_amount"],
-                    "total_paid": total_paid, "total_interest_accrued": 0,
-                    "months_elapsed": 0, "months_remaining": 0}
-        payments = self.repos["deposits"].get_repayments(dep["deposit_id"])
-        return LoanService.loan_analysis(
-            dep["principal_amount"], rate, months, "ANNUAL",
-            total_paid, dep["deposit_date"], payments=payments, method=method
-        )
-
-    def _check_repaid(self, deposit_id):
-        dep = self.repos["deposits"].get_deposit(deposit_id)
-        if not dep or dep["status"] in ("CLOSED", "REPAID"):
-            return
-        a = self._analysis(dep)
-        if a["current_value"] <= 0 and a["total_paid"] > 0:
-            self.repos["deposits"].update_status(deposit_id, "REPAID")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2475,11 +2773,9 @@ class MFPage(_FunctionPage):
         self._start_background_nav_fetch()
 
     def refresh(self):
-        """Override: don't fetch NAVs on tab open, only update dropdowns."""
         self._refresh_entry_dropdowns()
 
     def _start_background_nav_fetch(self):
-        """Start fetching NAVs silently in background on app open."""
         all_schemes = self.repos["mf"].list_schemes()
         to_fetch = [(s["scheme_id"], s["api_scheme_code"])
                     for s in all_schemes if s.get("api_scheme_code")]
@@ -2491,11 +2787,9 @@ class MFPage(_FunctionPage):
         self._nav_worker.start()
 
     def _on_navs_fetched(self, results):
-        """Called when background NAV fetch completes."""
         self._nav_cache.update(results)
         self._nav_fetched = True
         self._nav_worker = None
-        # Close loading popup if user switched to MF during fetch
         if self._loading_dlg:
             self._loading_dlg.accept()
             self._loading_dlg = None
@@ -2526,7 +2820,7 @@ class MFPage(_FunctionPage):
         lay = QVBoxLayout(page)
         self.mf_stack, _ = _build_subnav(lay, ["Purchase / SIP", "Redemption"])
 
-        # ── Purchase / SIP ──
+        # Purchase / SIP
         p1 = QWidget()
         f1 = QFormLayout(p1)
         self.mf_buy_scheme = SearchableCombo(placeholder="Search scheme\u2026")
@@ -2568,7 +2862,7 @@ class MFPage(_FunctionPage):
         f1.addRow("", buy_btn)
         self.mf_stack.addWidget(p1)
 
-        # ── Redemption ──
+        # Redemption
         p2 = QWidget()
         f2 = QFormLayout(p2)
         self.mf_sell_scheme = SearchableCombo(placeholder="Search scheme\u2026")
@@ -2624,12 +2918,16 @@ class MFPage(_FunctionPage):
         stype.addItems(["Equity", "Debt", "Hybrid", "Index", "ELSS", "Liquid", "Other"])
         folio = QLineEdit()
         folio.setPlaceholderText("Optional")
-        # Search fund to link API scheme code
         search_row = QHBoxLayout()
         self._linked_code = None
         self._linked_name = None
         link_lbl = QLabel("Not linked")
         link_lbl.setStyleSheet(f"color:{C['text3']};font-size:11px;")
+        cur_nav = QDoubleSpinBox()
+        cur_nav.setRange(0, 999999)
+        cur_nav.setDecimals(4)
+        launch_date = QDateEdit(QDate.currentDate())
+
         def search_fund():
             dlg2 = NavFetchDialog(initial_query=name.text(), parent=dlg)
             if dlg2.exec_() == QDialog.Accepted and dlg2.result_nav:
@@ -2640,9 +2938,7 @@ class MFPage(_FunctionPage):
                 self._linked_name = dlg2.result_name
                 link_lbl.setText(f"Linked: {dlg2.result_name}")
                 link_lbl.setStyleSheet(f"color:{C['green']};font-size:11px;font-weight:700;")
-                # Auto-fill NAV
                 cur_nav.setValue(dlg2.result_nav)
-                # Fetch scheme details for launch date
                 if self._linked_code:
                     try:
                         import urllib.request
@@ -2662,27 +2958,20 @@ class MFPage(_FunctionPage):
                                     continue
                     except Exception:
                         pass
+
         link_btn = QPushButton("\U0001f50d Search & Link")
         link_btn.clicked.connect(search_fund)
         search_row.addWidget(link_btn)
         search_row.addWidget(link_lbl)
-        # Current status for existing investments
         status_hint = QLabel("Leave at 0 if this is a new investment")
         status_hint.setStyleSheet(f"color:{C['text3']};font-size:10px;font-style:italic;")
         cur_units = QDoubleSpinBox()
         cur_units.setRange(0, 99999999)
         cur_units.setDecimals(4)
-        cur_units.setValue(0)
-        cur_nav = QDoubleSpinBox()
-        cur_nav.setRange(0, 999999)
-        cur_nav.setDecimals(4)
-        cur_nav.setValue(0)
         cur_invested = QDoubleSpinBox()
         cur_invested.setRange(0, 999999999)
         cur_invested.setPrefix("\u20b9 ")
         cur_invested.setDecimals(2)
-        cur_invested.setValue(0)
-
         f.addRow("AMC *", amc)
         f.addRow("Scheme Name *", name)
         f.addRow("Type", stype)
@@ -2713,15 +3002,13 @@ class MFPage(_FunctionPage):
             folio_number=folio.text().strip() or None, is_active=1,
             api_scheme_code=self._linked_code,
         )
-        # If existing holdings, create initial PURCHASE transaction
         units = cur_units.value()
         nav = cur_nav.value()
         invested = cur_invested.value()
         if units > 0 and nav > 0 and invested > 0:
             self.repos["mf"].add_txn(
                 scheme_id=sid, txn_type="PURCHASE",
-                txn_date=TODAY(),
-                amount=invested, nav=nav, units=units, linked_txn_id=None,
+                txn_date=TODAY(), amount=invested, nav=nav, units=units, linked_txn_id=None,
             )
         self._refresh_entry_dropdowns()
         label = f"{a} \u2014 {n}"
@@ -2754,22 +3041,18 @@ class MFPage(_FunctionPage):
         self.mf_sell_units.setMaximum(max(h["units"], 0))
 
     def _auto_fetch_buy_nav(self):
-        """Auto-fill NAV: cache first, then async fetch from saved API link."""
         try:
             sid = self.mf_buy_scheme.get_data()
         except (AttributeError, RuntimeError):
             return
         if not sid:
             return
-        # Cache hit → instant
         if sid in self._nav_cache and self._nav_cache[sid] > 0:
             self.mf_buy_nav.setValue(self._nav_cache[sid])
             return
-        # Try last transaction NAV as immediate fill
         txns = self.repos["mf"].list_txns(sid)
         if txns:
             self.mf_buy_nav.setValue(txns[-1]["nav"])
-        # Async fetch from API if linked
         scheme = self.repos["mf"].get_scheme(sid)
         api_code = scheme.get("api_scheme_code") if scheme else None
         if api_code:
@@ -2789,7 +3072,6 @@ class MFPage(_FunctionPage):
             pass
 
     def _auto_fetch_sell_nav(self):
-        """Auto-fill NAV: cache first, then async fetch from saved API link."""
         try:
             sid = self.mf_sell_scheme.get_data()
         except (AttributeError, RuntimeError):
@@ -2848,10 +3130,14 @@ class MFPage(_FunctionPage):
         except (AttributeError, RuntimeError):
             pass
         self._update_holdings()
-        # Auto-fill NAV for currently selected schemes
         try:
             if self.mf_buy_scheme.get_data():
                 self._auto_fetch_buy_nav()
+        except (AttributeError, RuntimeError):
+            pass
+        try:
+            if self.mf_sell_scheme.get_data():
+                self._auto_fetch_sell_nav()
         except (AttributeError, RuntimeError):
             pass
 
@@ -2916,7 +3202,6 @@ class MFPage(_FunctionPage):
         QMessageBox.information(self, "Redemption Logged", f"{units:,.4f} units redeemed for {fmt_money(amount)}.")
 
     def _edit_scheme(self, scheme):
-        """Edit scheme details dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle("Edit Scheme")
         dlg.setMinimumWidth(480)
@@ -2927,11 +3212,11 @@ class MFPage(_FunctionPage):
         stype.addItems(["Equity", "Debt", "Hybrid", "Index", "ELSS", "Liquid", "Other"])
         stype.setCurrentText(scheme.get("scheme_type") or "Equity")
         folio = QLineEdit(scheme.get("folio_number") or "")
-        # Link fund section
         cur_code = scheme.get("api_scheme_code") or ""
         link_lbl = QLabel(f"Linked: {cur_code}" if cur_code else "Not linked")
         link_lbl.setStyleSheet(f"color:{C['green'] if cur_code else C['text3']};font-size:11px;font-weight:700;")
-        new_code = [cur_code]  # mutable for closure
+        new_code = [cur_code]
+
         def relink():
             d = NavFetchDialog(initial_query=name.text(), parent=dlg)
             if d.exec_() == QDialog.Accepted and d.result_nav:
@@ -2940,12 +3225,12 @@ class MFPage(_FunctionPage):
                     new_code[0] = str(d._matches[idx].get("schemeCode", ""))
                 link_lbl.setText(f"Linked: {d.result_name}")
                 link_lbl.setStyleSheet(f"color:{C['green']};font-size:11px;font-weight:700;")
+
         link_row = QHBoxLayout()
         link_btn = QPushButton("\U0001f50d Re-Link Fund")
         link_btn.clicked.connect(relink)
         link_row.addWidget(link_btn)
         link_row.addWidget(link_lbl)
-
         f.addRow("AMC *", amc)
         f.addRow("Scheme Name *", name)
         f.addRow("Type", stype)
@@ -2979,7 +3264,6 @@ class MFPage(_FunctionPage):
     def _last_nav(self, scheme_id):
         if scheme_id in self._nav_cache:
             return self._nav_cache[scheme_id]
-        # Try auto-fetch from saved API scheme code (with short timeout)
         scheme = self.repos["mf"].get_scheme(scheme_id)
         api_code = scheme.get("api_scheme_code") if scheme else None
         if api_code:
@@ -2994,27 +3278,23 @@ class MFPage(_FunctionPage):
                     self._nav_cache[scheme_id] = nav
                     return nav
             except Exception:
-                pass  # fall through to txn-based NAV
+                pass
         txns = self.repos["mf"].list_txns(scheme_id)
         return txns[-1]["nav"] if txns else 0
 
     # ── List ──
     def load_list(self):
-        """Smart load: use cache if ready, show popup if still fetching."""
         if self._nav_fetched:
             self._build_list_data()
         elif self._nav_worker and self._nav_worker.isRunning():
-            # Background fetch still running — show popup
             if not self._loading_dlg:
                 self._loading_dlg = self._make_loading_dlg()
                 self._loading_dlg.show()
         else:
-            # No worker (no linked schemes) — just build
             self._nav_fetched = True
             self._build_list_data()
 
     def _build_list_data(self):
-        """Build MF list data using cached/fetched NAVs."""
         schemes = self.repos["mf"].list_schemes()
         self._list_data = []
         for s in schemes:
@@ -3035,7 +3315,6 @@ class MFPage(_FunctionPage):
         _clear_layout(self._stats_row)
         _clear_layout(self._list_lay)
         items = list(self._list_data)
-        # portfolio stats from full data
         total_inv = sum(i["net_invested"] for i in items)
         total_cur = sum(i["current_value"] for i in items)
         overall_ret = MFService.simple_return(total_inv, total_cur)
@@ -3045,12 +3324,10 @@ class MFPage(_FunctionPage):
             _metric_card("Overall Return", f"{overall_ret:+.2f}%",
                           C["green"] if overall_ret >= 0 else C["red"]),
         ])
-        # search
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
             items = [i for i in items
                      if search in (i["amc_name"] + " " + i["scheme_name"]).lower()]
-        # sort
         mode = self._sort_cb.currentText() if hasattr(self, "_sort_cb") else ""
         if mode == "Return %":
             items.sort(key=lambda i: i["return_pct"])
@@ -3062,7 +3339,6 @@ class MFPage(_FunctionPage):
             items.sort(key=lambda i: i["current_value"])
         if not getattr(self, "_sort_asc", True):
             items.reverse()
-        # render
         if not items:
             empty = QLabel("No matching schemes." if search else "No mutual fund schemes yet.")
             empty.setStyleSheet(f"color:{C['text3']};padding:20px;")
@@ -3072,71 +3348,170 @@ class MFPage(_FunctionPage):
         for it in items:
             ret = it["return_pct"]
             color = C["green"] if ret >= 0 else C["red"]
-            card = _wealth_card(
+            card = WealthCard(
+                item_id=it["scheme_id"],
                 title=f"{it['amc_name']} \u2014 {it['scheme_name']}",
                 subtitle=f"{it['scheme_type'] or ''} {MDOT} {it['holdings']['units']:,.4f} units {MDOT} NAV {it['nav']:,.4f}",
                 amount_text=fmt_money(it["current_value"]),
                 badge_text=f"{ret:+.2f}%", badge_color=color,
                 extra_line=f"Invested: {fmt_money(it['net_invested'])}",
-                on_click=lambda sid=it["scheme_id"]: self._open_detail(sid)
             )
+            card.clicked.connect(self._toggle_card)
+
+            sid = it["scheme_id"]
+
+            # Expanded: transaction history + edit scheme
+            detail_lbl = QLabel(
+                f"Folio: {it.get('folio_number') or EM_DASH}  {MDOT}  "
+                f"Type: {it.get('scheme_type') or EM_DASH}\n"
+                f"Units: {it['holdings']['units']:,.4f}  {MDOT}  "
+                f"NAV: {it['nav']:,.4f}  {MDOT}  "
+                f"Invested: {fmt_money(it['net_invested'])}  {MDOT}  "
+                f"Current: {fmt_money(it['current_value'])}  {MDOT}  "
+                f"Return: {ret:+.2f}%"
+            )
+            detail_lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;padding:4px 0;")
+            detail_lbl.setWordWrap(True)
+            card.add_expand_widget(detail_lbl)
+
+            # Transaction history
+            txns = self.repos["mf"].list_txns(sid)
+            if txns:
+                tx_header = QLabel("\U0001f4cb Transaction History")
+                tx_header.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};padding-top:4px;")
+                card.add_expand_widget(tx_header)
+                for tx in txns:
+                    tx_card = QFrame()
+                    tx_card.setStyleSheet(
+                        f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}"
+                    )
+                    tl = QHBoxLayout(tx_card)
+                    tl.setContentsMargins(12, 6, 12, 6)
+                    tl.setSpacing(12)
+                    t_type = QLabel(tx["txn_type"])
+                    t_type.setStyleSheet(f"font-size:11px;font-weight:700;color:{C['accent']};")
+                    t_date = QLabel(tx["txn_date"])
+                    t_date.setStyleSheet(f"font-size:11px;color:{C['text3']};")
+                    t_amt = QLabel(fmt_money(tx["amount"]))
+                    t_amt.setStyleSheet(f"font-size:13px;font-weight:800;color:{C['text']};")
+                    t_nav = QLabel(f"NAV {tx['nav']:,.4f} | {tx['units']:,.4f} units")
+                    t_nav.setStyleSheet(f"font-size:10px;color:{C['text3']};")
+                    tl.addWidget(t_type)
+                    tl.addWidget(t_date)
+                    tl.addStretch()
+                    tl.addWidget(t_nav)
+                    tl.addWidget(t_amt)
+                    card.add_expand_widget(tx_card)
+
+            # Edit Scheme button
+            def _make_edit_scheme(_scheme=it):
+                def _edit():
+                    self._edit_scheme(_scheme)
+                return _edit
+
+            btn_row = QHBoxLayout()
+            edit_btn = QPushButton("\u270f\ufe0f Edit Scheme")
+            edit_btn.setFixedHeight(28)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(_accent_btn_css(color))
+            edit_btn.clicked.connect(_make_edit_scheme())
+            btn_row.addWidget(edit_btn)
+            btn_row.addStretch()
+            card.add_expand_layout(btn_row)
+
             self._list_lay.addWidget(card)
 
-    def _open_detail(self, scheme_id):
-        scheme = self.repos["mf"].get_scheme(scheme_id)
-        if not scheme:
-            return
-        txns = self.repos["mf"].list_txns(scheme_id)
-        h = self.repos["mf"].holdings(scheme_id)
-        nav = self._last_nav(scheme_id)
-        dlg = MFDetailDialog(scheme, txns, h, nav,
-                             on_edit=lambda: self._edit_scheme(scheme),
-                             parent=self)
-        dlg.exec_()
-
 
 # ══════════════════════════════════════════════════════════════════════════
-#  MF DETAIL DIALOG
+#  NAV FETCH DIALOG (used by MF)
 # ══════════════════════════════════════════════════════════════════════════
-class MFDetailDialog(QDialog):
-    def __init__(self, scheme, txns, holdings, nav, on_edit=None, parent=None):
+class NavFetchDialog(QDialog):
+    def __init__(self, initial_query="", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{scheme['amc_name']} \u2014 {scheme['scheme_name']}")
-        self.setMinimumWidth(560)
+        self.setWindowTitle("\U0001f50e Fetch Latest NAV")
+        self.setMinimumWidth(480)
+        self.result_nav = None
+        self.result_name = None
+        self._matches = []
         lay = QVBoxLayout(self)
-        net_inv = holdings["invested"] - holdings["redeemed"]
-        cur_val = holdings["units"] * nav
-        ret = MFService.simple_return(net_inv, cur_val)
-        color = C["green"] if ret >= 0 else C["red"]
-        hdr = QHBoxLayout()
-        t = QLabel(f"{scheme['amc_name']} \u2014 {scheme['scheme_name']}")
-        t.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
-        t.setWordWrap(True)
-        hdr.addWidget(t, 1)
-        hdr.addWidget(_badge(f"{ret:+.2f}%", color))
-        lay.addLayout(hdr)
-        info = QLabel(
-            f"Folio: {scheme.get('folio_number') or EM_DASH}  {MDOT}  Type: {scheme.get('scheme_type') or EM_DASH}\n"
-            f"Units Held: {holdings['units']:,.4f}  {MDOT}  Latest NAV: {nav:,.4f}\n"
-            f"Invested: {fmt_money(net_inv)}  {MDOT}  Current Value: {fmt_money(cur_val)}"
-        )
-        info.setStyleSheet(f"color:{C['text2']};font-size:12px;")
+        row = QHBoxLayout()
+        self.query_box = QLineEdit(initial_query)
+        self.query_box.setPlaceholderText("Scheme name, e.g. Parag Parikh Flexi Cap")
+        search_btn = QPushButton("Search")
+        search_btn.setObjectName("primary")
+        search_btn.clicked.connect(self._search)
+        row.addWidget(self.query_box, 1)
+        row.addWidget(search_btn)
+        lay.addLayout(row)
+        from PyQt5.QtWidgets import QListWidget
+        self.results = QListWidget()
+        self.results.itemDoubleClicked.connect(self._pick)
+        lay.addWidget(self.results)
+        info = QLabel("Double-click a scheme to fetch its latest NAV. Requires internet access.")
+        info.setStyleSheet(f"color:{C['text3']};font-size:11px;")
         lay.addWidget(info)
-        lay.addWidget(_mf_txn_cards(txns), 1)
         btn_row = QHBoxLayout()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
         btn_row.addStretch()
-        if on_edit:
-            edit_btn = QPushButton("\u270f\ufe0f  Edit Scheme")
-            edit_btn.clicked.connect(lambda checked=False, _cb=on_edit: (_cb(), self.accept()))
-            btn_row.addWidget(edit_btn)
-        ok = QPushButton("Close")
-        ok.clicked.connect(self.accept)
-        btn_row.addWidget(ok)
+        btn_row.addWidget(cancel)
         lay.addLayout(btn_row)
+        if initial_query:
+            self._search()
+
+    def _search(self):
+        q = self.query_box.text().strip()
+        if not q:
+            return
+        self.results.clear()
+        self.results.addItem("Searching...")
+        import urllib.parse
+        url = f"https://api.mfapi.in/mf/search?q={urllib.parse.quote(q)}"
+        self._worker = _NavWorker(url, self)
+        self._worker.result.connect(self._on_search_result)
+        self._worker.error.connect(lambda e: (self.results.clear(), self.results.addItem(f"Error: {e}")))
+        self._worker.start()
+
+    def _on_search_result(self, data):
+        self.results.clear()
+        if not data:
+            self.results.addItem("No matches found.")
+            return
+        matches = data[:30] if isinstance(data, list) else []
+        for m in matches:
+            self.results.addItem(f"{m.get('schemeName', '?')}  [{m.get('schemeCode', '?')}]")
+        self._matches = matches
+
+    def _pick(self, item):
+        idx = self.results.row(item)
+        if not self._matches or idx >= len(self._matches):
+            return
+        m = self._matches[idx]
+        self.results.addItem("Fetching latest NAV...")
+        import urllib.parse
+        url = f"https://api.mfapi.in/mf/{m['schemeCode']}/latest"
+        self._nav_worker = _NavWorker(url, self)
+        self._nav_worker.result.connect(lambda data: self._on_nav_result(data, m))
+        self._nav_worker.error.connect(
+            lambda e: QMessageBox.warning(self, "Fetch Failed", f"Couldn't fetch NAV ({e}).")
+        )
+        self._nav_worker.start()
+
+    def _on_nav_result(self, data, m):
+        rows = data.get("data") or [] if isinstance(data, dict) else []
+        nav = float(rows[0]["nav"]) if rows else None
+        if nav is None:
+            QMessageBox.warning(self, "No Data", "No NAV data available.")
+            return
+        self.result_nav = nav
+        self.result_name = m.get("schemeName")
+        self.accept()
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  WEALTH TAB — 5 top-level pages (no grouping)
+#  WEALTH TAB — 5 top-level pages
 # ══════════════════════════════════════════════════════════════════════════
 class WealthTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
@@ -3153,7 +3528,6 @@ class WealthTab(QWidget):
         heading = QLabel("\U0001f4c8  Wealth")
         heading.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
         outer.addWidget(heading)
-        # 5 top-level nav buttons
         nav_row = QHBoxLayout()
         nav_row.setSpacing(8)
         self.btn_lg = QPushButton("\U0001f91d Loans I Give")
@@ -3168,7 +3542,6 @@ class WealthTab(QWidget):
             nav_row.addWidget(b)
         nav_row.addStretch()
         outer.addLayout(nav_row)
-        # page stack
         self.stack = QStackedWidget()
         outer.addWidget(self.stack, 1)
         self.loans_give_page = LoansGivePage(self.repos, self.services)

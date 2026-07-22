@@ -805,34 +805,8 @@ class AuditTab(QWidget):
         outer.addWidget(sub)
 
         nav = QHBoxLayout()
-        self.btn_regular = QPushButton("\U0001f4cb Regular Transactions")
-        self.btn_wealth = QPushButton("\U0001f4bc Wealth Transactions")
-        self._top_btns = [self.btn_regular, self.btn_wealth]
-        for b in self._top_btns:
-            b.setMinimumHeight(34)
-            b.setCursor(QCursor(Qt.PointingHandCursor))
-            nav.addWidget(b)
-        nav.addStretch()
-        outer.addLayout(nav)
-
-        self.stack = QStackedWidget()
-        outer.addWidget(self.stack, 1)
         self.regular_tab = _AuditSubTab(self.db, self.repos, self.services, wealth_mode=False)
-        self.wealth_tab = _AuditSubTab(self.db, self.repos, self.services, wealth_mode=True)
-        self.stack.addWidget(self.regular_tab)
-        self.stack.addWidget(self.wealth_tab)
-
-        self.btn_regular.clicked.connect(lambda: self._goto(0))
-        self.btn_wealth.clicked.connect(lambda: self._goto(1))
-        _switch_tabs(self._top_btns, 0)
-        self.stack.setCurrentIndex(0)
-
-    def _goto(self, idx):
-        _switch_tabs(self._top_btns, idx)
-        self.stack.setCurrentIndex(idx)
-        tab = self.regular_tab if idx == 0 else self.wealth_tab
-        tab.refresh()
+        outer.addWidget(self.regular_tab)
 
     def refresh(self):
         self.regular_tab.refresh()
-        self.wealth_tab.refresh()

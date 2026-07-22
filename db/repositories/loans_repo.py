@@ -60,16 +60,7 @@ class LoansRepo:
         self.db.execute(f"INSERT INTO repayments({cols}) VALUES({phs})",
                         tuple(kw.values()))
         self.db.commit()
-        total = self.total_repaid(kw["loan_id"])
-        loan = self.get_loan(kw["loan_id"])
-        if loan:
-            if total >= loan["loan_amount"]:
-                self.db.execute("UPDATE loans SET status='CLOSED' WHERE loan_id=?",
-                                (kw["loan_id"],))
-            elif total > 0:
-                self.db.execute("UPDATE loans SET status='PARTIALLY_PAID' WHERE loan_id=?",
-                                (kw["loan_id"],))
-        self.db.commit()
+        self.recalc_status(kw["loan_id"])
 
     def get_repayments(self, loan_id):
         return _rows(self.db.execute(
@@ -83,10 +74,12 @@ class LoansRepo:
         return r["t"]
 
     def sync_overdue(self):
+        """Batch: set ACTIVE loans past due date to OVERDUE (only if not fully paid)."""
         today = date.today().isoformat()
+        # Only mark ACTIVE loans as OVERDUE; PARTIALLY_PAID stays as-is for now
         self.db.execute(
-            "UPDATE loans SET status='OVERDUE' WHERE status='ACTIVE' AND due_date IS NOT NULL AND due_date < ?",
-            (today,))
+            "UPDATE loans SET status='OVERDUE' WHERE status='ACTIVE' "
+            "AND due_date IS NOT NULL AND due_date < ?", (today,))
         self.db.commit()
 
     def update_status(self, loan_id, status):
@@ -94,13 +87,37 @@ class LoansRepo:
         self.db.commit()
 
     def recalc_status(self, loan_id):
-        """Recalculate loan status from current payments. Same algo as add_repayment."""
+        """Comprehensive status recalculation — considers BOTH date and amount.
+        
+        Priority:
+          1. If fully paid (total >= principal) → REPAID (amount trumps date)
+          2. If past due date and has outstanding → OVERDUE (date-based)
+          3. If has some payments → PARTIALLY_PAID (amount-based)
+          4. Otherwise → ACTIVE
+          
+        Note: CLOSED is never changed by recalc — only by explicit user action.
+        """
         loan = self.get_loan(loan_id)
-        if not loan or loan["status"] in ("CLOSED", "CLEARED"):
+        if not loan or loan["status"] == "CLOSED":
             return
         total = self.total_repaid(loan_id)
+        today_str = date.today().isoformat()
+        due = loan.get("due_date")
+
         if total >= loan["loan_amount"]:
-            self.db.execute("UPDATE loans SET status='CLOSED' WHERE loan_id=?", (loan_id,))
+            # Fully paid — REPAID regardless of date
+            new_status = "REPAID"
+        elif due and due < today_str:
+            # Past due date with outstanding balance — OVERDUE
+            new_status = "OVERDUE"
         elif total > 0:
-            self.db.execute("UPDATE loans SET status='PARTIALLY_PAID' WHERE loan_id=?", (loan_id,))
-        self.db.commit()
+            # Some payment made, not fully paid, not overdue
+            new_status = "PARTIALLY_PAID"
+        else:
+            # No payments yet
+            new_status = "ACTIVE"
+
+        if loan["status"] != new_status:
+            self.db.execute("UPDATE loans SET status=? WHERE loan_id=?",
+                            (new_status, loan_id))
+            self.db.commit()
