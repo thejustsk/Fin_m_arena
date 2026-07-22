@@ -740,6 +740,7 @@ class _FunctionPage(QWidget):
         v.setSpacing(10)
         v.setAlignment(Qt.AlignTop)
         scroll.setWidget(inner)
+        self._scroll_ref = scroll  # store for lazy loading
         return scroll, v
 
     def _build_entry(self):
@@ -851,14 +852,18 @@ class _FunctionPage(QWidget):
 
     def _init_lazy_scroll(self):
         """Connect scroll area scrollbar to lazy loading."""
-        scroll = self._list_lay.parentWidget().parentWidget()
+        scroll = getattr(self, '_scroll_ref', None)
         if isinstance(scroll, QScrollArea):
+            try:
+                scroll.verticalScrollBar().valueChanged.disconnect(self._on_scroll)
+            except (TypeError, RuntimeError):
+                pass
             scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
     def _on_scroll(self, value):
         """Load next batch when scrolled near bottom."""
         scroll = self.sender()
-        if not scroll:
+        if not scroll or scroll.maximum() <= 0:
             return
         if value >= scroll.maximum() - self._get_scroll_trigger():
             self._render_next_batch()
@@ -1346,7 +1351,16 @@ class LoansGivePage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            self._list_lay.addWidget(card)
+            all_cards.append(card)
+
+        # Lazy loading
+        if all_cards:
+            first_batch = all_cards[:self._get_batch_size()]
+            self._pending_cards = all_cards[self._get_batch_size():]
+            for c in first_batch:
+                self._list_lay.addWidget(c)
+            if self._pending_cards:
+                self._init_lazy_scroll()
 
     def load_list(self):
         self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")

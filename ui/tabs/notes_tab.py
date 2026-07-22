@@ -312,14 +312,28 @@ class NotesTab(QWidget):
         self.search_box.setStyleSheet(_input_css())
         self.search_box.textChanged.connect(self._load_notes)
         lay.addWidget(self.search_box)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self._notes_scroll = QScrollArea(); self._notes_scroll.setWidgetResizable(True); self._notes_scroll.setFrameShape(QFrame.NoFrame)
+        self._notes_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         inner = QWidget(); inner.setStyleSheet("background:transparent;")
         self.notes_lay = QVBoxLayout(inner)
         self.notes_lay.setSpacing(10); self.notes_lay.setAlignment(Qt.AlignTop)
-        scroll.setWidget(inner)
-        lay.addWidget(scroll, 1)
+        self._notes_scroll.setWidget(inner)
+        lay.addWidget(self._notes_scroll, 1)
         return page
+
+    def _get_notes_batch_size(self):
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='notes_page_size'").fetchone()
+            if r: return int(r[0])
+        except Exception: pass
+        return 50
+
+    def _get_notes_scroll_trigger(self):
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key='notes_scroll_trigger'").fetchone()
+            if r: return int(r[0])
+        except Exception: pass
+        return 200
 
     def _load_notes(self):
         for i in reversed(range(self.notes_lay.count())):
@@ -331,12 +345,41 @@ class NotesTab(QWidget):
             empty.setStyleSheet(f"color:{C['text3']};font-size:13px;padding:24px;")
             empty.setAlignment(Qt.AlignCenter)
             self.notes_lay.addWidget(empty); return
+        all_cards = []
         for n in notes:
             card = NoteCard(n, tx_repo=self.tx)
             card.clicked.connect(self._toggle_card)
             card.edit_requested.connect(self._edit_note)
             card.delete_requested.connect(self._delete_note)
             card.print_requested.connect(self._print_single_note)
+            all_cards.append(card)
+        # Lazy loading
+        batch_size = self._get_notes_batch_size()
+        first_batch = all_cards[:batch_size]
+        self._pending_note_cards = all_cards[batch_size:]
+        for c in first_batch:
+            self.notes_lay.addWidget(c)
+        if self._pending_note_cards:
+            try:
+                self._notes_scroll.verticalScrollBar().valueChanged.disconnect(self._on_notes_scroll)
+            except (TypeError, RuntimeError):
+                pass
+            self._notes_scroll.verticalScrollBar().valueChanged.connect(self._on_notes_scroll)
+
+    def _on_notes_scroll(self, value):
+        scroll = self.sender()
+        if not scroll or scroll.maximum() <= 0:
+            return
+        if value >= scroll.maximum() - self._get_notes_scroll_trigger():
+            self._render_next_note_batch()
+
+    def _render_next_note_batch(self):
+        if not hasattr(self, '_pending_note_cards') or not self._pending_note_cards:
+            return
+        batch_size = self._get_notes_batch_size()
+        batch = self._pending_note_cards[:batch_size]
+        self._pending_note_cards = self._pending_note_cards[batch_size:]
+        for card in batch:
             self.notes_lay.addWidget(card)
 
     def _toggle_card(self, note_id):
