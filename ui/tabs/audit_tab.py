@@ -14,8 +14,7 @@ from datetime import date, timedelta
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QStackedWidget, QMessageBox,
-    QDialog, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFormLayout
+    QDialog, QFormLayout, QScrollArea
 )
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QCursor
@@ -23,10 +22,26 @@ from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tab_btn_active, _tab_btn_inactive, _switch_tabs, ChartView, CHART_TEMPLATE
-from ui.tabs.wealth_tab import _metric_card, _confirm
+try:
+    from ui.tabs.wealth_tab import _metric_card, _confirm
+except ImportError:
+    from ui.theme import C
+    from PyQt5.QtWidgets import QLabel, QFrame, QVBoxLayout, QMessageBox, QSizePolicy
+    from PyQt5.QtCore import Qt
+    def _metric_card(label, value, color=None):
+        color = color or C.get("text", "#101828")
+        card = QFrame()
+        card.setStyleSheet(f"QFrame{{background:{C.get('surface','#fff')};border:1px solid {C.get('border2','#E5E7EB')};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
+        lay = QVBoxLayout(card); lay.setContentsMargins(14,10,14,10); lay.setSpacing(4)
+        v = QLabel(value); v.setStyleSheet(f"font-size:18px;font-weight:800;color:{color};"); lay.addWidget(v)
+        l = QLabel(label); l.setStyleSheet(f"font-size:10px;color:{C.get('text3','#667085')};font-weight:600;text-transform:uppercase;letter-spacing:0.5px;"); lay.addWidget(l)
+        return card
+    def _confirm(parent, title, msg):
+        return QMessageBox.question(parent, title, msg, QMessageBox.Yes|QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
 
 NEEDNWANT_LABELS = {None: "\u2014 Not Set", 1: "Need", 0: "Want"}
+MDOT = "\u00b7"
 
 
 def TODAY():
@@ -226,15 +241,37 @@ class TransactionEditDialog(QDialog):
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
+        delete = QPushButton("\U0001f5d1\ufe0f Delete")
+        delete.setStyleSheet(
+            f"QPushButton{{background:{C['red_bg']};color:{C['red']};"
+            f"border:1.5px solid {C['red']};border-radius:8px;"
+            f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{C['red']};color:white;}}")
+        delete.clicked.connect(self._delete_tx)
+        btn_row.addWidget(delete)
+        btn_row.addStretch()
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         save = QPushButton("\U0001f4be Save Changes")
         save.setObjectName("primary")
         save.clicked.connect(self.accept)
-        btn_row.addStretch()
         btn_row.addWidget(cancel)
         btn_row.addWidget(save)
         lay.addLayout(btn_row)
+        self._deleted = False
+
+    def _delete_tx(self):
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Delete Transaction",
+            f"Delete transaction of {fmt_money(self.tx['amount'])}?\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self._deleted = True
+            self.accept()
+
+    def is_deleted(self):
+        return getattr(self, '_deleted', False)
 
     def changed_fields(self):
         """Returns {field: (old, new)} for every field that changed."""
@@ -319,8 +356,9 @@ class _AuditSubTab(QWidget):
 
         # Filter bar
         filt = QFrame()
-        filt.setObjectName("card")
+        filt.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         filt_lay = QVBoxLayout(filt)
+        filt_lay.setContentsMargins(14, 10, 14, 10)
         row1 = QHBoxLayout()
         self.f_from = QDateEdit(QDate.currentDate().addMonths(-1))
         self.f_from.setCalendarPopup(True)
@@ -365,8 +403,9 @@ class _AuditSubTab(QWidget):
 
         # Bulk toolbar
         bulk = QFrame()
-        bulk.setObjectName("card")
+        bulk.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         bulk_lay = QHBoxLayout(bulk)
+        bulk_lay.setContentsMargins(14, 8, 14, 8)
         self.bulk_count_lbl = QLabel("0 selected")
         self.bulk_count_lbl.setStyleSheet(f"font-weight:700;color:{C['text2']};")
         bulk_lay.addWidget(self.bulk_count_lbl)
@@ -397,20 +436,16 @@ class _AuditSubTab(QWidget):
         bulk_lay.addWidget(self.bulk_apply_btn)
         lay.addWidget(bulk)
 
-        # Table
-        self.table = QTableWidget()
-        cols = ["\u2713", "Date", "Account", "Type", "Amount", "Category",
-                "Person / Desc", "Method", "Need/Want", "PF Cat"]
-        if self.wealth_mode:
-            cols.append("Linked To")
-        cols.append("")
-        self.table.setColumnCount(len(cols))
-        self.table.setHorizontalHeaderLabels(cols)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
-        self.table.itemChanged.connect(self._on_check_changed)
-        lay.addWidget(self.table, 1)
+        # Card scroll area (replaces table)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        self._cards_lay = QVBoxLayout(inner)
+        self._cards_lay.setSpacing(8)
+        self._cards_lay.setAlignment(Qt.AlignTop)
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
         return page
 
     def _apply_quick_range(self, key):
@@ -463,50 +498,143 @@ class _AuditSubTab(QWidget):
         self.f_group_filter.blockSignals(False)
 
     def _render_table(self):
-        self.table.blockSignals(True)
-        self.table.setRowCount(len(self._rows))
-        wealth_col = 10 if self.wealth_mode else None
-        edit_col = 11 if self.wealth_mode else 10
-        for i, r in enumerate(self._rows):
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            chk.setCheckState(Qt.Unchecked)
-            chk.setData(Qt.UserRole, r["id"])
-            self.table.setItem(i, 0, chk)
-            self.table.setItem(i, 1, QTableWidgetItem(r.get("tx_date", "")))
-            self.table.setItem(i, 2, QTableWidgetItem(r.get("account_name") or ""))
-            self.table.setItem(i, 3, QTableWidgetItem(r.get("tx_type", "")))
-            amt_item = QTableWidgetItem(fmt_money(r["amount"]))
-            amt_item.setForeground(Qt.darkGreen if r["tx_type"] == "CREDIT" else Qt.darkRed)
-            self.table.setItem(i, 4, amt_item)
-            self.table.setItem(i, 5, QTableWidgetItem(r.get("cat_name") or "\u2014"))
-            desc = r.get("person_org") or r.get("description") or ""
-            self.table.setItem(i, 6, QTableWidgetItem(desc))
-            self.table.setItem(i, 7, QTableWidgetItem(r.get("method_name") or ""))
-            self.table.setItem(i, 8, QTableWidgetItem(NEEDNWANT_LABELS.get(
-                r.get("neednwant") if r.get("neednwant") in (0, 1) else None, "\u2014")))
-            self.table.setItem(i, 9, QTableWidgetItem(
-                (r.get("pf_category") or "\u2014").replace("_", " ").title()))
-            if self.wealth_mode:
-                link = self._link_map.get(r["id"], {})
-                self.table.setItem(i, wealth_col, QTableWidgetItem(link.get("label", "")))
+        """Render transactions as expandable cards."""
+        from PyQt5.QtWidgets import QSizePolicy
+        # Clear existing cards
+        while self._cards_lay.count():
+            item = self._cards_lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        self._check_btns = {}  # {tx_id: QPushButton checkbox}
+
+        if not self._rows:
+            empty = QLabel("No transactions found for the selected filters.")
+            empty.setStyleSheet(f"color:{C['text3']};padding:24px;font-size:13px;")
+            empty.setAlignment(Qt.AlignCenter)
+            self._cards_lay.addWidget(empty)
+            self._update_bulk_count()
+            return
+
+        for r in self._rows:
+            tx_id = r["id"]
+            is_credit = r["tx_type"] == "CREDIT"
+            amt_color = C["green"] if is_credit else C["red"]
+            prefix = "+" if is_credit else "\u2212"
+            link = self._link_map.get(tx_id, {}) if self.wealth_mode else {}
+            linked_label = link.get("label", "")
+
+            # Card
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}"
+                f"QFrame:hover{{border-color:{C['accent']};}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(14, 10, 14, 10)
+            cl.setSpacing(4)
+
+            # Row 1: Checkbox + Date + Type badge + Amount
+            top = QHBoxLayout()
+            chk = QPushButton("\u25CB")
+            chk.setFixedSize(24, 24)
+            chk.setFocusPolicy(Qt.NoFocus)
+            chk.setCursor(QCursor(Qt.PointingHandCursor))
+            chk.setStyleSheet(
+                f"QPushButton{{background:{C['surface']};color:{C['text3']};"
+                f"border:2px solid {C['border']};border-radius:12px;font-size:10px;font-weight:700;}}"
+                f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+            self._check_states = getattr(self, '_check_states', {})
+            self._check_states[tx_id] = False
+            def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
+                self._check_states[_tid] = not self._check_states[_tid]
+                is_on = self._check_states[_tid]
+                _btn.setText("\u2713" if is_on else "\u25CB")
+                _btn.setStyleSheet(
+                    f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
+                    f"color:{'white' if is_on else C['text3']};"
+                    f"border:2px solid {C['accent'] if is_on else C['border']};"
+                    f"border-radius:12px;font-size:10px;font-weight:700;}}"
+                    f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+                self._update_bulk_count()
+            chk.clicked.connect(_toggle_chk)
+            self._check_btns[tx_id] = chk
+            top.addWidget(chk)
+
+            date_lbl = QLabel(r.get("tx_date", ""))
+            date_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+            top.addWidget(date_lbl)
+
+            type_badge = QLabel(r["tx_type"])
+            type_badge.setStyleSheet(
+                f"color:white;background:{amt_color};border-radius:10px;"
+                f"padding:2px 8px;font-size:10px;font-weight:700;border:none;")
+            top.addWidget(type_badge)
+
+            if self.wealth_mode and linked_label:
+                link_badge = QLabel(f"\U0001f517 {link.get('group', '')}")
+                link_badge.setStyleSheet(
+                    f"color:{C['accent']};background:{C['accent_bg']};border-radius:10px;"
+                    f"padding:2px 8px;font-size:10px;font-weight:700;border:none;")
+                top.addWidget(link_badge)
+
+            top.addStretch()
+
+            amt_lbl = QLabel(f"{prefix}{fmt_money(r['amount'])}")
+            amt_lbl.setStyleSheet(f"font-size:16px;font-weight:900;color:{amt_color};")
+            top.addWidget(amt_lbl)
+            cl.addLayout(top)
+
+            # Row 2: Details
+            details = []
+            if r.get("account_name"):
+                details.append(f"\U0001f3e6 {r['account_name']}")
+            if r.get("cat_name"):
+                details.append(f"\U0001f4cb {r['cat_name']}")
+            if r.get("method_name"):
+                details.append(f"\U0001f4b3 {r['method_name']}")
+            person = r.get("person_org") or ""
+            desc = r.get("description") or ""
+            if person or desc:
+                _em_dash = "\u2014"
+            details.append(f"\U0001f464 {person}{(' ' + _em_dash + ' ' + desc) if desc else ''}")
+            nw = NEEDNWANT_LABELS.get(
+                r.get("neednwant") if r.get("neednwant") in (0, 1) else None)
+            if nw and nw != "\u2014 Not Set":
+                details.append(f"\U0001f3af {nw}")
+
+            det_lbl = QLabel(f"  {MDOT}  ".join(details))
+            det_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};")
+            det_lbl.setWordWrap(True)
+            cl.addWidget(det_lbl)
+
+            # Row 3: Edit button (hidden, shown on card click)
             edit_btn = QPushButton("\u270f\ufe0f Edit")
-            edit_btn.clicked.connect(lambda *, tid=r["id"]: self._open_edit(tid))
-            self.table.setCellWidget(i, edit_col, edit_btn)
-        self.table.blockSignals(False)
+            edit_btn.setFixedHeight(24)
+            edit_btn.setFocusPolicy(Qt.NoFocus)
+            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+            edit_btn.setStyleSheet(
+                f"QPushButton{{background:{C['surface']};color:{C['accent']};"
+                f"border:1.5px solid {C['accent']};border-radius:8px;"
+                f"padding:4px 12px;font-size:11px;font-weight:600;}}"
+                f"QPushButton:hover{{background:{C['accent_bg']};}}")
+            edit_btn.hide()
+            edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
+            cl.addWidget(edit_btn)
+
+            # Click card → show edit button
+            def _show_edit(event, btn=edit_btn):
+                btn.show()
+            card.mousePressEvent = _show_edit
+
+            self._cards_lay.addWidget(card)
+
         self._update_bulk_count()
 
-    def _on_check_changed(self, item):
-        if item.column() == 0:
-            self._update_bulk_count()
-
     def _checked_ids(self):
-        ids = []
-        for i in range(self.table.rowCount()):
-            item = self.table.item(i, 0)
-            if item and item.checkState() == Qt.Checked:
-                ids.append(item.data(Qt.UserRole))
-        return ids
+        """Get IDs of checked transaction cards."""
+        return [tx_id for tx_id, checked in getattr(self, '_check_states', {}).items() if checked]
 
     def _update_bulk_count(self):
         n = len(self._checked_ids())
@@ -521,6 +649,10 @@ class _AuditSubTab(QWidget):
         link = self._link_map.get(tx_id) if self.wealth_mode else None
         dlg = TransactionEditDialog(tx, self.acc, self.lu, wealth_link=link, parent=self)
         if dlg.exec_() == QDialog.Accepted:
+            # Handle deletion
+            if dlg.is_deleted():
+                self._delete_transaction(tx_id)
+                return
             changes = dlg.changed_fields()
             if not changes:
                 return
@@ -540,6 +672,40 @@ class _AuditSubTab(QWidget):
             if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
                 parent_tab._notify_data_changed()
             QMessageBox.information(self, "Saved", f"Updated {len(changes)} field(s).")
+
+    def _delete_transaction(self, tx_id):
+        """Delete transaction with cascade to linked wealth records."""
+        link = self._link_map.get(tx_id)
+        if link:
+            grp = link["group"]
+            try:
+                if grp == "Loan Given":
+                    self.db.execute("UPDATE loans SET trxn_id=NULL WHERE trxn_id=?", (tx_id,))
+                elif grp == "Loan Repayment":
+                    self.db.execute("UPDATE repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp == "Loan Taken":
+                    self.db.execute("UPDATE borrowed_loans SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp == "EMI Payment":
+                    self.db.execute("UPDATE borrowed_loan_repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp == "Deposit Received":
+                    self.db.execute("UPDATE deposits_from_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp == "Deposit Repayment":
+                    self.db.execute("UPDATE deposit_repayments_to_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp == "FD Deposit":
+                    self.db.execute("UPDATE fixed_deposits SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                elif grp.startswith("MF "):
+                    self.db.execute("UPDATE mf_transactions SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
+                self.db.commit()
+            except Exception as e:
+                print(f"[WARN] Cascade unlink failed: {e}")
+        self.tx.delete(tx_id)
+        self.load_records()
+        parent_tab = self.parent()
+        while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
+            parent_tab = parent_tab.parent()
+        if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
+            parent_tab._notify_data_changed()
+        QMessageBox.information(self, "Deleted", "Transaction deleted successfully.")
 
     def _cascade_amount(self, tx_id, new_amount):
         """Push edited transaction amount into the linked wealth table."""

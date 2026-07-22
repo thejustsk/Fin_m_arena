@@ -689,8 +689,14 @@ class _FunctionPage(QWidget):
         self.services = services
         self.db = repos["accounts"].db
         self._list_data = []
-        self._loaded = False  # tracks if _render_list has run
+        self._loaded = False
+        self._wealth_tab_ref = None  # set by WealthTab after creation
         self._build_skeleton()
+
+    def _notify_data_changed(self):
+        """Notify other tabs that data changed. Called after saves."""
+        if self._wealth_tab_ref:
+            self._wealth_tab_ref._notify_data_changed()
 
     def _build_skeleton(self):
         lay = QVBoxLayout(self)
@@ -1309,6 +1315,7 @@ class LoansGivePage(_FunctionPage):
                 self.db.commit()
                 self._loaded = False
                 self.load_list(force=True)
+                self._notify_data_changed()
             return _save
 
         edit_form = _build_edit_form(fields, _make_save(), lambda: None, accent_color=color)
@@ -1350,6 +1357,7 @@ class LoansGivePage(_FunctionPage):
                     self.db.commit()
                     self._loaded = False
                     self.load_list(force=True)
+                    self._notify_data_changed()
                 return _save
             return _on_rep_edit
 
@@ -2078,6 +2086,7 @@ class LoansTakePage(_FunctionPage):
                 self.db.commit()
                 self._loaded = False
                 self.load_list(force=True)
+                self._notify_data_changed()
             return _save
         edit_form = _build_edit_form(fields, _make_save(), lambda: None, accent_color=color)
         edit_btn = QPushButton("\u270f\ufe0f Edit Details")
@@ -2110,6 +2119,7 @@ class LoansTakePage(_FunctionPage):
                     self.db.commit()
                     self._loaded = False
                     self.load_list(force=True)
+                    self._notify_data_changed()
                 return _save
             return _on_rep_edit
         repayments = self._lt_repay.get(lid, [])
@@ -2404,6 +2414,7 @@ class FDGivePage(_FunctionPage):
                     self.db.commit()
                     self._loaded = False
                     self.load_list(force=True)
+                    self._notify_data_changed()
                 return _save
 
             edit_form = _build_edit_form(fields, _make_fd_save(fid), lambda: None,
@@ -2963,6 +2974,7 @@ class FDOthersPage(_FunctionPage):
                     self.db.commit()
                     self._loaded = False
                     self.load_list(force=True)
+                    self._notify_data_changed()
                 return _save
 
             edit_form = _build_edit_form(fields, _make_fo_save(did), lambda: None,
@@ -3005,6 +3017,7 @@ class FDOthersPage(_FunctionPage):
                         self.db.commit()
                         self._loaded = False
                         self.load_list(force=True)
+                        self._notify_data_changed()
                     return _save
                 return _on_rep_edit
 
@@ -3099,6 +3112,7 @@ class MFPage(_FunctionPage):
         self._nav_fetched = False
         self._nav_worker = None
         self._loading_dlg = None
+        self._user_visited = False
         super().__init__(repos, services, parent)
         self._start_background_nav_fetch()
 
@@ -3123,6 +3137,8 @@ class MFPage(_FunctionPage):
         if self._loading_dlg:
             self._loading_dlg.accept()
             self._loading_dlg = None
+        # Rebuild if page was already loaded with stale NAVs
+        if self._loaded:
             self._build_list_data()
 
     def _make_loading_dlg(self):
@@ -3607,9 +3623,13 @@ class MFPage(_FunctionPage):
         if self._nav_fetched:
             self._build_list_data()
         elif self._nav_worker and self._nav_worker.isRunning():
-            if not self._loading_dlg:
-                self._loading_dlg = self._make_loading_dlg()
-                self._loading_dlg.show()
+            # Show loading dialog only on explicit user visit, not during pre-load
+            if self._user_visited:
+                if not self._loading_dlg:
+                    self._loading_dlg = self._make_loading_dlg()
+                    self._loading_dlg.show()
+            else:
+                self._build_list_data()  # use last txn NAVs for now
         else:
             self._nav_fetched = True
             self._build_list_data()
@@ -3851,7 +3871,17 @@ class WealthTab(QWidget):
         self.db = db
         self.repos = repos
         self.services = services
+        self._refresh_callback = None
         self._build()
+
+    def set_refresh_callback(self, callback):
+        """Called by MainWindow to notify other tabs when wealth data changes."""
+        self._refresh_callback = callback
+
+    def _notify_data_changed(self):
+        """Notify other tabs (audit, home, etc.) that wealth data changed."""
+        if self._refresh_callback:
+            self._refresh_callback()
 
     def _build(self):
         outer = QVBoxLayout(self)
@@ -3886,6 +3916,7 @@ class WealthTab(QWidget):
             self.fd_give_page, self.fd_others_page, self.mf_page,
         ]
         for p in self._pages:
+            p._wealth_tab_ref = self
             self.stack.addWidget(p)
         self.btn_lg.clicked.connect(lambda: self._goto(0))
         self.btn_lt.clicked.connect(lambda: self._goto(1))
@@ -3898,6 +3929,9 @@ class WealthTab(QWidget):
     def _goto(self, i):
         _switch_tabs(self._nav_btns, i)
         self.stack.setCurrentIndex(i)
+        # Mark MF page as user-visited (enables loading dialog)
+        if hasattr(self._pages[i], '_user_visited'):
+            self._pages[i]._user_visited = True
         self._pages[i].load_list()
 
     def refresh(self):

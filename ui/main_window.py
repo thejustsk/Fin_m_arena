@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
 
         # Connect Audit tab's data-changed signal to refresh all tabs
         self._tabs["audit"].set_refresh_callback(self._refresh_all_tabs)
+        self._tabs["wealth"].set_refresh_callback(self._refresh_all_tabs)
 
         layout.addWidget(self.stack)
 
