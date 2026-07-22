@@ -734,6 +734,7 @@ class _FunctionPage(QWidget):
             self.load_list()
 
     def refresh(self):
+        self._loaded = False
         self._refresh_entry_dropdowns()
         self.load_list()
 

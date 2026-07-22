@@ -21,7 +21,7 @@ from PyQt5.QtGui import QCursor
 
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.tabs.database_tab import _tab_btn_active, _tab_btn_inactive, _switch_tabs, ChartView, CHART_TEMPLATE
+from ui.tabs.database_tab import _tab_btn_active, _tab_btn_inactive, _switch_tabs, ChartView, CHART_TEMPLATE, _tx_card, _day_header
 try:
     from ui.tabs.wealth_tab import _metric_card, _confirm
 except ImportError:
@@ -498,16 +498,15 @@ class _AuditSubTab(QWidget):
         self.f_group_filter.blockSignals(False)
 
     def _render_table(self):
-        """Render transactions as expandable cards."""
-        from PyQt5.QtWidgets import QSizePolicy
-        # Clear existing cards
+        """Render transactions using the same card style as database tab, with date grouping."""
+        from collections import OrderedDict
         while self._cards_lay.count():
             item = self._cards_lay.takeAt(0)
             w = item.widget()
             if w:
                 w.deleteLater()
 
-        self._check_btns = {}  # {tx_id: QPushButton checkbox}
+        self._check_states = {}
 
         if not self._rows:
             empty = QLabel("No transactions found for the selected filters.")
@@ -517,118 +516,77 @@ class _AuditSubTab(QWidget):
             self._update_bulk_count()
             return
 
-        for r in self._rows:
-            tx_id = r["id"]
-            is_credit = r["tx_type"] == "CREDIT"
-            amt_color = C["green"] if is_credit else C["red"]
-            prefix = "+" if is_credit else "\u2212"
-            link = self._link_map.get(tx_id, {}) if self.wealth_mode else {}
-            linked_label = link.get("label", "")
+        # Group by date (newest first)
+        by_date = OrderedDict()
+        for r in sorted(self._rows, key=lambda t: t.get("tx_date", ""), reverse=True):
+            d = r.get("tx_date", "")
+            by_date.setdefault(d, []).append(r)
 
-            # Card
-            card = QFrame()
-            card.setStyleSheet(
-                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}"
-                f"QFrame:hover{{border-color:{C['accent']};}}"
-                f"QLabel{{background:transparent;border:none;}}")
-            cl = QVBoxLayout(card)
-            cl.setContentsMargins(14, 10, 14, 10)
-            cl.setSpacing(4)
+        for d_str, day_txns in by_date.items():
+            try:
+                day_label = date.fromisoformat(d_str).strftime("%A, %d %b")
+            except Exception:
+                day_label = d_str
+            self._cards_lay.addWidget(_day_header(day_label))
 
-            # Row 1: Checkbox + Date + Type badge + Amount
-            top = QHBoxLayout()
-            chk = QPushButton("\u25CB")
-            chk.setFixedSize(24, 24)
-            chk.setFocusPolicy(Qt.NoFocus)
-            chk.setCursor(QCursor(Qt.PointingHandCursor))
-            chk.setStyleSheet(
-                f"QPushButton{{background:{C['surface']};color:{C['text3']};"
-                f"border:2px solid {C['border']};border-radius:12px;font-size:10px;font-weight:700;}}"
-                f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
-            self._check_states = getattr(self, '_check_states', {})
-            self._check_states[tx_id] = False
-            def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
-                self._check_states[_tid] = not self._check_states[_tid]
-                is_on = self._check_states[_tid]
-                _btn.setText("\u2713" if is_on else "\u25CB")
-                _btn.setStyleSheet(
-                    f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
-                    f"color:{'white' if is_on else C['text3']};"
-                    f"border:2px solid {C['accent'] if is_on else C['border']};"
-                    f"border-radius:12px;font-size:10px;font-weight:700;}}"
+            for r in day_txns:
+                tx_id = r["id"]
+                link = self._link_map.get(tx_id, {}) if self.wealth_mode else {}
+
+                # Row: [checkbox] [card] [edit button]
+                row_widget = QWidget()
+                row_widget.setStyleSheet("background:transparent;border:none;")
+                row_lay = QHBoxLayout(row_widget)
+                row_lay.setContentsMargins(0, 0, 0, 0)
+                row_lay.setSpacing(8)
+
+                # Checkbox (left, outside card)
+                chk = QPushButton("\u25CB")
+                chk.setFixedSize(28, 28)
+                chk.setFocusPolicy(Qt.NoFocus)
+                chk.setCursor(QCursor(Qt.PointingHandCursor))
+                chk.setStyleSheet(
+                    f"QPushButton{{background:{C['surface']};color:{C['text3']};"
+                    f"border:2px solid {C['border']};border-radius:14px;font-size:12px;font-weight:700;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
-                self._update_bulk_count()
-            chk.clicked.connect(_toggle_chk)
-            self._check_btns[tx_id] = chk
-            top.addWidget(chk)
+                self._check_states[tx_id] = False
+                def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
+                    self._check_states[_tid] = not self._check_states[_tid]
+                    is_on = self._check_states[_tid]
+                    _btn.setText("\u2713" if is_on else "\u25CB")
+                    _btn.setStyleSheet(
+                        f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
+                        f"color:{'white' if is_on else C['text3']};"
+                        f"border:2px solid {C['accent'] if is_on else C['border']};"
+                        f"border-radius:14px;font-size:12px;font-weight:700;}}"
+                        f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+                    self._update_bulk_count()
+                chk.clicked.connect(_toggle_chk)
+                row_lay.addWidget(chk, 0, Qt.AlignTop)
 
-            date_lbl = QLabel(r.get("tx_date", ""))
-            date_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-            top.addWidget(date_lbl)
+                # Transaction card (database tab style)
+                card = _tx_card(r)
+                row_lay.addWidget(card, 1)
 
-            type_badge = QLabel(r["tx_type"])
-            type_badge.setStyleSheet(
-                f"color:white;background:{amt_color};border-radius:10px;"
-                f"padding:2px 8px;font-size:10px;font-weight:700;border:none;")
-            top.addWidget(type_badge)
+                # Edit button (right, outside card)
+                edit_btn = QPushButton("\u270f\ufe0f")
+                edit_btn.setFixedSize(32, 32)
+                edit_btn.setFocusPolicy(Qt.NoFocus)
+                edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                edit_btn.setStyleSheet(
+                    f"QPushButton{{background:{C['surface']};color:{C['accent']};"
+                    f"border:1.5px solid {C['border2']};border-radius:16px;font-size:14px;}}"
+                    f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+                edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
+                row_lay.addWidget(edit_btn, 0, Qt.AlignTop)
 
-            if self.wealth_mode and linked_label:
-                link_badge = QLabel(f"\U0001f517 {link.get('group', '')}")
-                link_badge.setStyleSheet(
-                    f"color:{C['accent']};background:{C['accent_bg']};border-radius:10px;"
-                    f"padding:2px 8px;font-size:10px;font-weight:700;border:none;")
-                top.addWidget(link_badge)
+                self._cards_lay.addWidget(row_widget)
 
-            top.addStretch()
-
-            amt_lbl = QLabel(f"{prefix}{fmt_money(r['amount'])}")
-            amt_lbl.setStyleSheet(f"font-size:16px;font-weight:900;color:{amt_color};")
-            top.addWidget(amt_lbl)
-            cl.addLayout(top)
-
-            # Row 2: Details
-            details = []
-            if r.get("account_name"):
-                details.append(f"\U0001f3e6 {r['account_name']}")
-            if r.get("cat_name"):
-                details.append(f"\U0001f4cb {r['cat_name']}")
-            if r.get("method_name"):
-                details.append(f"\U0001f4b3 {r['method_name']}")
-            person = r.get("person_org") or ""
-            desc = r.get("description") or ""
-            if person or desc:
-                _em_dash = "\u2014"
-            details.append(f"\U0001f464 {person}{(' ' + _em_dash + ' ' + desc) if desc else ''}")
-            nw = NEEDNWANT_LABELS.get(
-                r.get("neednwant") if r.get("neednwant") in (0, 1) else None)
-            if nw and nw != "\u2014 Not Set":
-                details.append(f"\U0001f3af {nw}")
-
-            det_lbl = QLabel(f"  {MDOT}  ".join(details))
-            det_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};")
-            det_lbl.setWordWrap(True)
-            cl.addWidget(det_lbl)
-
-            # Row 3: Edit button (hidden, shown on card click)
-            edit_btn = QPushButton("\u270f\ufe0f Edit")
-            edit_btn.setFixedHeight(24)
-            edit_btn.setFocusPolicy(Qt.NoFocus)
-            edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
-            edit_btn.setStyleSheet(
-                f"QPushButton{{background:{C['surface']};color:{C['accent']};"
-                f"border:1.5px solid {C['accent']};border-radius:8px;"
-                f"padding:4px 12px;font-size:11px;font-weight:600;}}"
-                f"QPushButton:hover{{background:{C['accent_bg']};}}")
-            edit_btn.hide()
-            edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
-            cl.addWidget(edit_btn)
-
-            # Click card → show edit button
-            def _show_edit(event, btn=edit_btn):
-                btn.show()
-            card.mousePressEvent = _show_edit
-
-            self._cards_lay.addWidget(card)
+                # Wealth link label below card (if applicable)
+                if self.wealth_mode and link:
+                    link_lbl = QLabel(f"  \U0001f517 {link.get('group', '')}: {link.get('label', '')}")
+                    link_lbl.setStyleSheet(f"color:{C['accent']};font-size:11px;font-weight:600;")
+                    self._cards_lay.addWidget(link_lbl)
 
         self._update_bulk_count()
 
