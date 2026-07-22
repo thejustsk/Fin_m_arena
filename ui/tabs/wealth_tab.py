@@ -372,21 +372,21 @@ class WealthCard(QFrame):
         lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(8)
 
-        # ── Row 1: Title + Badge + Principal (right side below badge) ──
+        # ── Row 1: Title (left) | Badge + Principal (right) ──
         top = QHBoxLayout()
-        left_col = QVBoxLayout()
-        left_col.setSpacing(2)
         t = QLabel(title)
         t.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
-        left_col.addWidget(t)
+        top.addWidget(t, 1)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(2)
+        right_col.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self._badge_lbl = _badge(badge_text, badge_color)
-        left_col.addWidget(self._badge_lbl)
-        top.addLayout(left_col, 1)
-        # Principal value right-aligned
+        right_col.addWidget(self._badge_lbl, 0, Qt.AlignRight)
         a = QLabel(amount_text)
         a.setStyleSheet(f"font-size:18px;font-weight:900;color:{C['text']};")
-        a.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        top.addWidget(a)
+        a.setAlignment(Qt.AlignRight)
+        right_col.addWidget(a)
+        top.addLayout(right_col)
         lay.addLayout(top)
 
         # ── Row 2: Subtitle ──
@@ -446,17 +446,14 @@ class WealthCard(QFrame):
 
 
 def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=None):
-    """Single repayment row — click to expand, shows edit area with card's accent style."""
+    """Single repayment row with visible edit button and expandable edit form."""
     accent = accent_color or C["accent"]
     card = QFrame()
-    card._rep_expanded = False
     card.setStyleSheet(
         f"QFrame{{background:{_hex_rgba(accent, 0.05)};border:1px solid {_hex_rgba(accent, 0.2)};border-radius:8px;}}"
         f"QFrame:hover{{border-color:{accent};}}"
         f"QLabel{{background:transparent;border:none;}}"
     )
-    if on_edit:
-        card.setCursor(QCursor(Qt.PointingHandCursor))
     cl = QVBoxLayout(card)
     cl.setContentsMargins(12, 8, 12, 8)
     cl.setSpacing(4)
@@ -477,56 +474,62 @@ def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=N
         dl.setWordWrap(True)
         cl.addWidget(dl)
 
-    # Expand area: edit button + edit form (hidden by default)
-    expand_area = QWidget()
-    expand_area.setStyleSheet("background:transparent;border:none;")
-    ea_lay = QVBoxLayout(expand_area)
-    ea_lay.setContentsMargins(0, 4, 0, 0)
-    ea_lay.setSpacing(6)
+    # Edit form (hidden)
+    edit_frame = QFrame()
+    edit_frame.setStyleSheet(
+        f"QFrame{{background:transparent;border:1.5px solid {accent};border-radius:6px;}}"
+        f"QLabel{{background:transparent;border:none;}}"
+        f"QLineEdit, QDoubleSpinBox, QDateEdit{{"
+        f"border:1.5px solid {_hex_rgba(accent, 0.3)};border-radius:6px;padding:5px 8px;"
+        f"background:{C['surface']};}}"
+        f"QLineEdit:focus, QDoubleSpinBox:focus, QDateEdit:focus{{border-color:{accent};}}"
+    )
+    ef_lay = QVBoxLayout(edit_frame)
+    ef_lay.setContentsMargins(10, 8, 10, 8)
+    ef_lay.setSpacing(6)
+    e_title = QLabel("\u270f\ufe0f Edit Repayment")
+    e_title.setStyleSheet(f"font-size:12px;font-weight:700;color:{accent};")
+    ef_lay.addWidget(e_title)
+    e_form = QFormLayout()
+    e_form.setSpacing(4)
+    e_amt = QDoubleSpinBox()
+    e_amt.setRange(0, 99999999)
+    e_amt.setDecimals(2)
+    e_amt.setPrefix("\u20b9 ")
+    e_amt.setValue(rep[amount_key])
+    e_date = QDateEdit(QDate.fromString(rep.get(date_key, ""), "yyyy-MM-dd"))
+    e_date.setCalendarPopup(True)
+    e_desc = QLineEdit(rep.get("description") or "")
+    e_desc.setPlaceholderText("Description (optional)")
+    e_form.addRow("Amount", e_amt)
+    e_form.addRow("Date", e_date)
+    e_form.addRow("Description", e_desc)
+    ef_lay.addLayout(e_form)
+    e_btns = QHBoxLayout()
+    e_save = QPushButton("\U0001f4be Save")
+    e_save.setStyleSheet(_accent_save_css(accent))
+    e_cancel = QPushButton("Cancel")
+    e_cancel.setStyleSheet(_accent_btn_css(accent))
+    e_btns.addStretch()
+    e_btns.addWidget(e_cancel)
+    e_btns.addWidget(e_save)
+    ef_lay.addLayout(e_btns)
+    edit_frame.hide()
+    cl.addWidget(edit_frame)
 
+    # Edit button (always visible if on_edit provided)
     if on_edit:
-        # Edit form
-        edit_frame = QFrame()
-        edit_frame.setStyleSheet(
-            f"QFrame{{background:transparent;border:1.5px solid {accent};border-radius:6px;}}"
-            f"QLabel{{background:transparent;border:none;}}"
-            f"QLineEdit, QDoubleSpinBox, QDateEdit{{"
-            f"border:1.5px solid {_hex_rgba(accent, 0.3)};border-radius:6px;padding:5px 8px;"
-            f"background:{C['surface']};}}"
-            f"QLineEdit:focus, QDoubleSpinBox:focus, QDateEdit:focus{{border-color:{accent};}}"
-        )
-        ef_lay = QVBoxLayout(edit_frame)
-        ef_lay.setContentsMargins(10, 8, 10, 8)
-        ef_lay.setSpacing(6)
-        e_title = QLabel("\u270f\ufe0f Edit Repayment")
-        e_title.setStyleSheet(f"font-size:12px;font-weight:700;color:{accent};")
-        ef_lay.addWidget(e_title)
-        e_form = QFormLayout()
-        e_form.setSpacing(4)
-        e_amt = QDoubleSpinBox()
-        e_amt.setRange(0, 99999999)
-        e_amt.setDecimals(2)
-        e_amt.setPrefix("\u20b9 ")
-        e_amt.setValue(rep[amount_key])
-        e_date = QDateEdit(QDate.fromString(rep.get(date_key, ""), "yyyy-MM-dd"))
-        e_date.setCalendarPopup(True)
-        e_desc = QLineEdit(rep.get("description") or "")
-        e_desc.setPlaceholderText("Description (optional)")
-        e_form.addRow("Amount", e_amt)
-        e_form.addRow("Date", e_date)
-        e_form.addRow("Description", e_desc)
-        ef_lay.addLayout(e_form)
-        e_btns = QHBoxLayout()
-        e_save = QPushButton("\U0001f4be Save")
-        e_save.setStyleSheet(_accent_save_css(accent))
-        e_cancel = QPushButton("Cancel")
-        e_cancel.setStyleSheet(_accent_btn_css(accent))
-        e_btns.addStretch()
-        e_btns.addWidget(e_cancel)
-        e_btns.addWidget(e_save)
-        ef_lay.addLayout(e_btns)
-        ea_lay.addWidget(edit_frame)
-        edit_frame.hide()
+        edit_btn = QPushButton("\u270f\ufe0f Edit")
+        edit_btn.setFixedHeight(24)
+        edit_btn.setFocusPolicy(Qt.NoFocus)
+        edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        edit_btn.setStyleSheet(_accent_btn_css(accent))
+        cl.addWidget(edit_btn)
+
+        def _toggle_edit():
+            show = not edit_frame.isVisible()
+            edit_frame.setVisible(show)
+            edit_btn.setText("Cancel Edit" if show else "\u270f\ufe0f Edit")
 
         def _save_edit():
             data = {
@@ -534,31 +537,29 @@ def _make_repayment_card(rep, amount_key, date_key, accent_color=None, on_edit=N
                 "date": e_date.date().toString("yyyy-MM-dd"),
                 "description": e_desc.text().strip() or None,
             }
-            on_edit(data)
+            save_fn = on_edit()       # no args → _r uses captured repayment record
+            if callable(save_fn):
+                # Show saving indicator
+                saving_lbl = QLabel("\U0001f4be Saving...")
+                saving_lbl.setStyleSheet(f"color:{accent};font-size:11px;font-weight:700;")
+                cl.addWidget(saving_lbl)
+                from PyQt5.QtWidgets import QApplication
+                QApplication.processEvents()
+                save_fn(data)          # pass form data to _save
 
+        edit_btn.clicked.connect(_toggle_edit)
+        e_cancel.clicked.connect(_toggle_edit)
         e_save.clicked.connect(_save_edit)
-        e_cancel.clicked.connect(lambda: (edit_frame.hide(), setattr(card, '_rep_expanded', False)))
-
-    expand_area.hide()
-    cl.addWidget(expand_area)
-
-    def _toggle_expand():
-        if card._rep_expanded:
-            expand_area.hide()
-            card._rep_expanded = False
-        else:
-            expand_area.show()
-            card._rep_expanded = True
-
-    if on_edit:
-        card.mousePressEvent = lambda ev: _toggle_expand()
 
     return card
 
 
 def _repayment_section(repayments, amount_key, date_key, empty_msg="No repayments logged yet.",
                         accent_color=None, on_edit=None):
-    """VBox of repayment cards for an expanded detail area."""
+    """VBox of repayment cards for an expanded detail area.
+    
+    on_edit(rep_data, save_data) — called with the repayment record and form data.
+    """
     container = QWidget()
     container.setStyleSheet("background:transparent;border:none;")
     lay = QVBoxLayout(container)
@@ -573,7 +574,7 @@ def _repayment_section(repayments, amount_key, date_key, empty_msg="No repayment
         for r in repayments:
             card = _make_repayment_card(r, amount_key, date_key,
                                          accent_color=accent_color,
-                                         on_edit=(lambda _r=r: on_edit(_r)) if on_edit else None)
+                                         on_edit=(lambda _r=r, _data=None: on_edit(_r)) if on_edit else None)
             lay.addWidget(card)
     return container
 
@@ -1079,16 +1080,6 @@ class LoansGivePage(_FunctionPage):
         )
 
     # ── List ──
-    def load_list(self):
-        self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")
-        self.repos["loans"].sync_overdue()
-        # Recalc all non-closed loans for comprehensive status
-        for l in self.repos["loans"].list_loans():
-            if l["status"] not in ("CLOSED",):
-                self.repos["loans"].recalc_status(l["loan_id"])
-        self._list_data = self.repos["loans"].list_loans()
-        self._render_list()
-
     def _render_list(self):
         if not hasattr(self, "_list_lay"):
             return
@@ -1150,10 +1141,9 @@ class LoansGivePage(_FunctionPage):
             )
             card.clicked.connect(self._toggle_card)
 
-            # ── Expanded detail area ──
             lid = l["loan_id"]
 
-            # Detail info using kv layout
+            # Detail info
             detail_info = QLabel()
             detail_info.setTextFormat(Qt.RichText)
             detail_info.setText(
@@ -1209,8 +1199,9 @@ class LoansGivePage(_FunctionPage):
             edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
             edit_btn.setStyleSheet(_accent_btn_css(color))
             edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
-            card.add_expand_widget(edit_btn)
-            card.add_expand_widget(edit_form)
+            if l["status"] not in ("CLOSED",):
+                card.add_expand_widget(edit_btn)
+                card.add_expand_widget(edit_form)
 
             # Divider
             div = QFrame()
@@ -1246,7 +1237,21 @@ class LoansGivePage(_FunctionPage):
             )
             card.add_expand_widget(rep_section)
 
-            # Print button
+            # Mark as Closed for REPAID
+            if l["status"] == "REPAID":
+                close_btn = QPushButton("\u2705 Mark as Closed")
+                close_btn.setFixedHeight(28)
+                close_btn.setFocusPolicy(Qt.NoFocus)
+                close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.setStyleSheet(
+                    f"QPushButton{{background:{C['green_bg']};color:{C['green']};"
+                    f"border:1.5px solid {C['green']};border-radius:8px;"
+                    f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+                    f"QPushButton:hover{{background:{C['green']};color:white;}}")
+                close_btn.clicked.connect(lambda _, _lid=lid: self._mark_closed_lg(_lid))
+                card.add_expand_widget(close_btn)
+
+            # Print
             def _make_print(_l=l, _a=a):
                 def _print():
                     info = [
@@ -1284,17 +1289,17 @@ class LoansGivePage(_FunctionPage):
             btn_row.addStretch()
             card.add_expand_layout(btn_row)
 
-            # Mark as Closed for REPAID
-            if l["status"] == "REPAID":
-                close_btn = QPushButton("\u2705 Mark as Closed")
-                close_btn.setObjectName("primary")
-                close_btn.setFixedHeight(28)
-                close_btn.setFocusPolicy(Qt.NoFocus)
-                close_btn.setCursor(QCursor(Qt.PointingHandCursor))
-                close_btn.clicked.connect(lambda _, _lid=lid: self._mark_closed_lg(_lid))
-                card.add_expand_widget(close_btn)
-
             self._list_lay.addWidget(card)
+
+    def load_list(self):
+        self.db.execute("UPDATE loans SET status='CLOSED' WHERE status='CLEARED'")
+        self.repos["loans"].sync_overdue()
+        # Recalc all non-closed loans for comprehensive status
+        for l in self.repos["loans"].list_loans():
+            if l["status"] not in ("CLOSED",):
+                self.repos["loans"].recalc_status(l["loan_id"])
+        self._list_data = self.repos["loans"].list_loans()
+        self._render_list()
 
     def _mark_closed_lg(self, loan_id):
         if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
@@ -1670,7 +1675,6 @@ class LoansTakePage(_FunctionPage):
     # ── List ──
     def load_list(self):
         self.repos["borrowed"].sync_overdue()
-        # Recalc all non-closed loans for comprehensive status
         for l in self.repos["borrowed"].list_loans():
             if l["status"] not in ("CLOSED",):
                 self.repos["borrowed"].recalc_status(l["loan_id"])
@@ -1840,8 +1844,9 @@ class LoansTakePage(_FunctionPage):
             edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
             edit_btn.setStyleSheet(_accent_btn_css(color))
             edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
-            card.add_expand_widget(edit_btn)
-            card.add_expand_widget(edit_form)
+            if l["status"] not in ("CLOSED",):
+                card.add_expand_widget(edit_btn)
+                card.add_expand_widget(edit_form)
 
             # Divider
             div = QFrame()
@@ -1880,10 +1885,14 @@ class LoansTakePage(_FunctionPage):
             # Mark Closed button (only for REPAID)
             if l["status"] == "REPAID":
                 close_btn = QPushButton("\u2705 Mark as Closed")
-                close_btn.setObjectName("primary")
                 close_btn.setFixedHeight(28)
                 close_btn.setFocusPolicy(Qt.NoFocus)
                 close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.setStyleSheet(
+                    f"QPushButton{{background:{C['green_bg']};color:{C['green']};"
+                    f"border:1.5px solid {C['green']};border-radius:8px;"
+                    f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+                    f"QPushButton:hover{{background:{C['green']};color:white;}}")
                 close_btn.clicked.connect(lambda _, _lid=lid: self._mark_closed(_lid))
                 card.add_expand_widget(close_btn)
 
@@ -1938,9 +1947,6 @@ class LoansTakePage(_FunctionPage):
             self.load_list()
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  FD I DEPOSIT
-# ══════════════════════════════════════════════════════════════════════════
 class FDGivePage(_FunctionPage):
     ICON = "\U0001f3e6"
     TITLE = "FD I Deposit"
@@ -2105,7 +2111,7 @@ class FDGivePage(_FunctionPage):
                 item_id=fd["fd_id"],
                 title=fd["account_name"] or "Fixed Deposit",
                 subtitle=f"{fd['interest_rate']}% {MDOT} {fd['start_date']} \u2192 {fd['maturity_date']}",
-                amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
+            amount_text=fmt_money(fd["principal_amount"]) + "  Principal",
                 badge_text=fd["status"], badge_color=color, progress_pct=pct,
                 extra_line=extra,
             )
@@ -2136,18 +2142,19 @@ class FDGivePage(_FunctionPage):
             detail_info.setWordWrap(True)
             card.add_expand_widget(detail_info)
 
-            # Edit form
+            # Edit form (skip for withdrawn)
             fields = [
                 ("Principal", "number", fd["principal_amount"], None),
                 ("Interest Rate", "rate", fd.get("interest_rate") or 0, None),
+                ("Start Date", "date", fd.get("start_date"), None),
                 ("Maturity Date", "date", fd.get("maturity_date"), None),
             ]
 
             def _make_fd_save(_fid):
                 def _save(data):
                     self.db.execute(
-                        "UPDATE fixed_deposits SET principal_amount=?, interest_rate=?, maturity_date=? WHERE fd_id=?",
-                        (data["Principal"], data["Interest Rate"], data["Maturity Date"], _fid))
+                        "UPDATE fixed_deposits SET principal_amount=?, interest_rate=?, start_date=?, maturity_date=? WHERE fd_id=?",
+                        (data["Principal"], data["Interest Rate"], data["Start Date"], data["Maturity Date"], _fid))
                     fd_rec = self.repos["fd"].get(_fid)
                     if fd_rec and fd_rec.get("linked_txn_id"):
                         self.db.execute("UPDATE transactions SET amount=? WHERE id=?",
@@ -2164,8 +2171,9 @@ class FDGivePage(_FunctionPage):
             edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
             edit_btn.setStyleSheet(_accent_btn_css(color))
             edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
-            card.add_expand_widget(edit_btn)
-            card.add_expand_widget(edit_form)
+            if fd["status"] not in ("WITHDRAWN", "PREMATURE_WITHDRAWN"):
+                card.add_expand_widget(edit_btn)
+                card.add_expand_widget(edit_form)
 
             # Action buttons
             btn_row = QHBoxLayout()
@@ -2281,7 +2289,7 @@ class FDGivePage(_FunctionPage):
             fee = fee_spin.value()
             net = max(p + interest - fee, 0)
             _log_ledger_txn(
-                self.repos["transactions"], self.db, account_id=acc_cb.currentData(),
+            self.repos["transactions"], self.db, account_id=acc_cb.currentData(),
                 pay_method=method_cb.currentData(), tx_type="CREDIT", amount=net, person_org=None,
                 description="FD premature withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
                 category_names=("Investment", "Finance")
@@ -2408,19 +2416,6 @@ class FDOthersPage(_FunctionPage):
                 break
         QMessageBox.information(self, "Added", f"'{name}' added as a depositor.")
 
-    def _refresh_entry_dropdowns(self):
-        self.fo_dep_depositor.clear_items()
-        for d in self.repos["deposits"].list_depositors():
-            self.fo_dep_depositor.add_item(d["name"], d["depositor_id"])
-        self.fo_rep_deposit.clear_items()
-        for d in self.repos["deposits"].list_deposits():
-            if d["status"] not in ("CLOSED", "REPAID"):
-                self.fo_rep_deposit.add_item(
-                    f"{d['depositor_name']} \u2014 {fmt_money(d['principal_amount'])} ({d['status']})",
-                    d["deposit_id"]
-                )
-        self._update_fo_pending()
-
     def _update_fo_pending(self):
         did = self.fo_rep_deposit.get_data()
         if not did:
@@ -2509,15 +2504,6 @@ class FDOthersPage(_FunctionPage):
         else:
             QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
-    # ── List ──
-    def load_list(self):
-        # Recalc all non-closed deposits for comprehensive status
-        for d in self.repos["deposits"].list_deposits():
-            if d["status"] not in ("CLOSED",):
-                self.repos["deposits"].recalc_status(d["deposit_id"])
-        self._list_data = self.repos["deposits"].list_deposits()
-        self._render_list()
-
     def _analysis(self, dep):
         total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
         months = self._dep_months(dep)
@@ -2541,6 +2527,27 @@ class FDOthersPage(_FunctionPage):
         if dd:
             return max(1, round((date.fromisoformat(dd) - sd).days / 30.44))
         return 12
+
+    # ── List ──
+    def load_list(self):
+        for d in self.repos["deposits"].list_deposits():
+            if d["status"] not in ("CLOSED",):
+                self.repos["deposits"].recalc_status(d["deposit_id"])
+        self._list_data = self.repos["deposits"].list_deposits()
+        self._render_list()
+
+    def _refresh_entry_dropdowns(self):
+        self.fo_dep_depositor.clear_items()
+        for d in self.repos["deposits"].list_depositors():
+            self.fo_dep_depositor.add_item(d["name"], d["depositor_id"])
+        self.fo_rep_deposit.clear_items()
+        for d in self.repos["deposits"].list_deposits():
+            if d["status"] not in ("CLOSED", "REPAID"):
+                self.fo_rep_deposit.add_item(
+                    f"{d['depositor_name']} \u2014 {fmt_money(d['principal_amount'])} ({d['status']})",
+                    d["deposit_id"]
+                )
+        self._update_fo_pending()
 
     def _render_list(self):
         if not hasattr(self, "_list_lay"):
@@ -2585,8 +2592,7 @@ class FDOthersPage(_FunctionPage):
             interest_free = not d["interest_rate"]
             color = status_color(d["status"])
             interest_tag = "Interest-Free" if interest_free else f"{d['interest_rate']}%"
-            status_tag = d["status"]
-            badge_text = f"{interest_tag} | {status_tag}"
+            badge_text = f"{interest_tag} | {d['status']}"
             extra = (f"<span style='font-size:15px;font-weight:800;color:{C['text']};'>"
                      f"{fmt_money(a['current_value'])}</span>  "
                      f"<span style='font-size:11px;color:{C['text3']};'>Outstanding</span><br>"
@@ -2602,10 +2608,9 @@ class FDOthersPage(_FunctionPage):
                 progress_pct=pct, extra_line=extra,
             )
             card.clicked.connect(self._toggle_card)
-
             did = d["deposit_id"]
 
-            # Detail
+            # Detail info
             mthd = d.get("interest_method") or "SIMPLE"
             mth_label = "Simple" if mthd == "SIMPLE" else "Compound"
             detail_info = QLabel()
@@ -2664,8 +2669,9 @@ class FDOthersPage(_FunctionPage):
             edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
             edit_btn.setStyleSheet(_accent_btn_css(color))
             edit_btn.clicked.connect(lambda _, ef=edit_form: ef.setVisible(not ef.isVisible()))
-            card.add_expand_widget(edit_btn)
-            card.add_expand_widget(edit_form)
+            if d["status"] not in ("CLOSED",):
+                card.add_expand_widget(edit_btn)
+                card.add_expand_widget(edit_form)
 
             # Divider
             div = QFrame()
@@ -2704,10 +2710,14 @@ class FDOthersPage(_FunctionPage):
             # Mark Closed button (only for REPAID)
             if d["status"] == "REPAID":
                 close_btn = QPushButton("\u2705 Mark as Closed")
-                close_btn.setObjectName("primary")
                 close_btn.setFixedHeight(28)
                 close_btn.setFocusPolicy(Qt.NoFocus)
                 close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+                close_btn.setStyleSheet(
+                    f"QPushButton{{background:{C['green_bg']};color:{C['green']};"
+                    f"border:1.5px solid {C['green']};border-radius:8px;"
+                    f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+                    f"QPushButton:hover{{background:{C['green']};color:white;}}")
                 close_btn.clicked.connect(lambda _, _did=did: self._mark_closed(_did))
                 card.add_expand_widget(close_btn)
 
