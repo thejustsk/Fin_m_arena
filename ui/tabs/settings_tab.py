@@ -564,19 +564,27 @@ class SettingsTab(QWidget):
             "settings": "\u2699\ufe0f  Settings",
         }
         for key, label in tab_names.items():
-            row = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};font-weight:600;")
-            row.addWidget(lbl)
-            row.addStretch()
-
-            # Toggle button (like 2FA toggle)
             is_protected = False
             try:
                 existing = self.db.execute("SELECT * FROM tab_security WHERE tab_key=?", (key,)).fetchone()
                 is_protected = bool(existing)
             except: pass
 
+            # Container frame for each tab row
+            row_frame = QFrame()
+            row_frame.setStyleSheet(
+                f"QFrame{{background:{C['bg']};border:1px solid {C['border2']};border-radius:8px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            row = QHBoxLayout(row_frame)
+            row.setContentsMargins(12, 6, 12, 6)
+            row.setSpacing(10)
+
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};font-weight:600;")
+            row.addWidget(lbl)
+            row.addStretch()
+
+            # Toggle button (like 2FA toggle)
             toggle = QPushButton("ON" if is_protected else "OFF")
             toggle.setCheckable(True)
             toggle.setChecked(is_protected)
@@ -589,7 +597,7 @@ class SettingsTab(QWidget):
             toggle.clicked.connect(lambda checked, k=key, btn=toggle: self._toggle_tab_security_btn(k, checked, btn))
             self._tab_sec_checks[key] = toggle
             row.addWidget(toggle)
-            tsf.addLayout(row)
+            tsf.addWidget(row_frame)
 
         l.addWidget(ts_frame)
         l.addStretch()
