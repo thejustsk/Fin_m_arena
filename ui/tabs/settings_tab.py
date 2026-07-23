@@ -806,6 +806,31 @@ class SettingsTab(QWidget):
         self.storage_info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
         self.storage_info.setWordWrap(True); sf.addWidget(self.storage_info)
         l.addWidget(st_frame)
+
+        # Coming soon container
+        cs_frame = QFrame()
+        cs_frame.setStyleSheet(f"QFrame{{background:{C['accent_bg']};border:1.5px dashed {C['accent']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        cs_lay = QVBoxLayout(cs_frame); cs_lay.setContentsMargins(16,16,16,16); cs_lay.setSpacing(8)
+        cs_icon = QLabel("\U0001f680")
+        cs_icon.setStyleSheet("font-size:28px;")
+        cs_icon.setAlignment(Qt.AlignCenter)
+        cs_lay.addWidget(cs_icon)
+        cs_title = QLabel("Coming Soon")
+        cs_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['accent']};")
+        cs_title.setAlignment(Qt.AlignCenter)
+        cs_lay.addWidget(cs_title)
+        cs_desc = QLabel(
+            "\u2022  Data Export (CSV / Excel)\n"
+            "\u2022  Data Import from Bank Statements\n"
+            "\u2022  Data Take Down (Delete All Data)\n"
+            "\u2022  Cloud Backup & Sync"
+        )
+        cs_desc.setStyleSheet(f"font-size:12px;color:{C['text2']};")
+        cs_desc.setAlignment(Qt.AlignCenter)
+        cs_desc.setWordWrap(True)
+        cs_lay.addWidget(cs_desc)
+        l.addWidget(cs_frame)
+
         l.addStretch()
         return w
 
@@ -828,15 +853,133 @@ class SettingsTab(QWidget):
         self.storage_info.setText(f"Database: {db_size/1024:.1f} KB\nBackups: {total_bk/1024:.1f} KB ({count} files)")
 
     # ══════════════════════════════════════════════
-    # USER GUIDE (placeholder)
+    # USER GUIDE (4 sub-tabs)
     # ══════════════════════════════════════════════
     def _user_guide_tab(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16); l.setAlignment(Qt.AlignCenter)
-        icon = QLabel("\U0001f4d6"); icon.setStyleSheet("font-size:48px;"); icon.setAlignment(Qt.AlignCenter); l.addWidget(icon)
-        title = QLabel("User Guide"); title.setStyleSheet(f"font-size:20px;font-weight:800;color:{C['text']};"); title.setAlignment(Qt.AlignCenter); l.addWidget(title)
-        desc = QLabel("A comprehensive user guide will be available here soon.\n\nStay tuned for detailed instructions on all features.")
-        desc.setStyleSheet(f"font-size:13px;color:{C['text3']};"); desc.setAlignment(Qt.AlignCenter); desc.setWordWrap(True); l.addWidget(desc)
-        l.addStretch()
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        t = QTabWidget()
+        t.addTab(self._guide_walkthrough(), "Walk Through")
+        t.addTab(self._guide_functions(), "Functions")
+        t.addTab(self._guide_scheme(), "Working Scheme")
+        t.addTab(self._guide_ui(), "UI Details")
+        l.addWidget(t)
+        return w
+
+    def _guide_walkthrough(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        content = QLabel(
+            "<h3>\U0001f4d6 Walk Through</h3>"
+            "<p><b>Step 1: Set up your accounts</b><br>"
+            "Go to Settings \u2192 Accounts. Add your bank accounts, cash, and wallets. "
+            "Each account tracks its own balance.</p>"
+            "<p><b>Step 2: Add your cards</b><br>"
+            "Go to Credit Cards or Debit Cards tab. Link cards to your accounts. "
+            "Credit cards track billing cycles and due dates.</p>"
+            "<p><b>Step 3: Record transactions</b><br>"
+            "Use the Transactions tab to record daily income and expenses. "
+            "Transfers between accounts are also supported.</p>"
+            "<p><b>Step 4: Track wealth</b><br>"
+            "Use the Wealth tab for loans, FDs, and mutual funds. "
+            "Each item has detailed tracking and repayment history.</p>"
+            "<p><b>Step 5: Review in Audit</b><br>"
+            "The Audit tab shows all transactions with filters, bulk editing, "
+            "and wealth-linked badges.</p>"
+        )
+        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
+        content.setWordWrap(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        scroll.setWidget(content)
+        l.addWidget(scroll, 1)
+        return w
+
+    def _guide_functions(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        content = QLabel(
+            "<h3>\U0001f527 Functions</h3>"
+            "<p><b>\U0001f4dd Transactions</b> \u2014 Record income (credit) and expenses (debit). "
+            "Supports categories, payment methods, and need/want tagging.</p>"
+            "<p><b>\U0001f50d Audit</b> \u2014 View all transactions with advanced filters. "
+            "Bulk update categories, need/want, and PF categories. "
+            "Delete and edit with verification.</p>"
+            "<p><b>\U0001f4c8 Wealth</b> \u2014 Track loans (given/taken), FDs, deposits, "
+            "and mutual funds. Each has status tracking, repayment history, and detailed analysis.</p>"
+            "<p><b>\U0001f4b3 Credit Cards</b> \u2014 Manage credit cards with billing cycles, "
+            "FIFO payment allocation, due date reminders, and settlement tracking.</p>"
+            "<p><b>\U0001f4b3 Debit Cards</b> \u2014 Manage debit cards linked to current accounts. "
+            "View account transactions with monthly grouping.</p>"
+            "<p><b>\U0001f4cb Notes</b> \u2014 Create and organize notes with tags. "
+            "Link notes to transactions for reference.</p>"
+        )
+        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
+        content.setWordWrap(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        scroll.setWidget(content)
+        l.addWidget(scroll, 1)
+        return w
+
+    def _guide_scheme(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        content = QLabel(
+            "<h3>\u2699\ufe0f Working Scheme</h3>"
+            "<p><b>Data Storage</b><br>"
+            "All data is stored locally in a SQLite database (finance.db). "
+            "No internet connection required. No data is sent to external servers.</p>"
+            "<p><b>Security</b><br>"
+            "Password protection with optional TOTP (2FA). "
+            "Tab-level security for sensitive areas. "
+            "Google OAuth for alternative login.</p>"
+            "<p><b>Wealth Linking</b><br>"
+            "Wealth items (loans, FDs, MFs) create linked transactions automatically. "
+            "Edits in Audit cascade to wealth records. "
+            "Status is auto-calculated (Active, Overdue, Repaid, Closed).</p>"
+            "<p><b>Card Billing</b><br>"
+            "Credit cards use FIFO (First-In-First-Out) payment allocation. "
+            "Statement cycles are computed from statement date. "
+            "Reminders track due dates and overdue amounts.</p>"
+            "<p><b>Backup</b><br>"
+            "Automatic backups in finance_data/backups/. "
+            "Keeps last 14 backups. Manual backup available in Settings \u2192 Data Management.</p>"
+        )
+        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
+        content.setWordWrap(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        scroll.setWidget(content)
+        l.addWidget(scroll, 1)
+        return w
+
+    def _guide_ui(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        content = QLabel(
+            "<h3>\U0001f5bc\ufe0f UI Details</h3>"
+            "<p><b>Sidebar</b><br>"
+            "Left navigation with collapsible icon mode. "
+            "Click the header to toggle. Shows payment due reminders when expanded.</p>"
+            "<p><b>Home</b><br>"
+            "Dashboard with KPI cards (today, week, month, year). "
+            "Quick access tiles for all tabs.</p>"
+            "<p><b>Carousel</b><br>"
+            "Credit and Debit card tabs use a 3D carousel. "
+            "Drag to scroll, click to flip (show back), click stripe to view details.</p>"
+            "<p><b>Smart Scroll</b><br>"
+            "Transaction lists use lazy loading. "
+            "Wealth cards load in batches. "
+            "Debit card transactions load by month groups.</p>"
+            "<p><b>Theme</b><br>"
+            "Light theme with indigo accent (#4F46E5). "
+            "Consistent styling across all inputs, buttons, and dialogs.</p>"
+            "<p><b>Keyboard Shortcuts</b><br>"
+            "Tab: Move between fields. Enter: Submit form. "
+            "Left/Right arrows: Scroll carousel. Space: Flip card.</p>"
+        )
+        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
+        content.setWordWrap(True)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        scroll.setWidget(content)
+        l.addWidget(scroll, 1)
         return w
 
     # ══════════════════════════════════════════════
