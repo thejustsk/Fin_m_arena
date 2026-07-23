@@ -896,18 +896,19 @@ class _AuditSubTab(QWidget):
         tx = self.tx.get(tx_id)
         if not tx:
             return
-        if not self._verify_edit():
-            return
         link = self._link_map.get(tx_id)
         wealth_status = self._get_wealth_status(tx_id)
         dlg = TransactionEditDialog(tx, self.acc, self.lu, wealth_link=link, wealth_status=wealth_status, parent=self)
         if dlg.exec_() == QDialog.Accepted:
-            # Handle deletion
+            # Handle deletion (no verification needed for delete)
             if dlg.is_deleted():
                 self._delete_transaction(tx_id)
                 return
             changes = dlg.changed_fields()
             if not changes:
+                return
+            # Verify on SAVE, not on open
+            if not self._verify_edit():
                 return
             update_kw = {field: new for field, (old, new) in changes.items()}
             self.tx.update(tx_id, **update_kw)
@@ -922,6 +923,8 @@ class _AuditSubTab(QWidget):
                 self._cascade_date(tx_id, changes["tx_date"][1])
             if "amount" in changes or "tx_date" in changes:
                 self._recalc_status(tx_id)
+            # Mark linked wealth record as updated (for badge sync)
+            self._mark_wealth_updated(tx_id)
             self.load_records()
             # Notify parent to refresh other tabs
             parent_tab = self.parent()
@@ -1065,6 +1068,34 @@ class _AuditSubTab(QWidget):
         except Exception as e:
             print(f"[WARN] Status recalc failed: {e}")
 
+
+    def _mark_wealth_updated(self, tx_id):
+        """Set updated_at on the linked wealth record so the wealth tab shows Updated badge."""
+        link = self._link_map.get(tx_id)
+        if not link:
+            return
+        grp = link["group"]
+        try:
+            if grp == "Loan Given":
+                self.db.execute("UPDATE loans SET updated_at=? WHERE trxn_id=?", (TODAY(), tx_id))
+            elif grp == "Loan Repayment":
+                row = self.db.execute("SELECT loan_id FROM repayments WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row: self.db.execute("UPDATE loans SET updated_at=? WHERE loan_id=?", (TODAY(), row["loan_id"]))
+            elif grp == "Loan Taken":
+                self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE linked_txn_id=?", (TODAY(), tx_id))
+            elif grp == "EMI Payment":
+                row = self.db.execute("SELECT loan_id FROM borrowed_loan_repayments WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row: self.db.execute("UPDATE borrowed_loans SET updated_at=? WHERE loan_id=?", (TODAY(), row["loan_id"]))
+            elif grp == "Deposit Received":
+                self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE linked_txn_id=?", (TODAY(), tx_id))
+            elif grp == "Deposit Repayment":
+                row = self.db.execute("SELECT deposit_id FROM deposit_repayments_to_others WHERE linked_txn_id=?", (tx_id,)).fetchone()
+                if row: self.db.execute("UPDATE deposits_from_others SET updated_at=? WHERE deposit_id=?", (TODAY(), row["deposit_id"]))
+            elif grp == "FD Deposit":
+                self.db.execute("UPDATE fixed_deposits SET updated_at=? WHERE linked_txn_id=?", (TODAY(), tx_id))
+            self.db.commit()
+        except Exception as e:
+            print(f"[WARN] mark_wealth_updated failed: {e}")
 
     def _apply_bulk(self):
         ids = self._checked_ids()

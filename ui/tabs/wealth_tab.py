@@ -1863,12 +1863,32 @@ class LoansTakePage(_FunctionPage):
         ids = [l["loan_id"] for l in loans]
         repaid_map = self._batch_sum("borrowed_loan_repayments", "loan_id", "amount_paid", ids)
         today_str = date.today().isoformat()
+        # Pre-fetch repayments for non-EMI analysis
+        repay_map = self._batch_query("borrowed_loan_repayments", "loan_id", ids)
         for l in loans:
             if l["status"] == "CLOSED":
                 continue
             total = repaid_map.get(l["loan_id"], 0)
             due = l.get("due_date")
-            if total >= l["principal_amount"]:
+            emi_type = l.get("emi_type") or "EMI"
+            rate = l.get("interest_rate") or 0
+            if emi_type == "NON_EMI":
+                if rate > 0 and total > 0:
+                    # Non-EMI with interest: use analysis for accurate outstanding
+                    method = l.get("interest_method") or "SIMPLE"
+                    payments = repay_map.get(l["loan_id"], [])
+                    from services.loan_service import LoanService as _LS
+                    a = _LS.non_emi_analysis(
+                        l["principal_amount"], rate, total, l["start_date"],
+                        payments=payments, method=method)
+                    fully_paid = a["current_value"] <= 0
+                else:
+                    # Non-EMI zero-interest: simple principal check
+                    fully_paid = total >= l["principal_amount"]
+            else:
+                # EMI: simple principal check (EMI analysis handles interest via schedule)
+                fully_paid = total >= l["principal_amount"]
+            if fully_paid and total > 0:
                 new_status = "REPAID"
             elif due and due < today_str:
                 new_status = "OVERDUE"
