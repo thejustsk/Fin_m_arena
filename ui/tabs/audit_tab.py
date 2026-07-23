@@ -699,12 +699,16 @@ class _AuditSubTab(QWidget):
         from collections import OrderedDict
         from ui.tabs.database_tab import _get_pref, COMPLETE_PAGE_SIZE
 
-        # Clear existing
+        # Clear existing (immediate delete, no ghost widgets)
+        import sip
         while self._cards_lay.count():
             item = self._cards_lay.takeAt(0)
             w = item.widget()
             if w:
-                w.deleteLater()
+                try:
+                    sip.delete(w)
+                except Exception:
+                    w.deleteLater()
 
         self._check_states = {}
         self._all_render_items = []  # list of (type, data) tuples
@@ -743,7 +747,7 @@ class _AuditSubTab(QWidget):
                 row_widget.setStyleSheet("background:transparent;border:none;")
                 row_lay = QHBoxLayout(row_widget)
                 row_lay.setContentsMargins(0, 0, 0, 0)
-                row_lay.setSpacing(10)
+                row_lay.setSpacing(8)
 
                 # Checkbox
                 chk = QPushButton("\u25CB")
@@ -910,6 +914,26 @@ class _AuditSubTab(QWidget):
             # Verify on SAVE, not on open
             if not self._verify_edit():
                 return
+            # Show updating popup
+            from PyQt5.QtWidgets import QApplication
+            upd_dlg = QDialog(self)
+            upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
+            upd_dlg.setFixedSize(260, 100)
+            upd_frame = QFrame(upd_dlg)
+            upd_frame.setGeometry(10, 10, 240, 80)
+            upd_frame.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1.5px solid {C['accent']};"
+                f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+            upd_lay = QVBoxLayout(upd_frame)
+            upd_lay.setContentsMargins(16, 12, 16, 12)
+            upd_lbl = QLabel("\U0001f504  Updating...")
+            upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
+            upd_lbl.setAlignment(Qt.AlignCenter)
+            upd_lay.addWidget(upd_lbl)
+            upd_dlg.show()
+            QApplication.processEvents()
+
             update_kw = {field: new for field, (old, new) in changes.items()}
             self.tx.update(tx_id, **update_kw)
             self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), tx_id))
@@ -926,13 +950,26 @@ class _AuditSubTab(QWidget):
             # Mark linked wealth record as updated (for badge sync)
             self._mark_wealth_updated(tx_id)
             self.load_records()
+            # Close updating popup and show done state
+            try:
+                upd_lbl.setText("\u2705  Updated!")
+                upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
+                ok_btn = QPushButton("OK")
+                ok_btn.setObjectName("primary")
+                ok_btn.setFixedHeight(28)
+                ok_btn.clicked.connect(upd_dlg.accept)
+                upd_lay.addWidget(ok_btn)
+                ok_btn.setFocus()
+                QApplication.processEvents()
+            except Exception:
+                pass
             # Notify parent to refresh other tabs
             parent_tab = self.parent()
             while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
                 parent_tab = parent_tab.parent()
             if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
                 parent_tab._notify_data_changed()
-            QMessageBox.information(self, "Saved", f"Updated {len(changes)} field(s).")
+
 
     def _delete_transaction(self, tx_id):
         """Delete transaction with cascade to linked wealth records."""
@@ -1117,9 +1154,6 @@ class _AuditSubTab(QWidget):
             QMessageBox.information(self, "Nothing to Apply",
                                     "Pick at least one field to change.")
             return
-        if not _confirm(self, "Bulk Update",
-                        f"Apply these changes to {len(ids)} selected transaction(s)?"):
-            return
         for tid in ids:
             tx = self.tx.get(tid)
             if not tx:
@@ -1133,7 +1167,6 @@ class _AuditSubTab(QWidget):
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
         self.load_records()
-        QMessageBox.information(self, "Updated", f"{len(ids)} transaction(s) updated.")
 
     # ───────────────────────── INSIGHTS ────────────────────────────────
     def _build_insights(self):
