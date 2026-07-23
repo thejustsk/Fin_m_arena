@@ -97,6 +97,19 @@ CAT_ICONS = {
     "entertainment": "🎬", "transfer": "🔄", "other": "📋",
 }
 
+
+# Custom icon cache from preferences — overrides CAT_ICONS
+_CAT_ICON_CACHE = {}
+
+def _refresh_cat_icons(db):
+    """Load custom category icons from preferences into cache."""
+    global _CAT_ICON_CACHE
+    try:
+        rows = db.execute("SELECT key, value FROM preferences WHERE key LIKE 'cat_icon_%'").fetchall()
+        _CAT_ICON_CACHE = {r["key"].replace("cat_icon_", ""): r["value"] for r in rows if r["value"]}
+    except:
+        _CAT_ICON_CACHE = {}
+
 ACCT_TYPE_LABELS = {
     "CURRENT": "🏦 Bank Accounts",
     "WALLET": "👛 Wallets",
@@ -152,7 +165,7 @@ def _tx_card(tx, running_bal=None):
     lay.setSpacing(14)
 
     cat_id = tx.get("category") or "other"
-    icon = CAT_ICONS.get(cat_id, "📋")
+    icon = _CAT_ICON_CACHE.get(cat_id) or CAT_ICONS.get(cat_id, "📋")
     cat_color = tx.get("cat_color") or "#6B7280"
     icon_lbl = QLabel(icon)
     icon_lbl.setFixedSize(44, 44)
@@ -1507,4 +1520,5 @@ class DatabaseTab(QWidget):
                 QMessageBox.warning(self, "Error", f"Could not open PDF:\n{e}")
 
     def refresh(self):
+        _refresh_cat_icons(self.db)
         self._load_complete()

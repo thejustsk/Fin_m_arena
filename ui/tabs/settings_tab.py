@@ -1,14 +1,73 @@
-"""Settings tab — Accounts, Lookups, Security, Preferences. Shared table style."""
+"""Settings tab — Accounts, Lookups, Security, Preferences, Data Management, User Guide."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QTableWidget, QTableWidgetItem,
                               QTabWidget, QLineEdit, QComboBox, QDoubleSpinBox,
                               QFormLayout, QDialog, QDialogButtonBox, QMessageBox,
-                              QSpinBox, QCheckBox, QFrame)
+                              QSpinBox, QCheckBox, QFrame, QScrollArea, QGridLayout,
+                              QSizePolicy)
 from PyQt5.QtCore import Qt
+from datetime import datetime
 from ui.theme import C
 from ui.sidebar import fmt_money
-from ui.widgets.searchable_combo import SearchableCombo
 from ui.widgets.metric_card import mk_table
+
+
+# Default icons for categories (same as database_tab CAT_ICONS)
+_CAT_ICONS = {
+    "food_dining": "\U0001f354", "transport": "\U0001f697", "shopping": "\U0001f6cd\ufe0f",
+    "bills_utilities": "\U0001f4a1", "rent": "\U0001f3e0", "salary": "\U0001f4b0",
+    "investment": "\U0001f4c8", "health": "\U0001f3e5", "education": "\U0001f4da",
+    "entertainment": "\U0001f3ac", "transfer": "\U0001f504", "other": "\U0001f4cb",
+}
+
+# Icon palette for selection
+_ICON_PALETTE = [
+    # Food & Drink
+    "🍔", "🍕", "🍜", "🍞", "🍟", "🍫",
+    "🍰", "🍱", "🍦", "🍩", "🧀", "🧁",
+    "🥚", "🥛", "🥐", "🍎", "🍊", "🍅",
+    # Transport
+    "🚗", "🚕", "🚌", "🛵", "✈️", "🛴",
+    "🚢", "🚋", "🛹", "🚲", "🏍️", "🚘",
+    # Shopping & Money
+    "🛍️", "🏪", "🛒", "📱", "💻", "📷",
+    "💡", "💰", "💳", "💸", "💵", "💱",
+    "🏦", "📈", "📊", "📉", "📅", "📄",
+    # Home & Building
+    "🏠", "🏡", "🏢", "🏥", "🏨", "🏪",
+    "🏫", "🏭", "🏮", "🏯", "🏰", "⛪",
+    # Health & Education
+    "💊", "💉", "🏥", "📚", "🎓",
+    "📖", "📝", "📋", "📑", "📎", "📏",
+    # Entertainment & Sports
+    "🎬", "🎨", "🎵", "🎶", "🎮", "🎲",
+    "⚽", "🏀", "🏈", "🎾", "🎿", "🏆",
+    # People & Gestures
+    "👍", "👎", "👋", "🙏", "🎉", "🎊",
+    "🎁", "🎈", "🥳", "😎", "🔥", "✨",
+    # Objects & Symbols
+    "⚙️", "🔒", "🔓", "🔔", "❤️", "⭐",
+    "🚀", "🎯", "💠", "🌈", "💧", "💣",
+    "⚠️", "✅", "❌", "❗", "❓", "☑️",
+    # Nature & Animals
+    "🐾", "🐱", "🐶", "🐻", "🐰", "🐼",
+    "🌹", "🌻", "🌲", "🌿", "🍀", "🌱",
+]
+
+# Color palette for selection
+_COLOR_PALETTE = [
+    "#EF4444", "#F97316", "#F59E0B", "#EAB308", "#84CC16", "#22C55E",
+    "#10B981", "#14B8A6", "#06B6D4", "#0EA5E9", "#3B82F6", "#6366F1",
+    "#8B5CF6", "#A855F7", "#D946EF", "#EC4899", "#F43F5E", "#78716C",
+    "#6B7280", "#9CA3AF", "#374151", "#111827", "#1F2937", "#4B5563",
+]
+
+ACCT_TYPE_CONFIG = {
+    "CURRENT":  {"icon": "\U0001f3e6", "label": "Bank Accounts",   "color": "#4F46E5"},
+    "CASH":     {"icon": "\U0001f4b5", "label": "Cash",            "color": "#F59E0B"},
+    "WALLET":   {"icon": "\U0001f45b", "label": "Wallets",         "color": "#8B5CF6"},
+    "SAVINGS":  {"icon": "\U0001f3e6", "label": "Savings / FD",    "color": "#059669"},
+}
 
 
 class SettingsTab(QWidget):
@@ -34,16 +93,122 @@ class SettingsTab(QWidget):
         self.tabs.addTab(self._lookups_tab(), "Categories & Lookups")
         self.tabs.addTab(self._security_tab(), "Security")
         self.tabs.addTab(self._prefs_tab(), "Preferences")
+        self.tabs.addTab(self._data_mgmt_tab(), "Data Management")
+        self.tabs.addTab(self._user_guide_tab(), "User Guide")
         lay.addWidget(self.tabs)
 
+    # ══════════════════════════════════════════════
+    # 1. ACCOUNTS — single-line rows, grouped by type
+    # ══════════════════════════════════════════════
     def _accounts_tab(self):
-        w = QWidget(); l = QVBoxLayout(w)
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
         ab = QPushButton("+ Add Account"); ab.setObjectName("primary"); ab.clicked.connect(self._add_account)
         l.addWidget(ab)
-        self.acct_table = mk_table(["Name", "Label", "Type", "Opening Balance", "Active", "Action"])
-        l.addWidget(self.acct_table)
+        self.acct_scroll = QScrollArea()
+        self.acct_scroll.setWidgetResizable(True)
+        self.acct_scroll.setFrameShape(QFrame.NoFrame)
+        self.acct_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self.acct_inner = QWidget()
+        self.acct_inner.setStyleSheet("background:transparent;")
+        self.acct_lay = QVBoxLayout(self.acct_inner)
+        self.acct_lay.setSpacing(16)
+        self.acct_lay.setContentsMargins(0, 4, 0, 4)
+        self.acct_scroll.setWidget(self.acct_inner)
+        l.addWidget(self.acct_scroll, 1)
         return w
 
+    def _refresh_accounts(self):
+        while self.acct_lay.count():
+            itm = self.acct_lay.takeAt(0)
+            if itm.widget(): itm.widget().deleteLater()
+
+        accts = self.acct.list_all()
+        groups = {}
+        for a in accts:
+            t = a["account_type"]
+            if t not in groups: groups[t] = []
+            groups[t].append(a)
+
+        for atype in ["CURRENT", "CASH", "WALLET", "SAVINGS", "CREDIT_CARD"]:
+            if atype not in groups: continue
+            cfg = ACCT_TYPE_CONFIG.get(atype, {"icon": "\U0001f4b0", "label": atype, "color": "#6B7280"})
+            if atype == "CREDIT_CARD":
+                cfg = {"icon": "\U0001f4b3", "label": "Credit Cards", "color": "#7C3AED"}
+
+            # Group header
+            hdr = QLabel(f"{cfg['icon']}  {cfg['label']} ({len(groups[atype])})")
+            hdr.setStyleSheet(f"color:{cfg['color']};font-size:13px;font-weight:700;padding:4px 0;")
+            self.acct_lay.addWidget(hdr)
+
+            # Single-line rows
+            for a in groups[atype]:
+                row = self._make_acct_row(a, cfg["color"])
+                self.acct_lay.addWidget(row)
+
+        self.acct_lay.addStretch()
+
+    def _make_acct_row(self, a, accent):
+        """Single-line account row."""
+        row = QFrame()
+        row.setFixedHeight(44)
+        row.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+            f"border-left:3px solid {accent};border-radius:8px;}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(16)
+
+        # Name
+        name = QLabel(f"<b>{a['display_name']}</b>")
+        name.setStyleSheet(f"font-size:12px;color:{C['text']};")
+        lay.addWidget(name, 2)
+
+        # Label
+        lbl = QLabel(a["short_label"])
+        lbl.setStyleSheet(f"color:{C['text3']};font-size:11px;font-weight:600;")
+        lay.addWidget(lbl, 0)
+
+        # Type badge
+        badge = QLabel(a["account_type"])
+        badge.setStyleSheet(f"color:{accent};font-size:9px;font-weight:700;background:{accent}15;border-radius:4px;padding:2px 6px;")
+        lay.addWidget(badge, 0)
+
+        # Opening Balance
+        ob_lbl = QLabel("OPENING BALANCE")
+        ob_lbl.setStyleSheet(f"color:{C['text3']};font-size:9px;font-weight:600;")
+        lay.addWidget(ob_lbl, 0)
+        bal = QLabel(fmt_money(a["opening_balance"]))
+        bal.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
+        lay.addWidget(bal, 0)
+
+        # Status
+        if not a["is_active"]:
+            status = QLabel("INACTIVE")
+            status.setStyleSheet(f"color:{C['text3']};font-size:9px;font-weight:700;background:{C['border2']};border-radius:4px;padding:1px 6px;")
+            lay.addWidget(status, 0)
+
+        # Edit button
+        edit_btn = QPushButton("Edit")
+        edit_btn.setCursor(Qt.PointingHandCursor)
+        edit_btn.setStyleSheet(f"color:{C['accent']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:3px 10px;font-size:11px;")
+        acct_data = dict(a)
+        edit_btn.clicked.connect(lambda _, ad=acct_data: self._edit_account(ad))
+        lay.addWidget(edit_btn, 0)
+
+        # Activate/Deactivate toggle
+        toggle_btn = QPushButton("Deactivate" if a["is_active"] else "Activate")
+        toggle_btn.setCursor(Qt.PointingHandCursor)
+        toggle_btn.setStyleSheet(f"color:{C['red'] if a['is_active'] else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:3px 10px;font-size:11px;")
+        aid = a["account_id"]; active = a["is_active"]
+        toggle_btn.clicked.connect(lambda _, aid=aid, act=active: self._toggle_account(aid, act))
+        lay.addWidget(toggle_btn, 0)
+
+        return row
+
+    # ══════════════════════════════════════════════
+    # 2. CATEGORIES — icon palette, color disc, instant update
+    # ══════════════════════════════════════════════
     def _lookups_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
         t = QTabWidget()
@@ -56,13 +221,14 @@ class SettingsTab(QWidget):
     def _categories_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
         ab = QPushButton("+ Add Category"); ab.clicked.connect(self._add_category); l.addWidget(ab)
-        self.cat_table = mk_table(["Name", "PF Category", "Tax Deductible", "Color"])
+        self.cat_table = mk_table(["Icon", "Name", "PF Category", "Tax", "Color", "Action"])
         l.addWidget(self.cat_table)
         return w
 
     def _methods_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
-        self.method_table = mk_table(["Name", "Active"])
+        ab = QPushButton("+ Add Payment Method"); ab.clicked.connect(self._add_method); l.addWidget(ab)
+        self.method_table = mk_table(["Name", "Status", "Action"])
         l.addWidget(self.method_table)
         return w
 
@@ -73,6 +239,242 @@ class SettingsTab(QWidget):
         l.addWidget(self.tag_table)
         return w
 
+    def _get_cat_icon(self, cid):
+        """Get icon for category: custom from preferences, or default from CAT_ICONS."""
+        try:
+            r = self.db.execute("SELECT value FROM preferences WHERE key=?", (f"cat_icon_{cid}",)).fetchone()
+            if r and r["value"]: return r["value"]
+        except: pass
+        return _CAT_ICONS.get(cid, "\U0001f4cb")
+
+    def _add_category(self):
+        d = QDialog(self); d.setWindowTitle("Add Category"); d.setMinimumWidth(400)
+        f = QFormLayout(d)
+
+        # Icon selector
+        icon_row = QHBoxLayout()
+        self._new_cat_icon = "\U0001f4cb"
+        icon_btn = QPushButton(self._new_cat_icon)
+        icon_btn.setFixedSize(48, 48)
+        icon_btn.setStyleSheet("font-size:20px;background:transparent;border:1px solid #E5E7EB;border-radius:8px;")
+        icon_btn.setCursor(Qt.PointingHandCursor)
+        def pick_icon():
+            chosen = self._show_icon_palette()
+            if chosen:
+                self._new_cat_icon = chosen
+                icon_btn.setText(chosen)
+        icon_btn.clicked.connect(pick_icon)
+        icon_row.addWidget(icon_btn)
+        icon_row.addWidget(QLabel("Click to pick icon"))
+        icon_row.addStretch()
+        f.addRow("Icon:", icon_row)
+
+        name = QLineEdit(); name.setPlaceholderText("Category name"); f.addRow("Name:", name)
+        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"]); f.addRow("PF Category:", pf)
+
+        # Color disc selector
+        color_row = QHBoxLayout()
+        self._new_cat_color = "#4F46E5"
+        color_btn = QPushButton()
+        color_btn.setFixedSize(32, 32)
+        color_btn.setStyleSheet(f"background:{self._new_cat_color};border:2px solid #E5E7EB;border-radius:16px;")
+        color_btn.setCursor(Qt.PointingHandCursor)
+        def pick_color():
+            chosen = self._show_color_palette()
+            if chosen:
+                self._new_cat_color = chosen
+                color_btn.setStyleSheet(f"background:{chosen};border:2px solid #E5E7EB;border-radius:16px;")
+        color_btn.clicked.connect(pick_color)
+        color_row.addWidget(color_btn)
+        color_row.addWidget(QLabel("Click to pick color"))
+        color_row.addStretch()
+        f.addRow("Color:", color_row)
+
+        tax = QCheckBox("Tax deductible"); f.addRow("", tax)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
+
+        if d.exec_() == QDialog.Accepted and name.text().strip():
+            try:
+                cid = name.text().strip().lower().replace(" ", "_")
+                self.lu.add_category(cid, name.text().strip(), self._new_cat_color,
+                                      pf.currentText(), 1 if tax.isChecked() else 0)
+                self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
+                                (f"cat_icon_{cid}", self._new_cat_icon))
+                self.db.commit()
+                self.refresh()
+            except ValueError as e:
+                QMessageBox.warning(self, "Duplicate", str(e))
+
+    def _edit_category(self, cat_data):
+        cid = cat_data.get("category_id", "")
+        d = QDialog(self)
+        d.setWindowTitle(f"Edit: {cat_data['display_name']}")
+        d.setMinimumWidth(400)
+        f = QFormLayout(d)
+
+        # Icon selector
+        current_icon = self._get_cat_icon(cid)
+        icon_row = QHBoxLayout()
+        self._edit_cat_icon = current_icon
+        icon_btn = QPushButton(current_icon)
+        icon_btn.setFixedSize(48, 48)
+        icon_btn.setStyleSheet("font-size:20px;background:transparent;border:1px solid #E5E7EB;border-radius:8px;")
+        icon_btn.setCursor(Qt.PointingHandCursor)
+        def pick_icon():
+            chosen = self._show_icon_palette()
+            if chosen:
+                self._edit_cat_icon = chosen
+                icon_btn.setText(chosen)
+        icon_btn.clicked.connect(pick_icon)
+        icon_row.addWidget(icon_btn)
+        icon_row.addWidget(QLabel("Click to pick icon"))
+        icon_row.addStretch()
+        f.addRow("Icon:", icon_row)
+
+        name = QLineEdit(); name.setText(cat_data.get("display_name", "")); f.addRow("Name:", name)
+        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"])
+        pf.setCurrentText(cat_data.get("default_pf_category", "nc")); f.addRow("PF Category:", pf)
+
+        # Color disc selector
+        current_color = cat_data.get("color_hex", "#4F46E5")
+        color_row = QHBoxLayout()
+        self._edit_cat_color = current_color
+        color_btn = QPushButton()
+        color_btn.setFixedSize(32, 32)
+        color_btn.setStyleSheet(f"background:{current_color};border:2px solid #E5E7EB;border-radius:16px;")
+        color_btn.setCursor(Qt.PointingHandCursor)
+        def pick_color():
+            chosen = self._show_color_palette()
+            if chosen:
+                self._edit_cat_color = chosen
+                color_btn.setStyleSheet(f"background:{chosen};border:2px solid #E5E7EB;border-radius:16px;")
+        color_btn.clicked.connect(pick_color)
+        color_row.addWidget(color_btn)
+        color_row.addWidget(QLabel("Click to pick color"))
+        color_row.addStretch()
+        f.addRow("Color:", color_row)
+
+        tax = QCheckBox("Tax deductible"); tax.setChecked(bool(cat_data.get("tax_deductible", 0))); f.addRow("", tax)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Update")
+        bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
+
+        if d.exec_() == QDialog.Accepted:
+            self.db.execute(
+                "UPDATE categories SET display_name=?, color_hex=?, default_pf_category=?, tax_deductible=? WHERE category_id=?",
+                (name.text().strip(), self._edit_cat_color, pf.currentText(),
+                 1 if tax.isChecked() else 0, cid))
+            self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
+                            (f"cat_icon_{cid}", self._edit_cat_icon))
+            self.db.commit()
+            self.refresh()
+
+    def _show_icon_palette(self):
+        """Show icon palette dialog, return selected icon or None."""
+        d = QDialog(self)
+        d.setWindowTitle("Pick Icon")
+        d.setMinimumWidth(400)
+        lay = QVBoxLayout(d)
+        lay.setSpacing(8)
+        lbl = QLabel("Click an icon:")
+        lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;")
+        lay.addWidget(lbl)
+        grid = QGridLayout()
+        grid.setSpacing(4)
+        selected = [None]
+        for i, icon in enumerate(_ICON_PALETTE):
+            btn = QPushButton(icon)
+            btn.setFixedSize(48, 48)
+            btn.setStyleSheet("font-size:20px;background:transparent;border:1px solid transparent;border-radius:8px;padding:2px;")
+            btn.setCursor(Qt.PointingHandCursor)
+            def pick(_, ic=icon):
+                selected[0] = ic
+                d.accept()
+            btn.clicked.connect(pick)
+            grid.addWidget(btn, i // 8, i % 8)
+        lay.addLayout(grid)
+        bb = QDialogButtonBox(QDialogButtonBox.Cancel)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        d.exec_()
+        return selected[0]
+
+    def _show_color_palette(self):
+        """Show color palette dialog, return selected color or None."""
+        d = QDialog(self)
+        d.setWindowTitle("Pick Color")
+        d.setMinimumWidth(360)
+        lay = QVBoxLayout(d)
+        lay.setSpacing(8)
+        lbl = QLabel("Click a color:")
+        lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;")
+        lay.addWidget(lbl)
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        selected = [None]
+        for i, color in enumerate(_COLOR_PALETTE):
+            btn = QPushButton()
+            btn.setFixedSize(36, 36)
+            btn.setStyleSheet(f"background:{color};border:2px solid #E5E7EB;border-radius:18px;")
+            btn.setCursor(Qt.PointingHandCursor)
+            def pick(_, c=color):
+                selected[0] = c
+                d.accept()
+            btn.clicked.connect(pick)
+            grid.addWidget(btn, i // 8, i % 8)
+        lay.addLayout(grid)
+        bb = QDialogButtonBox(QDialogButtonBox.Cancel)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        d.exec_()
+        return selected[0]
+
+    def _add_method(self):
+        d = QDialog(self); d.setWindowTitle("Add Payment Method"); f = QFormLayout(d)
+        name = QLineEdit(); name.setPlaceholderText("e.g. PHONEPAY"); f.addRow("Name:", name)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
+        if d.exec_() == QDialog.Accepted and name.text().strip():
+            try:
+                mid = name.text().strip().upper().replace(" ", "_")
+                existing = self.db.execute("SELECT method_id FROM payment_methods WHERE method_id=?", (mid,)).fetchone()
+                if existing:
+                    QMessageBox.warning(self, "Duplicate", f"Method '{name.text()}' already exists.")
+                    return
+                max_order = self.db.execute("SELECT MAX(sort_order) FROM payment_methods").fetchone()
+                order = (max_order[0] or 0) + 1 if max_order else 0
+                self.db.execute("INSERT INTO payment_methods(method_id, display_name, is_active, sort_order) VALUES(?,?,1,?)",
+                                (mid, name.text().strip(), order))
+                self.db.commit()
+                self.refresh()
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+
+    def _add_tag(self):
+        from PyQt5.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "New Tag", "Tag name:")
+        if ok and name:
+            try:
+                self.lu.add_tag(name.lower(), name)
+                self.refresh()
+            except ValueError as e:
+                QMessageBox.warning(self, "Duplicate", str(e))
+
+    # ══════════════════════════════════════════════
+    # 3. PAYMENT METHOD TOGGLE (not permanent removal)
+    # ══════════════════════════════════════════════
+    def _toggle_method(self, method_id, current_active):
+        """Toggle payment method active state. Does NOT delete — just hides from dropdown."""
+        new_active = 0 if current_active else 1
+        self.db.execute("UPDATE payment_methods SET is_active=? WHERE method_id=?", (new_active, method_id))
+        self.db.commit()
+        self.refresh()
+
+    # ══════════════════════════════════════════════
+    # 4. SECURITY — smaller toggle, tab security with auth
+    # ══════════════════════════════════════════════
     def _security_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
 
@@ -80,34 +482,30 @@ class SettingsTab(QWidget):
         tfa_frame = QFrame()
         tfa_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         tf = QVBoxLayout(tfa_frame); tf.setContentsMargins(16,16,16,16); tf.setSpacing(10)
-        tfa_title = QLabel("🔐  Two-Factor Authentication")
+        tfa_title = QLabel("\U0001f510  Two-Factor Authentication")
         tfa_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); tf.addWidget(tfa_title)
 
-        # Status label
         self.totp_lbl = QLabel(); self.totp_lbl.setStyleSheet("font-size:13px;font-weight:600;"); tf.addWidget(self.totp_lbl)
 
-        # Toggle row
         toggle_row = QHBoxLayout()
         toggle_label = QLabel("Require TOTP for login & edits:")
         toggle_label.setStyleSheet(f"font-size:12px;color:{C['text2']};font-weight:600;")
         toggle_row.addWidget(toggle_label)
         self.tfa_toggle = QPushButton("ON")
         self.tfa_toggle.setCheckable(True)
-        self.tfa_toggle.setFixedWidth(80)
+        self.tfa_toggle.setFixedSize(64, 28)
         self.tfa_toggle.setCursor(Qt.PointingHandCursor)
         self.tfa_toggle.clicked.connect(self._toggle_2fa)
         toggle_row.addWidget(self.tfa_toggle)
         toggle_row.addStretch()
         tf.addLayout(toggle_row)
 
-        # Edit 2FA button (change secret key)
         tfa_note = QLabel("Toggle changes login method. Secret key stays the same.")
         tfa_note.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;"); tf.addWidget(tfa_note)
-        edit_tfa_btn = QPushButton("✏️  Edit 2FA Key (new secret)")
+        edit_tfa_btn = QPushButton("\u270f\ufe0f  Edit 2FA Key (new secret)")
         edit_tfa_btn.setCursor(Qt.PointingHandCursor)
         edit_tfa_btn.clicked.connect(self._edit_tfa_key)
         tf.addWidget(edit_tfa_btn)
-
         l.addWidget(tfa_frame)
 
         # ── Google Account Section ──
@@ -135,49 +533,146 @@ class SettingsTab(QWidget):
         self.google_btn_row.addWidget(self.google_unlink_btn)
         self.google_btn_row.addStretch()
         gf.addLayout(self.google_btn_row)
-
         l.addWidget(g_frame)
 
         # ── Change Password ──
         pw_frame = QFrame()
         pw_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         pf = QVBoxLayout(pw_frame); pf.setContentsMargins(16,16,16,16); pf.setSpacing(10)
-        pw_title = QLabel("🔑  Change Password")
+        pw_title = QLabel("\U0001f511  Change Password")
         pw_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); pf.addWidget(pw_title)
         cpw = QPushButton("Change Password"); cpw.clicked.connect(self._change_pw); pf.addWidget(cpw)
         l.addWidget(pw_frame)
+
+        # ── Tab Security Section ──
+        ts_frame = QFrame()
+        ts_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        tsf = QVBoxLayout(ts_frame); tsf.setContentsMargins(16,16,16,16); tsf.setSpacing(10)
+        ts_title = QLabel("\U0001f512  Tab Security (Optional)")
+        ts_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); tsf.addWidget(ts_title)
+        ts_desc = QLabel("Enable password protection for specific tabs. Login password/TOTP will be used.")
+        ts_desc.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;"); ts_desc.setWordWrap(True); tsf.addWidget(ts_desc)
+
+        self._tab_sec_checks = {}
+        tab_names = {
+            "wealth": "\U0001f4c8  Wealth",
+            "audit": "\U0001f50d  Audit",
+            "database": "\U0001f5c4\ufe0f  Database",
+            "cards": "\U0001f4b3  Credit Cards",
+            "notes": "\U0001f4cb  Notes",
+            "gmail": "\U0001f4e7  Gmail",
+            "settings": "\u2699\ufe0f  Settings",
+        }
+        for key, label in tab_names.items():
+            row = QHBoxLayout()
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};font-weight:600;")
+            row.addWidget(lbl)
+            row.addStretch()
+
+            # Toggle button (like 2FA toggle)
+            is_protected = False
+            try:
+                existing = self.db.execute("SELECT * FROM tab_security WHERE tab_key=?", (key,)).fetchone()
+                is_protected = bool(existing)
+            except: pass
+
+            toggle = QPushButton("ON" if is_protected else "OFF")
+            toggle.setCheckable(True)
+            toggle.setChecked(is_protected)
+            toggle.setFixedSize(64, 28)
+            toggle.setCursor(Qt.PointingHandCursor)
+            toggle.setStyleSheet(
+                f"QPushButton{{background:{C['green'] if is_protected else C['text3']};color:white;"
+                f"border:none;border-radius:14px;padding:2px 16px;font-size:11px;font-weight:700;}}"
+                f"QPushButton:hover{{background:{C['green'] if is_protected else C['text2']};}}")
+            toggle.clicked.connect(lambda checked, k=key, btn=toggle: self._toggle_tab_security_btn(k, checked, btn))
+            self._tab_sec_checks[key] = toggle
+            row.addWidget(toggle)
+            tsf.addLayout(row)
+
+        l.addWidget(ts_frame)
         l.addStretch()
         return w
 
+    def _toggle_tab_security_btn(self, tab_key, checked, btn):
+        """Toggle button handler for tab security — requires password/TOTP verification."""
+        btn.setEnabled(False)
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        verified = False
+        action = "protect" if checked else "remove protection from"
+
+        if self.sec.is_2fa():
+            from PyQt5.QtWidgets import QInputDialog
+            code, ok = QInputDialog.getText(self, "Verify", f"Enter TOTP code to {action} this tab:")
+            if ok and code:
+                verified = self.sec.verify_totp(code)
+        else:
+            from PyQt5.QtWidgets import QInputDialog
+            pw, ok = QInputDialog.getText(self, "Verify", f"Enter your password to {action} this tab:", QLineEdit.Password)
+            if ok and pw:
+                verified = self.sec.verify(pw)
+
+        if verified:
+            if checked:
+                self.db.execute("INSERT OR IGNORE INTO tab_security(tab_key, password_hash, failed_attempts, updated_at) VALUES(?, '', 0, ?)",
+                                (tab_key, datetime.now().isoformat()))
+                self.db.commit()
+                btn.setText("ON")
+                btn.setStyleSheet(
+                    f"QPushButton{{background:{C['green']};color:white;"
+                    f"border:none;border-radius:14px;padding:2px 16px;font-size:11px;font-weight:700;}}"
+                    f"QPushButton:hover{{background:{C['green']};}}")
+            else:
+                self.db.execute("DELETE FROM tab_security WHERE tab_key=?", (tab_key,))
+                self.db.commit()
+                btn.setText("OFF")
+                btn.setStyleSheet(
+                    f"QPushButton{{background:{C['text3']};color:white;"
+                    f"border:none;border-radius:14px;padding:2px 16px;font-size:11px;font-weight:700;}}"
+                    f"QPushButton:hover{{background:{C['text2']};}}")
+        else:
+            # Revert toggle state
+            btn.setChecked(not checked)
+            btn.setText("ON" if not checked else "OFF")
+            btn.setStyleSheet(
+                f"QPushButton{{background:{C['green'] if not checked else C['text3']};color:white;"
+                f"border:none;border-radius:14px;padding:2px 16px;font-size:11px;font-weight:700;}}"
+                f"QPushButton:hover{{background:{C['green'] if not checked else C['text2']};}}")
+
+        btn.setEnabled(True)
+
+    def _toggle_tab_security(self, tab_key, state):
+        """Legacy handler — kept for compatibility."""
+        pass
+
+    # ══════════════════════════════════════════════
+    # PREFERENCES
+    # ══════════════════════════════════════════════
     def _prefs_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
 
-        # ── Display Settings ──
         grp1 = QFrame()
         grp1.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         f1 = QFormLayout(grp1); f1.setContentsMargins(16,16,16,16); f1.setSpacing(10)
         f1.addRow("Theme:", QLabel("Light (locked)"))
-        f1.addRow("Currency:", QLabel("₹ Indian"))
+        f1.addRow("Currency:", QLabel("\u20b9 Indian"))
         l.addWidget(grp1)
 
-        # ── Pagination Settings ──
         grp2 = QFrame()
         grp2.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         f2 = QFormLayout(grp2); f2.setContentsMargins(16,16,16,16); f2.setSpacing(10)
-        title2 = QLabel("📊  Pagination")
+        title2 = QLabel("\U0001f4ca  Pagination")
         title2.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         f2.addRow(title2)
-
         self.pref_page_size = QSpinBox(); self.pref_page_size.setRange(30, 1000); self.pref_page_size.setSingleStep(10)
-        self.pref_page_size.setToolTip("Number of transactions loaded per batch")
         f2.addRow("Page Size:", self.pref_page_size)
-
         self.pref_scroll_trigger = QSpinBox(); self.pref_scroll_trigger.setRange(50, 2000); self.pref_scroll_trigger.setSingleStep(50)
-        self.pref_scroll_trigger.setToolTip("Load more when this many pixels from the bottom")
         f2.addRow("Scroll Trigger (px):", self.pref_scroll_trigger)
         l.addWidget(grp2)
 
-        # ── Wealth Pagination ──
         grp_w = QFrame()
         grp_w.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         fw = QFormLayout(grp_w); fw.setContentsMargins(16,16,16,16); fw.setSpacing(10)
@@ -185,14 +680,11 @@ class SettingsTab(QWidget):
         title_w.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         fw.addRow(title_w)
         self.pref_wealth_page_size = QSpinBox(); self.pref_wealth_page_size.setRange(10, 1000); self.pref_wealth_page_size.setSingleStep(10)
-        self.pref_wealth_page_size.setToolTip("Cards loaded per batch in Wealth tab")
         fw.addRow("Page Size:", self.pref_wealth_page_size)
         self.pref_wealth_scroll_trigger = QSpinBox(); self.pref_wealth_scroll_trigger.setRange(20, 2000); self.pref_wealth_scroll_trigger.setSingleStep(50)
-        self.pref_wealth_scroll_trigger.setToolTip("Load more when scrolled near bottom")
         fw.addRow("Scroll Trigger (px):", self.pref_wealth_scroll_trigger)
         l.addWidget(grp_w)
 
-        # ── Notes Pagination ──
         grp_n = QFrame()
         grp_n.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         fn = QFormLayout(grp_n); fn.setContentsMargins(16,16,16,16); fn.setSpacing(10)
@@ -200,55 +692,104 @@ class SettingsTab(QWidget):
         title_n.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         fn.addRow(title_n)
         self.pref_notes_page_size = QSpinBox(); self.pref_notes_page_size.setRange(10, 500); self.pref_notes_page_size.setSingleStep(10)
-        self.pref_notes_page_size.setToolTip("Notes loaded per batch")
         fn.addRow("Page Size:", self.pref_notes_page_size)
         self.pref_notes_scroll_trigger = QSpinBox(); self.pref_notes_scroll_trigger.setRange(20, 2000); self.pref_notes_scroll_trigger.setSingleStep(50)
-        self.pref_notes_scroll_trigger.setToolTip("Load more when scrolled near bottom")
         fn.addRow("Scroll Trigger (px):", self.pref_notes_scroll_trigger)
         l.addWidget(grp_n)
 
-        # ── Alert Settings ──
         grp3 = QFrame()
         grp3.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         f3 = QFormLayout(grp3); f3.setContentsMargins(16,16,16,16); f3.setSpacing(10)
-        title3 = QLabel("🔔  Alerts")
+        title3 = QLabel("\U0001f514  Alerts")
         title3.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         f3.addRow(title3)
-
         self.pref_txn_alert = QSpinBox(); self.pref_txn_alert.setRange(100, 100000); self.pref_txn_alert.setSingleStep(100)
-        self.pref_txn_alert.setPrefix("₹ "); self.pref_txn_alert.setToolTip("Minimum amount for high-value transaction alerts")
+        self.pref_txn_alert.setPrefix("\u20b9 ")
         f3.addRow("High-Value Alert:", self.pref_txn_alert)
         l.addWidget(grp3)
 
-        # ── Save + Backup ──
         btn_row = QHBoxLayout()
-        save_btn = QPushButton("💾  Save Settings"); save_btn.setObjectName("primary")
+        save_btn = QPushButton("\U0001f4be  Save Settings"); save_btn.setObjectName("primary")
         save_btn.setMinimumHeight(38); save_btn.clicked.connect(self._save_prefs)
-        btn_row.addWidget(save_btn)
-        btn_row.addStretch()
-        bb = QPushButton("📦  Backup Now"); bb.setMinimumHeight(38)
-        bb.clicked.connect(lambda: (self.db.backup(), QMessageBox.information(self, "Done", "Backup created.")))
-        btn_row.addWidget(bb)
-        l.addLayout(btn_row)
+        btn_row.addWidget(save_btn); btn_row.addStretch()
+        l.addLayout(btn_row); l.addStretch()
+        return w
+
+    # ══════════════════════════════════════════════
+    # DATA MANAGEMENT
+    # ══════════════════════════════════════════════
+    def _data_mgmt_tab(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
+
+        bk_frame = QFrame()
+        bk_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        bf = QVBoxLayout(bk_frame); bf.setContentsMargins(16,16,16,16); bf.setSpacing(10)
+        bk_title = QLabel("\U0001f4e6  Backup")
+        bk_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); bf.addWidget(bk_title)
+        self.bk_info = QLabel()
+        self.bk_info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
+        self.bk_info.setWordWrap(True); bf.addWidget(self.bk_info)
+        bb = QPushButton("\U0001f4e6  Backup Now"); bb.setMinimumHeight(38)
+        bb.clicked.connect(self._do_backup); bf.addWidget(bb)
+        l.addWidget(bk_frame)
+
+        st_frame = QFrame()
+        st_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        sf = QVBoxLayout(st_frame); sf.setContentsMargins(16,16,16,16); sf.setSpacing(10)
+        st_title = QLabel("\U0001f4be  Storage Info")
+        st_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); sf.addWidget(st_title)
+        self.storage_info = QLabel()
+        self.storage_info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
+        self.storage_info.setWordWrap(True); sf.addWidget(self.storage_info)
+        l.addWidget(st_frame)
         l.addStretch()
         return w
 
+    def _do_backup(self):
+        self.db.backup()
+        QMessageBox.information(self, "Done", "Backup created.")
+        self._refresh_backup_info()
+
+    def _refresh_backup_info(self):
+        if not hasattr(self, 'bk_info'): return
+        from config import BACKUP_DIR, BACKUP_RETENTION
+        import os
+        backups = sorted(BACKUP_DIR.glob("finance_*.db"), key=lambda f: f.stat().st_mtime, reverse=True)
+        count = len(backups)
+        last = backups[0].stat().st_mtime if backups else None
+        last_str = datetime.fromtimestamp(last).strftime("%d %b %Y, %I:%M %p") if last else "Never"
+        self.bk_info.setText(f"Location: {BACKUP_DIR}\nRetention: {BACKUP_RETENTION} backups\nCurrent: {count}\nLast: {last_str}")
+        db_size = os.path.getsize(str(self.db.path)) if hasattr(self.db, 'path') else 0
+        total_bk = sum(f.stat().st_size for f in backups)
+        self.storage_info.setText(f"Database: {db_size/1024:.1f} KB\nBackups: {total_bk/1024:.1f} KB ({count} files)")
+
+    # ══════════════════════════════════════════════
+    # USER GUIDE (placeholder)
+    # ══════════════════════════════════════════════
+    def _user_guide_tab(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16); l.setAlignment(Qt.AlignCenter)
+        icon = QLabel("\U0001f4d6"); icon.setStyleSheet("font-size:48px;"); icon.setAlignment(Qt.AlignCenter); l.addWidget(icon)
+        title = QLabel("User Guide"); title.setStyleSheet(f"font-size:20px;font-weight:800;color:{C['text']};"); title.setAlignment(Qt.AlignCenter); l.addWidget(title)
+        desc = QLabel("A comprehensive user guide will be available here soon.\n\nStay tuned for detailed instructions on all features.")
+        desc.setStyleSheet(f"font-size:13px;color:{C['text3']};"); desc.setAlignment(Qt.AlignCenter); desc.setWordWrap(True); l.addWidget(desc)
+        l.addStretch()
+        return w
+
+    # ══════════════════════════════════════════════
+    # ACTIONS
+    # ══════════════════════════════════════════════
     def _save_prefs(self):
         try:
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('complete_page_size', ?)",
-                            (str(self.pref_page_size.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('scroll_trigger_px', ?)",
-                            (str(self.pref_scroll_trigger.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('wealth_page_size', ?)",
-                            (str(self.pref_wealth_page_size.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('wealth_scroll_trigger', ?)",
-                            (str(self.pref_wealth_scroll_trigger.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('notes_page_size', ?)",
-                            (str(self.pref_notes_page_size.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('notes_scroll_trigger', ?)",
-                            (str(self.pref_notes_scroll_trigger.value()),))
-            self.db.execute("INSERT OR REPLACE INTO preferences VALUES('min_txn_alert', ?)",
-                            (str(self.pref_txn_alert.value()),))
+            for key, val in [
+                ('complete_page_size', self.pref_page_size.value()),
+                ('scroll_trigger_px', self.pref_scroll_trigger.value()),
+                ('wealth_page_size', self.pref_wealth_page_size.value()),
+                ('wealth_scroll_trigger', self.pref_wealth_scroll_trigger.value()),
+                ('notes_page_size', self.pref_notes_page_size.value()),
+                ('notes_scroll_trigger', self.pref_notes_scroll_trigger.value()),
+                ('min_txn_alert', self.pref_txn_alert.value()),
+            ]:
+                self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)", (key, str(val)))
             self.db.commit()
             QMessageBox.information(self, "Saved", "Settings saved successfully.\nRestart the app for pagination changes to take effect.")
         except Exception as e:
@@ -261,13 +802,12 @@ class SettingsTab(QWidget):
         except: pass
         return default
 
-    # ── Add Account (CURRENT / CASH / WALLET only) ──
     def _add_account(self):
         d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
         n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setPlaceholderText("4-char label"); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"]); f.addRow("Type:", t)
-        ob = QDoubleSpinBox(); ob.setPrefix("₹ "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
+        ob = QDoubleSpinBox(); ob.setPrefix("\u20b9 "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
         if d.exec_() == QDialog.Accepted and n.text().strip():
@@ -278,14 +818,10 @@ class SettingsTab(QWidget):
             except ValueError as e:
                 QMessageBox.warning(self, "Duplicate", str(e))
 
-    # ── Edit Account ──
     def _edit_account(self, acct_data):
-        """Open edit dialog. Credit cards → cards tab edit dialog. Others → pre-filled account dialog."""
         acct_type = acct_data.get("account_type", "")
         aid = acct_data["account_id"]
-
         if acct_type == "CREDIT_CARD" and self.cards:
-            # Use the Cards tab edit dialog
             card = self.cards.get_by_account(aid)
             if card:
                 from ui.tabs.cards_tab import AddCardDialog
@@ -296,161 +832,53 @@ class SettingsTab(QWidget):
             else:
                 QMessageBox.warning(self, "Not Found", "No card record found for this account.")
                 return
-
-        # Non-credit: pre-filled account dialog
-        d = QDialog(self)
-        d.setWindowTitle("Edit Account")
-        d.setMinimumWidth(400)
+        d = QDialog(self); d.setWindowTitle("Edit Account"); d.setMinimumWidth(400)
         f = QFormLayout(d)
-
         n = QLineEdit(); n.setText(acct_data.get("display_name", "")); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setText(acct_data.get("short_label", "")); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"])
         idx = t.findText(acct_type)
         if idx >= 0: t.setCurrentIndex(idx)
-        t.setEnabled(False)  # type can't be changed
+        t.setEnabled(False)
         f.addRow("Type:", t)
-        ob = QDoubleSpinBox(); ob.setPrefix("₹ "); ob.setRange(-99999999, 99999999)
+        ob = QDoubleSpinBox(); ob.setPrefix("\u20b9 "); ob.setRange(-99999999, 99999999)
         ob.setValue(acct_data.get("opening_balance", 0)); f.addRow("Opening Balance:", ob)
-
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("Update")
         bb.accepted.connect(d.accept); bb.rejected.connect(d.reject); f.addRow(bb)
-
         if d.exec_() == QDialog.Accepted and n.text().strip():
-            self.acct.update(aid,
-                             display_name=n.text().strip(),
+            self.acct.update(aid, display_name=n.text().strip(),
                              short_label=(lb.text() or n.text()[:4]).upper(),
                              opening_balance=ob.value())
             self.refresh()
 
-    def _add_category(self):
-        name, ok = QInputDialog_getText(self, "New Category", "Name:")
-        if ok and name:
-            pf, ok2 = QInputDialog_getItem(self, "PF Category", "Type:",
-                                            ["commitment", "consumption", "growth", "safety", "nc"])
-            if ok2:
-                try:
-                    self.lu.add_category(name.lower().replace(" ", "_"), name, "#4F46E5", pf)
-                    self.refresh()
-                except ValueError as e:
-                    QMessageBox.warning(self, "Duplicate", str(e))
-
-    def _add_tag(self):
-        name, ok = QInputDialog_getText(self, "New Tag", "Tag name:")
-        if ok and name:
-            try:
-                self.lu.add_tag(name.lower(), name)
-                self.refresh()
-            except ValueError as e:
-                QMessageBox.warning(self, "Duplicate", str(e))
-
-    def _setup_google(self):
-        """Link Google account — uses embedded credentials, just opens browser."""
-        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
-        cid = get_client_id()
-        csec = get_client_secret()
-        if not cid or not csec:
-            QMessageBox.warning(self, "Not Configured",
-                "Google OAuth credentials are not embedded in the app.")
-            return
-
-        existing = self.sec.get_google_email()
-        msg = "This will open your browser to sign in with Google.\n\n"
-        msg += "Your Google account will be used as an alternative login method.\n"
-        msg += "This is for security verification only \u2014 no data is shared with Google."
-        if existing:
-            msg = f"Currently linked: {existing}\n\n" + msg
-        reply = QMessageBox.question(self, "Link Google Account", msg,
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-        if reply != QMessageBox.Yes:
-            return
-
-        status_dlg = QDialog(self)
-        status_dlg.setWindowTitle("Linking...")
-        status_dlg.setMinimumWidth(320)
-        sl = QVBoxLayout(status_dlg)
-        sl.setContentsMargins(24, 20, 24, 20)
-        sl_lbl = QLabel("Opening browser...\nPlease sign in with your Google account.")
-        sl_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
-        sl_lbl.setAlignment(Qt.AlignCenter)
-        sl.addWidget(sl_lbl)
-        status_dlg.show()
-        from PyQt5.QtWidgets import QApplication
-        QApplication.processEvents()
-
-        email, refresh_token, error = start_oauth_flow(cid, csec)
-        status_dlg.close()
-
-        if error:
-            QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}")
-            return
-
-        self.sec.setup_google(cid, csec, email, refresh_token)
-        QMessageBox.information(self, "Linked",
-            f"Google account '{email}' linked successfully.\n\n"
-            "You can now use 'Sign in with Google' on the login screen.")
-        self.refresh()
-
-
-    def _unlink_google(self):
-        """Remove the linked Google account."""
-        email = self.sec.get_google_email()
-        if not email:
-            return
-        reply = QMessageBox.question(self, "Unlink Google?",
-            f"Remove Google account '{email}'?\nYou will no longer be able to sign in with Google.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.sec.unlink_google()
-            QMessageBox.information(self, "Unlinked", "Google account removed.")
-            self.refresh()
-
-    def _change_pw(self):
-        pw, ok = QInputDialog_getText(self, "Change Password", "New password:", echo=QLineEdit.Password)
-        if ok and pw:
-            pw2, ok2 = QInputDialog_getText(self, "Confirm", "Confirm:", echo=QLineEdit.Password)
-            if ok2 and pw == pw2:
-                self.sec.set_pw(pw); QMessageBox.information(self, "Done", "Password changed.")
-            else:
-                QMessageBox.warning(self, "Error", "Passwords don't match.")
-
     def _toggle_account(self, acct_id, current_active):
         new_active = 0 if current_active else 1
         self.acct.update(acct_id, is_active=new_active)
-        # Also update associated cards so they move to Closed/Active
         self.db.execute("UPDATE cards SET is_active=? WHERE account_id=?", (new_active, acct_id))
         self.db.commit()
         self.refresh()
 
     def _toggle_2fa(self):
-        """Toggle 2FA on/off WITHOUT changing the secret key."""
         new_state = self.tfa_toggle.isChecked()
         if new_state:
-            # Enabling — check if secret exists
             if not self.sec.get_secret():
-                QMessageBox.warning(self, "No Secret Key",
-                    "No 2FA secret key found. Please use 'Edit 2FA Key' to set up first.")
-                self.tfa_toggle.setChecked(False)
-                return
+                QMessageBox.warning(self, "No Secret Key", "No 2FA secret key found. Please use 'Edit 2FA Key' to set up first.")
+                self.tfa_toggle.setChecked(False); return
             self.sec.toggle_2fa(True)
-            QMessageBox.information(self, "2FA Enabled",
-                "TOTP is now required for login and wealth edits.")
+            QMessageBox.information(self, "2FA Enabled", "TOTP is now required for login and wealth edits.")
         else:
-            # Disabling — warn
             reply = QMessageBox.question(self, "Disable 2FA?",
                 "Password will be used instead of TOTP for login and edits.\nContinue?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 self.sec.toggle_2fa(False)
-                QMessageBox.information(self, "2FA Disabled",
-                    "Password is now required for login and wealth edits.")
+                QMessageBox.information(self, "2FA Disabled", "Password is now required for login and wealth edits.")
             else:
                 self.tfa_toggle.setChecked(True)
         self.refresh()
 
     def _edit_tfa_key(self):
-        """Generate new TOTP secret key — follows setup wizard flow."""
         try:
             import pyotp, qrcode
             from io import BytesIO
@@ -458,162 +886,167 @@ class SettingsTab(QWidget):
         except ImportError:
             QMessageBox.warning(self, "Missing", "Install pyotp and qrcode:\npip install pyotp qrcode[pil]")
             return
-
-        # Verify current identity first
         if self.sec.is_2fa():
+            from PyQt5.QtWidgets import QInputDialog
             code, ok = QInputDialog.getText(self, "Verify", "Enter current TOTP code to proceed:")
             if not ok or not self.sec.verify_totp(code):
-                QMessageBox.warning(self, "Failed", "Invalid code. Aborted.")
-                return
+                QMessageBox.warning(self, "Failed", "Invalid code. Aborted."); return
         else:
+            from PyQt5.QtWidgets import QInputDialog
             pw, ok = QInputDialog.getText(self, "Verify", "Enter your password:", QLineEdit.Password)
             if not ok or not self.sec.verify(pw):
-                QMessageBox.warning(self, "Failed", "Invalid password. Aborted.")
-                return
-
-        # Generate new secret
+                QMessageBox.warning(self, "Failed", "Invalid password. Aborted."); return
         secret = pyotp.random_base32()
         totp = pyotp.TOTP(secret)
         uri = totp.provisioning_uri("FinanceManager", issuer_name="Finance Manager")
-
-        # Generate QR
         qr = qrcode.make(uri)
-        buf = BytesIO()
-        qr.save(buf, format="PNG")
-        buf.seek(0)
-        pixmap = QPixmap()
-        pixmap.loadFromData(buf.read())
-
-        # Show dialog
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Setup New 2FA Key")
-        dlg.setMinimumWidth(420)
-        dl = QVBoxLayout(dlg)
-        dl.setSpacing(12)
-
+        buf = BytesIO(); qr.save(buf, format="PNG"); buf.seek(0)
+        pixmap = QPixmap(); pixmap.loadFromData(buf.read())
+        dlg = QDialog(self); dlg.setWindowTitle("Setup New 2FA Key"); dlg.setMinimumWidth(420)
+        dl = QVBoxLayout(dlg); dl.setSpacing(12)
         info = QLabel("Scan this QR code with your authenticator app:")
-        info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
-        info.setAlignment(Qt.AlignCenter)
-        dl.addWidget(info)
-
+        info.setStyleSheet(f"font-size:12px;color:{C['text2']};"); info.setAlignment(Qt.AlignCenter); dl.addWidget(info)
         qr_lbl = QLabel()
         qr_lbl.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         qr_lbl.setAlignment(Qt.AlignCenter)
         qr_lbl.setStyleSheet("background:white;border:2px solid #E5E7EB;border-radius:12px;padding:8px;")
         dl.addWidget(qr_lbl, alignment=Qt.AlignCenter)
-
         sec_lbl = QLabel(f"Manual key: {secret}")
         sec_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        sec_lbl.setStyleSheet(f"font-family:'Courier New',monospace;font-size:14px;font-weight:700;"
-                              f"color:{C['accent']};background:{C['accent_bg']};"
-                              f"padding:10px 16px;border-radius:8px;letter-spacing:2px;")
-        sec_lbl.setAlignment(Qt.AlignCenter)
-        dl.addWidget(sec_lbl)
-
+        sec_lbl.setStyleSheet(f"font-family:'Courier New',monospace;font-size:14px;font-weight:700;color:{C['accent']};background:{C['accent_bg']};padding:10px 16px;border-radius:8px;letter-spacing:2px;")
+        sec_lbl.setAlignment(Qt.AlignCenter); dl.addWidget(sec_lbl)
         verify_lbl = QLabel("Enter 6-digit code to verify & save:")
-        verify_lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};")
-        dl.addWidget(verify_lbl)
-
-        code_input = QLineEdit()
-        code_input.setPlaceholderText("000000")
-        code_input.setMaxLength(6)
+        verify_lbl.setStyleSheet(f"font-size:12px;color:{C['text2']};"); dl.addWidget(verify_lbl)
+        code_input = QLineEdit(); code_input.setPlaceholderText("000000"); code_input.setMaxLength(6)
         code_input.setMinimumHeight(44)
         code_input.setStyleSheet(f"font-size:18px;font-weight:700;letter-spacing:4px;padding:10px;")
-        code_input.setAlignment(Qt.AlignCenter)
-        dl.addWidget(code_input)
-
-        err_lbl = QLabel("")
-        err_lbl.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
-        err_lbl.setAlignment(Qt.AlignCenter)
-        dl.addWidget(err_lbl)
-
+        code_input.setAlignment(Qt.AlignCenter); dl.addWidget(code_input)
+        err_lbl = QLabel(""); err_lbl.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
+        err_lbl.setAlignment(Qt.AlignCenter); dl.addWidget(err_lbl)
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel"); cancel_btn.clicked.connect(dlg.reject)
-        save_btn = QPushButton("✅ Verify & Save"); save_btn.setObjectName("primary")
+        save_btn = QPushButton("\u2705 Verify & Save"); save_btn.setObjectName("primary")
         def do_save():
             code = code_input.text().strip()
-            if not code:
-                err_lbl.setText("Enter the code."); return
+            if not code: err_lbl.setText("Enter the code."); return
             if not totp.verify(code, valid_window=1):
-                err_lbl.setText("Invalid code. Try again.")
-                code_input.clear(); code_input.setFocus()
-                return
-            # Save new secret + enable
+                err_lbl.setText("Invalid code. Try again."); code_input.clear(); code_input.setFocus(); return
             self.sec.repo.set_totp(secret, True)
             dlg.accept()
             QMessageBox.information(self, "Done", "New 2FA key saved and enabled.")
             self.refresh()
-        save_btn.clicked.connect(do_save)
-        code_input.returnPressed.connect(do_save)
+        save_btn.clicked.connect(do_save); code_input.returnPressed.connect(do_save)
         btn_row.addStretch(); btn_row.addWidget(cancel_btn); btn_row.addWidget(save_btn)
         dl.addLayout(btn_row)
-
         dlg.exec_()
 
+    def _setup_google(self):
+        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
+        cid = get_client_id(); csec = get_client_secret()
+        if not cid or not csec:
+            QMessageBox.warning(self, "Not Configured", "Google OAuth credentials are not embedded in the app."); return
+        existing = self.sec.get_google_email()
+        msg = "This will open your browser to sign in with Google.\n\nYour Google account will be used as an alternative login method.\nThis is for security verification only \u2014 no data is shared with Google."
+        if existing: msg = f"Currently linked: {existing}\n\n" + msg
+        reply = QMessageBox.question(self, "Link Google Account", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes: return
+        status_dlg = QDialog(self); status_dlg.setWindowTitle("Linking..."); status_dlg.setMinimumWidth(320)
+        sl = QVBoxLayout(status_dlg); sl.setContentsMargins(24, 20, 24, 20)
+        sl_lbl = QLabel("Opening browser...\nPlease sign in with your Google account.")
+        sl_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;"); sl_lbl.setAlignment(Qt.AlignCenter); sl.addWidget(sl_lbl)
+        status_dlg.show()
+        from PyQt5.QtWidgets import QApplication; QApplication.processEvents()
+        email, refresh_token, error = start_oauth_flow(cid, csec); status_dlg.close()
+        if error: QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}"); return
+        self.sec.setup_google(cid, csec, email, refresh_token)
+        QMessageBox.information(self, "Linked", f"Google account '{email}' linked successfully.\n\nYou can now use 'Sign in with Google' on the login screen.")
+        self.refresh()
+
+    def _unlink_google(self):
+        email = self.sec.get_google_email()
+        if not email: return
+        reply = QMessageBox.question(self, "Unlink Google?", f"Remove Google account '{email}'?\nYou will no longer be able to sign in with Google.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.sec.unlink_google()
+            QMessageBox.information(self, "Unlinked", "Google account removed.")
+            self.refresh()
+
+    def _change_pw(self):
+        from PyQt5.QtWidgets import QInputDialog
+        pw, ok = QInputDialog.getText(self, "Change Password", "New password:", echo=QLineEdit.Password)
+        if ok and pw:
+            pw2, ok2 = QInputDialog.getText(self, "Confirm", "Confirm:", echo=QLineEdit.Password)
+            if ok2 and pw == pw2:
+                self.sec.set_pw(pw); QMessageBox.information(self, "Done", "Password changed.")
+            else:
+                QMessageBox.warning(self, "Error", "Passwords don't match.")
+
+    # ══════════════════════════════════════════════
+    # REFRESH
+    # ══════════════════════════════════════════════
     def refresh(self):
-        accts = self.acct.list_all()
-        self.acct_table.setRowCount(len(accts))
-        for i, a in enumerate(accts):
-            self.acct_table.setItem(i, 0, QTableWidgetItem(a["display_name"]))
-            self.acct_table.setItem(i, 1, QTableWidgetItem(a["short_label"]))
-            self.acct_table.setItem(i, 2, QTableWidgetItem(a["account_type"]))
-            self.acct_table.setItem(i, 3, QTableWidgetItem(fmt_money(a["opening_balance"])))
-            self.acct_table.setItem(i, 4, QTableWidgetItem("✓" if a["is_active"] else "✗"))
+        # Accounts
+        self._refresh_accounts()
 
-            # Action: Edit + Activate/Deactivate in a row
-            action_w = QWidget()
-            action_lay = QHBoxLayout(action_w)
-            action_lay.setContentsMargins(4, 2, 4, 2)
-            action_lay.setSpacing(6)
-
-            edit_btn = QPushButton("Edit")
-            edit_btn.setStyleSheet(f"color:{C['accent']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 10px;")
-            edit_btn.setCursor(Qt.PointingHandCursor)
-            acct_data = dict(a)
-            edit_btn.clicked.connect(lambda _, ad=acct_data: self._edit_account(ad))
-            action_lay.addWidget(edit_btn)
-
-            toggle_btn = QPushButton("Deactivate" if a["is_active"] else "Activate")
-            toggle_btn.setStyleSheet(f"color:{C['red'] if a['is_active'] else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 8px;")
-            toggle_btn.setCursor(Qt.PointingHandCursor)
-            aid = a["account_id"]; active = a["is_active"]
-            toggle_btn.clicked.connect(lambda _, aid=aid, act=active: self._toggle_account(aid, act))
-            action_lay.addWidget(toggle_btn)
-
-            self.acct_table.setCellWidget(i, 5, action_w)
-
+        # Categories — show correct icons
         cats = self.lu.list_categories()
         self.cat_table.setRowCount(len(cats))
         for i, c in enumerate(cats):
-            self.cat_table.setItem(i, 0, QTableWidgetItem(c["display_name"]))
-            self.cat_table.setItem(i, 1, QTableWidgetItem(c.get("default_pf_category") or "—"))
-            self.cat_table.setItem(i, 2, QTableWidgetItem("Yes" if c.get("tax_deductible") else "No"))
-            cl = QLabel("●"); cl.setStyleSheet(f"color:{c.get('color_hex') or '#000'};font-size:18px;")
-            self.cat_table.setCellWidget(i, 3, cl)
+            cid = c.get("category_id", "")
+            icon_val = self._get_cat_icon(cid)
+            icon_lbl = QLabel(icon_val)
+            icon_lbl.setStyleSheet("font-size:20px;background:transparent;border:none;")
+            icon_lbl.setAlignment(Qt.AlignCenter)
+            self.cat_table.setCellWidget(i, 0, icon_lbl)
+            self.cat_table.setItem(i, 1, QTableWidgetItem(c["display_name"]))
+            self.cat_table.setItem(i, 2, QTableWidgetItem(c.get("default_pf_category") or "\u2014"))
+            self.cat_table.setItem(i, 3, QTableWidgetItem("Yes" if c.get("tax_deductible") else "No"))
+            cl = QLabel("\u25cf")
+            cl.setStyleSheet(f"color:{c.get('color_hex') or '#000'};font-size:18px;background:transparent;border:none;")
+            self.cat_table.setCellWidget(i, 4, cl)
+            edit_btn = QPushButton("Edit")
+            edit_btn.setStyleSheet(f"color:{C['accent']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:3px 10px;font-size:11px;")
+            edit_btn.setCursor(Qt.PointingHandCursor)
+            cat_data = dict(c)
+            edit_btn.clicked.connect(lambda _, cd=cat_data: self._edit_category(cd))
+            self.cat_table.setCellWidget(i, 5, edit_btn)
 
-        methods = self.lu.list_methods()
+        # Payment methods — show ALL (active + inactive)
+        methods = [dict(r) for r in self.db.execute(
+            "SELECT * FROM payment_methods ORDER BY sort_order").fetchall()]
         self.method_table.setRowCount(len(methods))
         for i, m in enumerate(methods):
             self.method_table.setItem(i, 0, QTableWidgetItem(m["display_name"]))
-            self.method_table.setItem(i, 1, QTableWidgetItem("✓" if m["is_active"] else "✗"))
+            active = bool(m.get("is_active", 1))
+            status_lbl = QLabel("\u2713 Active" if active else "\u2717 Inactive")
+            status_lbl.setStyleSheet(f"color:{C['green'] if active else C['text3']};font-weight:600;font-size:11px;background:transparent;border:none;")
+            self.method_table.setCellWidget(i, 1, status_lbl)
+            toggle_btn = QPushButton("Deactivate" if active else "Activate")
+            toggle_btn.setStyleSheet(f"color:{C['red'] if active else C['green']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:3px 10px;font-size:11px;")
+            toggle_btn.setCursor(Qt.PointingHandCursor)
+            mid = m["method_id"]; cur_active = m.get("is_active", 1)
+            toggle_btn.clicked.connect(lambda _, mid=mid, act=cur_active: self._toggle_method(mid, act))
+            self.method_table.setCellWidget(i, 2, toggle_btn)
 
+        # Tags
         tags = self.lu.list_tags()
         self.tag_table.setRowCount(len(tags))
         for i, t in enumerate(tags):
             self.tag_table.setItem(i, 0, QTableWidgetItem(t["display_name"]))
-            self.tag_table.setItem(i, 1, QTableWidgetItem("✓" if t["is_active"] else "✗"))
+            self.tag_table.setItem(i, 1, QTableWidgetItem("\u2713" if t["is_active"] else "\u2717"))
 
+        # Security — smaller toggle
         is_on = self.sec.is_2fa()
-        self.totp_lbl.setText("✓ TOTP Enabled" if is_on else "✗ TOTP Disabled (password required)")
+        self.totp_lbl.setText("\u2713 TOTP Enabled" if is_on else "\u2717 TOTP Disabled (password required)")
         self.totp_lbl.setStyleSheet(f"color:{C['green'] if is_on else C['amber']};font-weight:600;")
         self.tfa_toggle.setChecked(is_on)
         self.tfa_toggle.setText("ON" if is_on else "OFF")
         self.tfa_toggle.setStyleSheet(
             f"QPushButton{{background:{C['green'] if is_on else C['text3']};color:white;"
-            f"border:none;border-radius:12px;padding:4px 14px;font-size:12px;font-weight:700;}}"
+            f"border:none;border-radius:14px;padding:2px 16px;font-size:11px;font-weight:700;}}"
             f"QPushButton:hover{{background:{C['green'] if is_on else C['text2']};}}")
 
-        # Google account status
+        # Google
         if hasattr(self, 'google_status'):
             g_email = self.sec.get_google_email()
             g_linked = self.sec.is_google_linked()
@@ -628,7 +1061,7 @@ class SettingsTab(QWidget):
                 self.google_link_btn.setText("\U0001f517  Link Google Account")
                 self.google_unlink_btn.setVisible(False)
 
-        # Load preference values
+        # Preferences
         if hasattr(self, 'pref_page_size'):
             self.pref_page_size.setValue(self._get_pref('complete_page_size', 150))
             self.pref_scroll_trigger.setValue(self._get_pref('scroll_trigger_px', 400))
@@ -638,22 +1071,5 @@ class SettingsTab(QWidget):
             self.pref_notes_scroll_trigger.setValue(self._get_pref('notes_scroll_trigger', 200))
             self.pref_txn_alert.setValue(self._get_pref('min_txn_alert', 499))
 
-
-def QInputDialog_getText(parent, title, label, echo=QLineEdit.Normal):
-    from PyQt5.QtWidgets import QInputDialog
-    return QInputDialog.getText(parent, title, label, echo)
-
-def QInputDialog_getItem(parent, title, label, items, current=0):
-    from PyQt5.QtWidgets import QInputDialog
-    return QInputDialog.getItem(parent, title, label, items, current, False)
-
-try:
-    from PyQt5.QtWidgets import QInputDialog
-except ImportError:
-    pass
-
-try:
-    import pyotp
-    HAS_TOTP = True
-except ImportError:
-    HAS_TOTP = False
+        # Backup info
+        self._refresh_backup_info()

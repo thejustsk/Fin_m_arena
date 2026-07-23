@@ -104,6 +104,11 @@ class MainWindow(QMainWindow):
 
     def _nav(self, key):
         idx = self._tab_map.get(key, 0)
+
+        # Tab security check
+        if not self._check_tab_security(key):
+            return
+
         self.stack.setCurrentIndex(idx)
         # Update sidebar highlight
         self.sidebar.highlight(key)
@@ -115,6 +120,34 @@ class MainWindow(QMainWindow):
                 print(f"Refresh error on {key}: {e}")
         self.sidebar.update_nw()
         self.sidebar.refresh_dues()
+
+    def _check_tab_security(self, key):
+        """Check if tab requires password/TOTP verification. Returns True if allowed."""
+        try:
+            row = self.db.execute("SELECT * FROM tab_security WHERE tab_key=?", (key,)).fetchone()
+            if not row:
+                return True  # No protection
+        except:
+            return True
+
+        # Tab is protected — verify identity
+        sec = self.services.get("security")
+        if not sec:
+            return True
+
+        if sec.is_2fa():
+            from PyQt5.QtWidgets import QInputDialog
+            code, ok = QInputDialog.getText(self, "Tab Locked", f"Enter TOTP code to access this tab:")
+            if ok and code:
+                return sec.verify_totp(code)
+            return False
+        else:
+            from PyQt5.QtWidgets import QInputDialog
+            from PyQt5.QtWidgets import QLineEdit
+            pw, ok = QInputDialog.getText(self, "Tab Locked", "Enter password to access this tab:", QLineEdit.Password)
+            if ok and pw:
+                return sec.verify(pw)
+            return False
 
     def closeEvent(self, event):
         try:

@@ -767,8 +767,9 @@ class TransactionEntryTab(QWidget):
             self.ac_combo.add_item(label, aid)
             self.tf_from.add_item(label, aid); self.tf_to.add_item(label, aid)
             self._acct_list.append((label, aid))
-        for m in PAYMENT_METHODS:
-            self.method_combo.add_item(m, m); self.tf_method.add_item(m, m)
+        for m in self.lu.list_methods():
+            mname = m["display_name"]
+            self.method_combo.add_item(mname, mname); self.tf_method.add_item(mname, mname)
         self._cat_pf = {}
         for c in self.lu.list_categories():
             self.cat_combo.add_item(c["display_name"], c["category_id"])
