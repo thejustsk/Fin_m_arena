@@ -1159,6 +1159,9 @@ class _AuditSubTab(QWidget):
             if not tx:
                 continue
             self.tx.update(tid, **updates)
+            self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), tid))
+            self.db.commit()
+            self._mark_wealth_updated(tid)
             for field, new_val in updates.items():
                 old_val = tx.get(field)
                 if old_val != new_val:
@@ -1167,6 +1170,11 @@ class _AuditSubTab(QWidget):
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
         self.load_records()
+        parent_tab = self.parent()
+        while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
+            parent_tab = parent_tab.parent()
+        if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
+            parent_tab._notify_data_changed()
 
     # ───────────────────────── INSIGHTS ────────────────────────────────
     def _build_insights(self):
@@ -1241,16 +1249,36 @@ class _AuditSubTab(QWidget):
         all_accts = sorted(set(list(acct_cr.keys()) + list(acct_db.keys())))
         acct_totals = [round(acct_cr.get(a, 0) + acct_db.get(a, 0), 2) for a in all_accts]
 
+        # Determine aggregation: by month if range > 90 days, else by day
+        from datetime import datetime as _dtt
+        try:
+            _d1 = _dtt.strptime(d_from, "%Y-%m-%d")
+            _d2 = _dtt.strptime(d_to, "%Y-%m-%d")
+            _span_days = (_d2 - _d1).days
+        except Exception:
+            _span_days = 30
+        _by_month = _span_days > 90
+
         trend_cr, trend_db = {}, {}
         for r in rows:
-            trend_cr.setdefault(r["tx_date"], 0)
-            trend_db.setdefault(r["tx_date"], 0)
-            if r["tx_type"] == "CREDIT":
-                trend_cr[r["tx_date"]] += r["amount"]
+            if _by_month:
+                key = r["tx_date"][:7]  # "YYYY-MM"
             else:
-                trend_db[r["tx_date"]] += r["amount"]
+                key = r["tx_date"]      # "YYYY-MM-DD"
+            trend_cr.setdefault(key, 0)
+            trend_db.setdefault(key, 0)
+            if r["tx_type"] == "CREDIT":
+                trend_cr[key] += r["amount"]
+            else:
+                trend_db[key] += r["amount"]
         all_dates = sorted(set(list(trend_cr.keys()) + list(trend_db.keys())))
-        trend_labels = [d[5:] for d in all_dates]
+        if _by_month:
+            # Show "Jan", "Feb", etc. for monthly
+            _MONTH_NAMES = {"01":"Jan","02":"Feb","03":"Mar","04":"Apr","05":"May","06":"Jun",
+                            "07":"Jul","08":"Aug","09":"Sep","10":"Oct","11":"Nov","12":"Dec"}
+            trend_labels = [_MONTH_NAMES.get(d[5:], d[5:]) for d in all_dates]
+        else:
+            trend_labels = [d[5:] for d in all_dates]
 
         cats = {}
         for r in rows:

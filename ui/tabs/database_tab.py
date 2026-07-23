@@ -286,7 +286,7 @@ def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     net_color = '#10B981' if net >= 0 else '#EF4444'
     net_sign = '' if net >= 0 else '- '
     card.setStyleSheet(f"""
-        QFrame {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {type_color}15,stop:1 #ffffff);
+        QFrame {{ background:#ffffff;
                   border:1px solid #E5E7EB; border-radius:12px; border-top:3px solid {type_color}; }}
         QLabel {{ background:transparent; border:none; }}
     """)
