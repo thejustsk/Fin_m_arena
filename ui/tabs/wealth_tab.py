@@ -1112,6 +1112,7 @@ class LoansGivePage(_FunctionPage):
         self.lg_loan_amount.setValue(0)
         self.lg_loan_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "Loan Recorded", f"\u20b9{amount:,.2f} loan to {borrower_name} recorded.")
 
@@ -1148,6 +1149,7 @@ class LoansGivePage(_FunctionPage):
         self.lg_rep_amount.setValue(0)
         self.lg_rep_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
@@ -1168,7 +1170,6 @@ class LoansGivePage(_FunctionPage):
             loan["loan_amount"], rate, months, "ANNUAL", total_paid, loan["start_date"], method=method
         )
 
-    # ── List ──
     # ── List ──
     def _render_list(self):
         if not hasattr(self, "_list_lay"):
@@ -1477,6 +1478,7 @@ class LoansGivePage(_FunctionPage):
     def _mark_closed_lg(self, loan_id):
         if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
             self.repos["loans"].update_status(loan_id, "CLOSED")
+            self._loaded = False
             self.load_list()
 
     def _print_pending(self):
@@ -1796,6 +1798,7 @@ class LoansTakePage(_FunctionPage):
         self.lt_loan_principal.setValue(0)
         self.lt_loan_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         total = LoanService.total_expected(emi, months)
         QMessageBox.information(
@@ -1837,6 +1840,7 @@ class LoansTakePage(_FunctionPage):
         )
         self.lt_rep_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         loan = self.repos["borrowed"].get_loan(lid)
         if loan and loan["status"] == "REPAID":
@@ -2175,6 +2179,7 @@ class LoansTakePage(_FunctionPage):
     def _mark_closed(self, loan_id):
         if _confirm(self, "Mark Closed", "Confirm: mark this loan as CLOSED?"):
             self.repos["borrowed"].update_status(loan_id, "CLOSED")
+            self._loaded = False
             self.load_list()
 
 
@@ -2285,6 +2290,7 @@ class FDGivePage(_FunctionPage):
             status="ACTIVE", linked_txn_id=txn_id
         )
         self.fd_principal.setValue(0)
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "FD Created", "Fixed deposit recorded successfully.")
 
@@ -2467,6 +2473,7 @@ class FDGivePage(_FunctionPage):
     def _mark_matured(self, fd_id):
         if _confirm(self, "Mark Matured", "Mark this FD as matured?"):
             self.repos["fd"].update_status(fd_id, "MATURED")
+            self._loaded = False
             self.load_list()
 
     def _mark_withdrawn(self, fd_id):
@@ -2561,6 +2568,7 @@ class FDGivePage(_FunctionPage):
                 category_names=("Investment", "Finance")
             )
             self.repos["fd"].update_status(fd_id, "PREMATURE_WITHDRAWN")
+            self._loaded = False
             self.load_list()
 
 
@@ -2726,6 +2734,7 @@ class FDOthersPage(_FunctionPage):
         self.fo_dep_amount.setValue(0)
         self.fo_dep_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "Deposit Recorded", f"\u20b9{amount:,.2f} deposit from {name} recorded.")
 
@@ -2762,6 +2771,7 @@ class FDOthersPage(_FunctionPage):
         self.fo_rep_amount.setValue(0)
         self.fo_rep_desc.clear()
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         dep = self.repos["deposits"].get_deposit(did)
         if dep and dep["status"] == "REPAID":
@@ -3098,6 +3108,7 @@ class FDOthersPage(_FunctionPage):
     def _mark_closed(self, deposit_id):
         if _confirm(self, "Mark Closed", "Mark this deposit as fully returned/closed?"):
             self.repos["deposits"].update_status(deposit_id, "CLOSED")
+            self._loaded = False
             self.load_list()
 
 
@@ -3513,6 +3524,7 @@ class MFPage(_FunctionPage):
         self._nav_cache[sid] = nav
         self.mf_buy_amount.setValue(0)
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "Purchase Logged", f"{units:,.4f} units purchased.")
 
@@ -3545,6 +3557,7 @@ class MFPage(_FunctionPage):
         self._nav_cache[sid] = nav
         self.mf_sell_units.setValue(0)
         self._refresh_entry_dropdowns()
+        self._loaded = False
         self.load_list()
         QMessageBox.information(self, "Redemption Logged", f"{units:,.4f} units redeemed for {fmt_money(amount)}.")
 
@@ -3605,6 +3618,7 @@ class MFPage(_FunctionPage):
             self._nav_cache.pop(scheme["scheme_id"], None)
             if hasattr(self, 'mf_buy_scheme'):
                 self._refresh_entry_dropdowns()
+            self._loaded = False
             self._build_list_data()
             QMessageBox.information(self, "Updated", f"Scheme '{n}' updated successfully.")
 
