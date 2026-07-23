@@ -270,4 +270,28 @@ QPushButton#sidebar-item {{
 }}
 QPushButton#sidebar-item:hover {{ background: {C['surface2']}; color: #111827; font-weight: 700; }}
 QGroupBox {{ font-weight: 600; border: 1px solid {C['border2']}; border-radius: {C['radius']}; margin-top: 12px; padding: 16px 12px 12px; }}
+
+/* ═══════ QDialog — Global Style ═══════ */
+QDialog {{
+    background: {C['bg']};
+}}
+QDialog QLabel {{
+    background: transparent;
+    border: none;
+}}
+
+/* ═══════ QMessageBox — Global Style ═══════ */
+QMessageBox {{
+    background: {C['surface']};
+}}
+QMessageBox QLabel {{
+    color: {C['text']};
+    font-size: 13px;
+    background: transparent;
+}}
+QMessageBox QPushButton {{
+    min-width: 80px;
+    min-height: 32px;
+}}
+
 """

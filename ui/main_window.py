@@ -1,5 +1,6 @@
 """Main application window with sidebar and stacked content."""
 from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
+from PyQt5.QtCore import Qt
 from config import APP_NAME, APP_VERSION
 from ui.sidebar import Sidebar, COLLAPSED_W
 
@@ -12,6 +13,17 @@ class MainWindow(QMainWindow):
         self.services = services
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1280, 800)
+
+        # Set app icon (💸 emoji as window icon — inherited by all dialogs)
+        from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont
+        from PyQt5.QtCore import QSize
+        _icon_px = QPixmap(64, 64)
+        _icon_px.fill(Qt.transparent)
+        _p = QPainter(_icon_px)
+        _p.setFont(QFont("Segoe UI Emoji", 36))
+        _p.drawText(_icon_px.rect(), Qt.AlignCenter, "\U0001f4b8")
+        _p.end()
+        self.setWindowIcon(QIcon(_icon_px))
         self._build()
 
     def _build(self):
@@ -95,6 +107,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_all_tabs(self):
         """Called by AuditTab when data changes — refresh all visible tabs."""
+        # Refresh category icon cache (used by all tabs for transaction cards)
+        from ui.tabs.database_tab import _refresh_cat_icons
+        _refresh_cat_icons(self.db)
         for tab in self._tabs.values():
             if hasattr(tab, "refresh"):
                 try:
@@ -108,6 +123,10 @@ class MainWindow(QMainWindow):
         # Tab security check
         if not self._check_tab_security(key):
             return
+
+        # Refresh category icon cache on every navigation
+        from ui.tabs.database_tab import _refresh_cat_icons
+        _refresh_cat_icons(self.db)
 
         self.stack.setCurrentIndex(idx)
         # Update sidebar highlight
@@ -135,19 +154,75 @@ class MainWindow(QMainWindow):
         if not sec:
             return True
 
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame
+        from ui.theme import C
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("\U0001f512  Tab Locked")
+        dlg.setMinimumWidth(400)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(12)
+
+        title = QLabel("\U0001f512  Verification Required")
+        title.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        lay.addWidget(title)
+
         if sec.is_2fa():
-            from PyQt5.QtWidgets import QInputDialog
-            code, ok = QInputDialog.getText(self, "Tab Locked", f"Enter TOTP code to access this tab:")
-            if ok and code:
-                return sec.verify_totp(code)
-            return False
+            desc = QLabel("Enter your TOTP code to access this tab:")
         else:
-            from PyQt5.QtWidgets import QInputDialog
-            from PyQt5.QtWidgets import QLineEdit
-            pw, ok = QInputDialog.getText(self, "Tab Locked", "Enter password to access this tab:", QLineEdit.Password)
-            if ok and pw:
-                return sec.verify(pw)
-            return False
+            desc = QLabel("Enter your password to access this tab:")
+        desc.setStyleSheet(f"font-size:12px;color:{C['text3']};")
+        lay.addWidget(desc)
+
+        input_field = QLineEdit()
+        input_field.setMinimumHeight(40)
+        if sec.is_2fa():
+            input_field.setPlaceholderText("000000")
+            input_field.setMaxLength(6)
+        else:
+            input_field.setEchoMode(QLineEdit.Password)
+            input_field.setPlaceholderText("Password")
+        lay.addWidget(input_field)
+
+        err_lbl = QLabel("")
+        err_lbl.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
+        lay.addWidget(err_lbl)
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dlg.reject)
+        ok_btn = QPushButton("\U0001f513  Unlock")
+        ok_btn.setObjectName("primary")
+        ok_btn.setMinimumHeight(36)
+        def do_verify():
+            val = input_field.text().strip()
+            if not val:
+                err_lbl.setText("Enter the code/password.")
+                return
+            if sec.is_2fa():
+                if sec.verify_totp(val):
+                    dlg.accept()
+                else:
+                    err_lbl.setText("Invalid TOTP code.")
+                    input_field.clear()
+                    input_field.setFocus()
+            else:
+                if sec.verify(val):
+                    dlg.accept()
+                else:
+                    err_lbl.setText("Invalid password.")
+                    input_field.clear()
+                    input_field.setFocus()
+        ok_btn.clicked.connect(do_verify)
+        input_field.returnPressed.connect(do_verify)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        lay.addLayout(btn_row)
+
+        return dlg.exec_() == QDialog.Accepted
 
     def closeEvent(self, event):
         try:

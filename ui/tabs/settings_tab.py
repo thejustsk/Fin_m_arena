@@ -606,22 +606,78 @@ class SettingsTab(QWidget):
     def _toggle_tab_security_btn(self, tab_key, checked, btn):
         """Toggle button handler for tab security — requires password/TOTP verification."""
         btn.setEnabled(False)
-        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
         QApplication.processEvents()
 
-        verified = False
         action = "protect" if checked else "remove protection from"
 
+        # Custom styled verification dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("\U0001f512  Verify")
+        dlg.setMinimumWidth(400)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(12)
+
+        title = QLabel("\U0001f512  Verification Required")
+        title.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        lay.addWidget(title)
+
         if self.sec.is_2fa():
-            from PyQt5.QtWidgets import QInputDialog
-            code, ok = QInputDialog.getText(self, "Verify", f"Enter TOTP code to {action} this tab:")
-            if ok and code:
-                verified = self.sec.verify_totp(code)
+            desc = QLabel(f"Enter TOTP code to {action} this tab:")
         else:
-            from PyQt5.QtWidgets import QInputDialog
-            pw, ok = QInputDialog.getText(self, "Verify", f"Enter your password to {action} this tab:", QLineEdit.Password)
-            if ok and pw:
-                verified = self.sec.verify(pw)
+            desc = QLabel(f"Enter password to {action} this tab:")
+        desc.setStyleSheet(f"font-size:12px;color:{C['text3']};")
+        lay.addWidget(desc)
+
+        input_field = QLineEdit()
+        input_field.setMinimumHeight(40)
+        if self.sec.is_2fa():
+            input_field.setPlaceholderText("000000")
+            input_field.setMaxLength(6)
+        else:
+            input_field.setEchoMode(QLineEdit.Password)
+            input_field.setPlaceholderText("Password")
+        lay.addWidget(input_field)
+
+        err_lbl = QLabel("")
+        err_lbl.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
+        lay.addWidget(err_lbl)
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dlg.reject)
+        ok_btn = QPushButton("\u2705  Verify")
+        ok_btn.setObjectName("primary")
+        ok_btn.setMinimumHeight(36)
+        def do_verify():
+            val = input_field.text().strip()
+            if not val:
+                err_lbl.setText("Enter the code/password.")
+                return
+            if self.sec.is_2fa():
+                if self.sec.verify_totp(val):
+                    dlg.accept()
+                else:
+                    err_lbl.setText("Invalid TOTP code.")
+                    input_field.clear()
+                    input_field.setFocus()
+            else:
+                if self.sec.verify(val):
+                    dlg.accept()
+                else:
+                    err_lbl.setText("Invalid password.")
+                    input_field.clear()
+                    input_field.setFocus()
+        ok_btn.clicked.connect(do_verify)
+        input_field.returnPressed.connect(do_verify)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        lay.addLayout(btn_row)
+
+        verified = dlg.exec_() == QDialog.Accepted
 
         if verified:
             if checked:

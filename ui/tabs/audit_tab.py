@@ -941,6 +941,25 @@ class _AuditSubTab(QWidget):
             self.db.commit()
             for field, (old, new) in changes.items():
                 self.audit.log(tx_id, field, old, new, reason="Manual edit via Audit tab")
+
+            # Cascade to related transfer transaction (same transfer_group_id)
+            transfer_group = tx.get("transfer_group_id")
+            if transfer_group:
+                related = self.db.execute(
+                    "SELECT id FROM transactions WHERE transfer_group_id=? AND id!=?",
+                    (transfer_group, tx_id)).fetchone()
+                if related:
+                    rel_id = related["id"]
+                    # Build update for related txn (skip type — keep opposite)
+                    rel_kw = {k: v for k, v in update_kw.items() if k != "tx_type"}
+                    if rel_kw:
+                        self.tx.update(rel_id, **rel_kw)
+                        self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), rel_id))
+                        self.db.commit()
+                        for field, (old, new) in changes.items():
+                            if field != "tx_type":
+                                self.audit.log(rel_id, field, old, new, reason="Transfer cascade from Audit tab")
+
             # Cascade changes to linked wealth records
             if "amount" in changes:
                 self._cascade_amount(tx_id, changes["amount"][1])
@@ -1257,6 +1276,10 @@ class _AuditSubTab(QWidget):
         upd_lay.addWidget(upd_lbl)
         upd_dlg.show()
         QApplication.processEvents()
+        from PyQt5.QtCore import QTimer
+        import time
+        time.sleep(0.1)  # Small delay to ensure popup renders
+        QApplication.processEvents()
         cat_val = self.bulk_category.currentData()
         nw_val = self.bulk_neednwant.currentData()
         pf_val = self.bulk_pf.currentData()
@@ -1268,10 +1291,11 @@ class _AuditSubTab(QWidget):
         if pf_val != "__nochange__":
             updates["pf_category"] = None if pf_val == "__clear__" else pf_val
         if not updates:
+            upd_dlg.close()
             QMessageBox.information(self, "Nothing to Apply",
                                     "Pick at least one field to change.")
             return
-        for tid in ids:
+        for i, tid in enumerate(ids):
             tx = self.tx.get(tid)
             if not tx:
                 continue
@@ -1283,9 +1307,15 @@ class _AuditSubTab(QWidget):
                 old_val = tx.get(field)
                 if old_val != new_val:
                     self.audit.log(tid, field, old_val, new_val, reason="Bulk recategorize via Audit tab")
+            # Keep UI responsive during bulk update
+            if (i + 1) % 10 == 0:
+                upd_lbl.setText(f"\U0001f504  Updating {i+1}/{len(ids)}...")
+                QApplication.processEvents()
         self.bulk_category.setCurrentIndex(0)
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
+        # Refresh records BEFORE showing done popup
+        self.load_records()
         # Show done state in popup
         try:
             upd_lbl.setText(f"\u2705  {len(ids)} transactions updated!")
