@@ -29,19 +29,48 @@ DC_STRIPE_RECT = QRectF(-DC_CARD_W/2, -DC_CARD_H/2+20, DC_CARD_W, 32)
 DC_EASE = 0.16; DC_PX_PER = DC_CARD_W * 0.9; DC_DRAG_TH = 6
 
 DC_GRADIENTS = [
-    ("#3a3a3a","#0f0f0f"),("#1c3d5a","#0a0f14"),("#4b2e2e","#120909"),
-    ("#2e4b34","#0a120c"),("#3a2e4b","#0f0a14"),("#4b3a1a","#120d05"),
-    ("#1a3a3a","#050f0f"),("#4b1a3a","#12050d"),("#2a2a4b","#08081b"),
-    ("#4b3a2a","#150f08"),("#1a2a4b","#05081b"),("#3a1a1a","#0f0505"),
-    ("#2a4b3a","#081b10"),("#4a4a1a","#141405"),("#1a4a3a","#051410"),
-    ("#3a2a1a","#0f0805"),("#2a1a3a","#08051b"),("#4a1a2a","#14050b"),
-    ("#1a1a3a","#05051b"),("#3a4a1a","#0f1405"),
+    ("#b8bcc2", "#5f656d"),  # Silver Steel
+    ("#8a9199", "#2f343b"),  # Gunmetal
+    ("#d9d9d6", "#7d7d79"),  # Platinum
+    ("#c9ced3", "#59616b"),  # Titanium
+    ("#b79a67", "#4e3c1f"),  # Antique Gold
+    ("#d0a85d", "#6a4b17"),  # Brushed Gold
+    ("#b56d43", "#59301c"),  # Copper
+    ("#9f7554", "#4d2e1e"),  # Bronze
+    ("#8b8e91", "#242629"),  # Iron
+    ("#707780", "#1e2328"),  # Graphite
+    ("#bcc3cb", "#40464d"),  # Chrome
+    ("#6d747d", "#2a2d31"),  # Carbon Steel
+    ("#9da3a8", "#4f555b"),  # Pewter
+    ("#7b8088", "#34383d"),  # Nickel
+    ("#8f8c88", "#4c4844"),  # Zinc
+    ("#d4d0c8", "#666057"),  # Palladium
+    ("#8d8173", "#43382f"),  # Raw Steel
+    ("#c0b8aa", "#5a544d"),  # Satin Alloy
+    ("#6e7377", "#17191b"),  # Black Chrome
+    ("#e3d8b8", "#7b6b43"),  # Champagne Metal
 ]
 DC_GRAD_NAMES = [
-    "Meridian","Solace","Vertex","Palisade","Anchorpoint",
-    "Lumen","Cobalt","Granite","Auric","Northgate",
-    "Harborline","Sterling","Cascade","Ridgeway","Ivory",
-    "Falcon","Crescent","Marble","Obsidian","Summit",
+    "Titanium",
+    "Gunmetal",
+    "Platinum",
+    "Silverforge",
+    "Aurum",
+    "Bullion",
+    "Copperline",
+    "Bronzework",
+    "Ironclad",
+    "Graphite",
+    "Chrome",
+    "Carbon",
+    "Pewter",
+    "Nickel",
+    "Zinc",
+    "Palladium",
+    "Forge",
+    "Alloy",
+    "Blacksteel",
+    "Champagne",
 ]
 
 
@@ -282,7 +311,7 @@ class DebitCardAddDialog(QDialog):
         self.dcr = debit_cards_repo; self.acct = accounts_repo
         self._card = card; self._is_edit = card is not None
         self.setWindowTitle("\u270f\ufe0f  Edit Debit Card" if self._is_edit else "\U0001f4b3  Add Debit Card")
-        self.setMinimumWidth(640); self.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        self.setMinimumWidth(640); # Global QSS handles dialog background
         self._build()
         if self._is_edit: self._prefill()
 

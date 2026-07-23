@@ -412,7 +412,7 @@ class AddCardDialog(QDialog):
         self._card = card; self._is_edit = card is not None
         title = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
         self.setWindowTitle(title); self.setMinimumWidth(640)
-        self.setStyleSheet(f"QDialog{{background:{C['bg']};}}"); self._build()
+        # Global QSS handles dialog background; self._build()
         if self._is_edit: self._prefill()
     def _build(self):
         lay=QHBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(20)
