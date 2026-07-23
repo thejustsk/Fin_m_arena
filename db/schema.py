@@ -202,6 +202,24 @@ CREATE TABLE IF NOT EXISTS preferences (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS debit_cards (
+    card_id         TEXT PRIMARY KEY,
+    account_id      TEXT NOT NULL REFERENCES accounts,
+    card_name       TEXT NOT NULL,
+    card_network    TEXT DEFAULT 'VISA',
+    card_class      TEXT DEFAULT '',
+    last_four       TEXT DEFAULT '0000',
+    card_number     TEXT DEFAULT '',
+    cardholder_name TEXT DEFAULT '',
+    expiry_month    INTEGER DEFAULT 12,
+    expiry_year     INTEGER DEFAULT 2028,
+    annual_fee      REAL DEFAULT 0,
+    card_color_1    TEXT DEFAULT '#1a1a2e',
+    card_color_2    TEXT DEFAULT '#16213e',
+    is_active       INTEGER DEFAULT 1,
+    sort_order      INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(tx_date);
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
@@ -307,6 +325,10 @@ def run_migrations(db):
         ("deposits_from_others", "updated_at", "TEXT"),
         ("fixed_deposits", "updated_at", "TEXT"),
         ("transactions", "updated_at", "TEXT"),
+        ("app_security", "google_client_id", "TEXT"),
+        ("app_security", "google_client_secret", "TEXT"),
+        ("app_security", "google_email", "TEXT"),
+        ("app_security", "google_refresh_token", "TEXT"),
     ]
     for table, col, typedef in _safe_cols:
         try:
@@ -344,6 +366,16 @@ def run_migrations(db):
          "WHERE id IN (SELECT linked_txn_id FROM mf_transactions WHERE linked_txn_id IS NOT NULL AND txn_type='REDEMPTION') "
          "AND transaction_kind='REGULAR'"),
     ]
+    # ── Backfill FD_WITHDRAWAL kind (no linked_txn_id, match by description) ──
+    try:
+        c.execute(
+            "UPDATE transactions SET transaction_kind='FD_WITHDRAWAL' "
+            "WHERE transaction_kind='REGULAR' "
+            "AND (description LIKE '%FD%withdrawal%' OR description LIKE '%FD withdrawal%')"
+        )
+    except Exception:
+        pass
+
     for sql in _KIND_SQL:
         try:
             c.execute(sql)

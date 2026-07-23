@@ -737,19 +737,8 @@ class _AuditSubTab(QWidget):
 
             for r in day_txns:
                 tx_id = r["id"]
-                link = self._link_map.get(tx_id, {})
                 # Keep original transaction_kind so _tx_card shows proper badge
                 card = _tx_card(r)
-
-                # Embed link details inside the card's text column
-                if link:
-                    link_info = QLabel(f"\U0001f517 {link.get('group', '')}: {link.get('label', '')}")
-                    link_info.setStyleSheet(f"color:{C['accent']};font-size:10px;font-weight:600;")
-                    link_info.setWordWrap(True)
-                    # Add to the card's text column (2nd item in QHBoxLayout)
-                    _text_col = card.layout().itemAt(1).layout()
-                    if _text_col:
-                        _text_col.addWidget(link_info)
 
                 row_widget = QWidget()
                 row_widget.setStyleSheet("background:transparent;border:none;")
@@ -799,7 +788,6 @@ class _AuditSubTab(QWidget):
                 row_lay.addWidget(edit_btn, 0, Qt.AlignVCenter)
 
                 self._all_render_items.append(("card", row_widget))
-                # Link info is now embedded inside the card — no separate widget
 
         # Lazy render: first batch
         page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
@@ -906,12 +894,20 @@ class _AuditSubTab(QWidget):
         if not tx:
             return
         link = self._link_map.get(tx_id)
+        # Fallback: if not in link_map, check transaction_kind for wealth linkage
+        if not link:
+            _WEALTH_KINDS = {"LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT",
+                             "FD_DEPOSIT", "FD_WITHDRAWAL", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT",
+                             "MF_PURCHASE", "MF_REDEMPTION"}
+            kind = tx.get("transaction_kind", "REGULAR")
+            if kind in _WEALTH_KINDS:
+                link = {"group": kind, "label": kind.replace("_", " ").title()}
         wealth_status = self._get_wealth_status(tx_id)
         dlg = TransactionEditDialog(tx, self.acc, self.lu, wealth_link=link, wealth_status=wealth_status, parent=self)
         if dlg.exec_() == QDialog.Accepted:
-            # Handle deletion (no verification needed for delete)
+            # Handle deletion with verification + transfer detection
             if dlg.is_deleted():
-                self._delete_transaction(tx_id)
+                self._delete_with_auth(tx_id)
                 return
             changes = dlg.changed_fields()
             if not changes:
@@ -924,9 +920,9 @@ class _AuditSubTab(QWidget):
             upd_dlg = QDialog(self)
             upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
             upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
-            upd_dlg.setFixedSize(260, 100)
+            upd_dlg.setFixedSize(340, 140)
             upd_frame = QFrame(upd_dlg)
-            upd_frame.setGeometry(10, 10, 240, 80)
+            upd_frame.setGeometry(10, 10, 320, 120)
             upd_frame.setStyleSheet(
                 f"QFrame{{background:{C['surface']};border:1.5px solid {C['accent']};"
                 f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
@@ -976,39 +972,136 @@ class _AuditSubTab(QWidget):
                 parent_tab._notify_data_changed()
 
 
-    def _delete_transaction(self, tx_id):
-        """Delete transaction with cascade to linked wealth records."""
-        link = self._link_map.get(tx_id)
-        if link:
-            grp = link["group"]
+    def _delete_with_auth(self, tx_id):
+        """Delete transaction with: transfer detection, warning, auth, updating popup."""
+        tx = self.tx.get(tx_id)
+        if not tx:
+            return
+
+        # ── Step 1: Detect transfer pair ──
+        transfer_group = tx.get("transfer_group_id")
+        related_txns = []
+        if transfer_group:
+            rows = self.db.execute(
+                "SELECT id, tx_date, tx_type, amount, account_id FROM transactions "
+                "WHERE transfer_group_id=? AND id!=?",
+                (transfer_group, tx_id)).fetchall()
+            related_txns = [dict(r) for r in rows]
+
+        # ── Step 2: Show warning with details ──
+        if related_txns:
+            details = []
+            for rt in related_txns:
+                acct = self.db.execute(
+                    "SELECT display_name FROM accounts WHERE account_id=?",
+                    (rt["account_id"],)).fetchone()
+                acct_name = acct["display_name"] if acct else "Unknown"
+                details.append(
+                    f"  {rt['tx_type']} {fmt_money(rt['amount'])} — {acct_name} ({rt['tx_date']})")
+            warning_text = (
+                f"This is a TRANSFER transaction.\n\n"
+                f"Deleting it will also delete the related transaction:\n"
+                f"{chr(10).join(details)}\n\n"
+                f"Both transactions will be permanently removed.\n"
+                f"This cannot be undone."
+            )
+        else:
+            warning_text = (
+                f"Delete transaction of {fmt_money(tx['amount'])}?\n"
+                f"This cannot be undone."
+            )
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete", warning_text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        # ── Step 3: Verify identity (2FA / password) ──
+        if not self._verify_edit():
+            return
+
+        # ── Step 4: Show updating popup ──
+        from PyQt5.QtWidgets import QApplication
+        upd_dlg = QDialog(self)
+        upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
+        upd_dlg.setFixedSize(340, 140)
+        upd_frame = QFrame(upd_dlg)
+        upd_frame.setGeometry(10, 10, 320, 120)
+        upd_frame.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1.5px solid {C['red']};"
+            f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        upd_lay = QVBoxLayout(upd_frame)
+        upd_lay.setContentsMargins(16, 12, 16, 12)
+        upd_lbl = QLabel("\U0001f504  Deleting...")
+        upd_lbl.setStyleSheet(f"color:{C['red']};font-size:13px;font-weight:700;")
+        upd_lbl.setAlignment(Qt.AlignCenter)
+        upd_lay.addWidget(upd_lbl)
+        upd_dlg.show()
+        QApplication.processEvents()
+
+        # ── Step 5: Delete all related transactions ──
+        all_ids = [tx_id] + [rt["id"] for rt in related_txns]
+        # Clean audit_log entries first (no ON DELETE CASCADE)
+        for del_id in all_ids:
             try:
-                if grp == "Loan Given":
-                    self.db.execute("UPDATE loans SET trxn_id=NULL WHERE trxn_id=?", (tx_id,))
-                elif grp == "Loan Repayment":
-                    self.db.execute("UPDATE repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp == "Loan Taken":
-                    self.db.execute("UPDATE borrowed_loans SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp == "EMI Payment":
-                    self.db.execute("UPDATE borrowed_loan_repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp == "Deposit Received":
-                    self.db.execute("UPDATE deposits_from_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp == "Deposit Repayment":
-                    self.db.execute("UPDATE deposit_repayments_to_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp == "FD Deposit":
-                    self.db.execute("UPDATE fixed_deposits SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                elif grp.startswith("MF "):
-                    self.db.execute("UPDATE mf_transactions SET linked_txn_id=NULL WHERE linked_txn_id=?", (tx_id,))
-                self.db.commit()
-            except Exception as e:
-                print(f"[WARN] Cascade unlink failed: {e}")
-        self.tx.delete(tx_id)
+                self.db.execute("DELETE FROM audit_log WHERE transaction_id=?", (del_id,))
+            except Exception:
+                pass
+        self.db.commit()
+        for del_id in all_ids:
+            # Cascade unlink from wealth records
+            link = self._link_map.get(del_id)
+            if link:
+                grp = link["group"]
+                try:
+                    if grp == "Loan Given":
+                        self.db.execute("UPDATE loans SET trxn_id=NULL WHERE trxn_id=?", (del_id,))
+                    elif grp == "Loan Repayment":
+                        self.db.execute("UPDATE repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp == "Loan Taken":
+                        self.db.execute("UPDATE borrowed_loans SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp == "EMI Payment":
+                        self.db.execute("UPDATE borrowed_loan_repayments SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp == "Deposit Received":
+                        self.db.execute("UPDATE deposits_from_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp == "Deposit Repayment":
+                        self.db.execute("UPDATE deposit_repayments_to_others SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp == "FD Deposit":
+                        self.db.execute("UPDATE fixed_deposits SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    elif grp.startswith("MF "):
+                        self.db.execute("UPDATE mf_transactions SET linked_txn_id=NULL WHERE linked_txn_id=?", (del_id,))
+                    self.db.commit()
+                except Exception as e:
+                    print(f"[WARN] Cascade unlink failed: {e}")
+            self.tx.delete(del_id)
+
+        self.db.commit()
         self.load_records()
+
+        # Notify other tabs
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
             parent_tab = parent_tab.parent()
         if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
             parent_tab._notify_data_changed()
-        QMessageBox.information(self, "Deleted", "Transaction deleted successfully.")
+
+        # ── Step 6: Show done popup ──
+        try:
+            count = len(all_ids)
+            upd_lbl.setText(f"\u2705  {count} transaction(s) deleted!")
+            upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
+            ok_btn = QPushButton("OK")
+            ok_btn.setObjectName("primary")
+            ok_btn.setFixedHeight(28)
+            ok_btn.clicked.connect(upd_dlg.accept)
+            upd_lay.addWidget(ok_btn)
+            ok_btn.setFocus()
+            QApplication.processEvents()
+            upd_dlg.exec_()
+        except Exception:
+            pass
 
     def _cascade_amount(self, tx_id, new_amount):
         """Push edited transaction amount into the linked wealth table."""
@@ -1145,6 +1238,25 @@ class _AuditSubTab(QWidget):
             return
         if not self._verify_edit():
             return
+        # Show updating popup
+        from PyQt5.QtWidgets import QApplication
+        upd_dlg = QDialog(self)
+        upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
+        upd_dlg.setFixedSize(340, 140)
+        upd_frame = QFrame(upd_dlg)
+        upd_frame.setGeometry(10, 10, 320, 120)
+        upd_frame.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1.5px solid {C['accent']};"
+            f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        upd_lay = QVBoxLayout(upd_frame)
+        upd_lay.setContentsMargins(16, 12, 16, 12)
+        upd_lbl = QLabel("\U0001f504  Updating...")
+        upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
+        upd_lbl.setAlignment(Qt.AlignCenter)
+        upd_lay.addWidget(upd_lbl)
+        upd_dlg.show()
+        QApplication.processEvents()
         cat_val = self.bulk_category.currentData()
         nw_val = self.bulk_neednwant.currentData()
         pf_val = self.bulk_pf.currentData()
@@ -1174,6 +1286,20 @@ class _AuditSubTab(QWidget):
         self.bulk_category.setCurrentIndex(0)
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
+        # Show done state in popup
+        try:
+            upd_lbl.setText(f"\u2705  {len(ids)} transactions updated!")
+            upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
+            ok_btn = QPushButton("OK")
+            ok_btn.setObjectName("primary")
+            ok_btn.setFixedHeight(28)
+            ok_btn.clicked.connect(upd_dlg.accept)
+            upd_lay.addWidget(ok_btn)
+            ok_btn.setFocus()
+            QApplication.processEvents()
+            upd_dlg.exec_()
+        except Exception:
+            pass
         self.load_records()
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):

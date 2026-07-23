@@ -656,6 +656,18 @@ class RemindersWidget(QWidget):
                             reminders.append((3, f"⚡ {name} — ₹{tx['amount']:,.0f} on {date_str}", "#8B5CF6"))
                 except: pass
 
+        # Expiry reminders for credit cards
+        for card in cards:
+            name = card.get("card_name", card.get("issuer_bank", "Card"))
+            em = card.get("expiry_month", 12)
+            ey = card.get("expiry_year", 2028)
+            if ey == today.year and em == today.month:
+                reminders.append((-50, f"⚠️ {name} — Expires THIS month!", "#DC2626"))
+            elif ey == today.year and em == today.month + 1:
+                reminders.append((-40, f"📅 {name} — Expires next month", "#D97706"))
+            elif ey == today.year + 1 and today.month == 12 and em == 1:
+                reminders.append((-40, f"📅 {name} — Expires next month (Jan)", "#D97706"))
+
         reminders.sort(key=lambda r: r[0])
         if not reminders:
             lbl = QLabel("No upcoming reminders.")
@@ -782,6 +794,15 @@ class CardsTab(QWidget):
         return u
 
     def _load_cards(self):
+        # Auto-close expired cards
+        today = date.today()
+        for card in self.cr.list_active():
+            em = card.get("expiry_month", 12)
+            ey = card.get("expiry_year", 2028)
+            if ey < today.year or (ey == today.year and em < today.month):
+                self.cr.update(card["card_id"], is_active=0)
+                self.acct.update(card["account_id"], is_active=0)
+
         ac = self.cr.list_active()
         ic = [dict(r) for r in self.db.execute(
             "SELECT c.*,a.display_name AS acct_name,a.credit_limit AS acct_limit "
@@ -1123,6 +1144,7 @@ class CardsTab(QWidget):
             f"Settle {fmt_money(amt)} for {card_name}?\n\nFrom: {self.sf_src.currentText()}\nMethod: {method}",
             QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes: return
+
         today = self.sf_date.date().toString("yyyy-MM-dd"); desc = f"Card settlement — {card_name}"; gid = str(uuid.uuid4())
         try:
             self.tx_repo.create(tx_date=today, account_id=src_id, pay_method=method, tx_type="DEBIT", amount=amt, description=desc, transaction_kind="TRANSFER", transfer_group_id=gid, category="transfer", pf_category="internal_transfer")

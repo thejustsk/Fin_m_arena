@@ -31,8 +31,11 @@ NAV_GROUPS = [
     ("DAILY", [
         ("transaction_entry", "📝", "Transactions"),
         ("database", "🗄️", "Database"),
-        ("cards", "💳", "Cards"),
         ("balances", "💰", "Balances"),
+    ]),
+    ("CARDS", [
+        ("cards", "💳", "Credit Cards"),
+        ("debit_cards", "💳", "Debit Cards"),
     ]),
     ("REVIEW & PLANNING", [
         ("audit", "🔍", "Audit"),
@@ -298,6 +301,11 @@ class Sidebar(QWidget):
         for k, b in self._btns.items():
             b.setStyleSheet(self._btn_css(k == key))
         self.nav.emit(key)
+
+    def highlight(self, key):
+        """Update button highlight without emitting nav signal."""
+        for k, b in self._btns.items():
+            b.setStyleSheet(self._btn_css(k == key))
 
     def select_home(self):
         self._sel("home")

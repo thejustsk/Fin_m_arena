@@ -110,6 +110,34 @@ class SettingsTab(QWidget):
 
         l.addWidget(tfa_frame)
 
+        # ── Google Account Section ──
+        g_frame = QFrame()
+        g_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        gf = QVBoxLayout(g_frame); gf.setContentsMargins(16,16,16,16); gf.setSpacing(10)
+        g_title = QLabel("\U0001f4e7  Google Account (Optional)")
+        g_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); gf.addWidget(g_title)
+        g_desc = QLabel("Link your Google account to enable 'Sign in with Google' as an alternative login method.")
+        g_desc.setStyleSheet(f"font-size:11px;color:{C['text3']};font-style:italic;"); g_desc.setWordWrap(True); gf.addWidget(g_desc)
+
+        self.google_status = QLabel()
+        self.google_status.setStyleSheet("font-size:13px;font-weight:600;")
+        gf.addWidget(self.google_status)
+
+        self.google_btn_row = QHBoxLayout()
+        self.google_link_btn = QPushButton("\U0001f517  Link Google Account")
+        self.google_link_btn.setCursor(Qt.PointingHandCursor)
+        self.google_link_btn.clicked.connect(self._setup_google)
+        self.google_btn_row.addWidget(self.google_link_btn)
+        self.google_unlink_btn = QPushButton("Unlink")
+        self.google_unlink_btn.setCursor(Qt.PointingHandCursor)
+        self.google_unlink_btn.setStyleSheet(f"color:{C['red']};font-weight:600;background:transparent;border:1px solid {C['border']};border-radius:6px;padding:4px 10px;")
+        self.google_unlink_btn.clicked.connect(self._unlink_google)
+        self.google_btn_row.addWidget(self.google_unlink_btn)
+        self.google_btn_row.addStretch()
+        gf.addLayout(self.google_btn_row)
+
+        l.addWidget(g_frame)
+
         # ── Change Password ──
         pw_frame = QFrame()
         pw_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
@@ -316,6 +344,67 @@ class SettingsTab(QWidget):
                 self.refresh()
             except ValueError as e:
                 QMessageBox.warning(self, "Duplicate", str(e))
+
+    def _setup_google(self):
+        """Link Google account — uses embedded credentials, just opens browser."""
+        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
+        cid = get_client_id()
+        csec = get_client_secret()
+        if not cid or not csec:
+            QMessageBox.warning(self, "Not Configured",
+                "Google OAuth credentials are not embedded in the app.")
+            return
+
+        existing = self.sec.get_google_email()
+        msg = "This will open your browser to sign in with Google.\n\n"
+        msg += "Your Google account will be used as an alternative login method.\n"
+        msg += "This is for security verification only \u2014 no data is shared with Google."
+        if existing:
+            msg = f"Currently linked: {existing}\n\n" + msg
+        reply = QMessageBox.question(self, "Link Google Account", msg,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes:
+            return
+
+        status_dlg = QDialog(self)
+        status_dlg.setWindowTitle("Linking...")
+        status_dlg.setMinimumWidth(320)
+        sl = QVBoxLayout(status_dlg)
+        sl.setContentsMargins(24, 20, 24, 20)
+        sl_lbl = QLabel("Opening browser...\nPlease sign in with your Google account.")
+        sl_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
+        sl_lbl.setAlignment(Qt.AlignCenter)
+        sl.addWidget(sl_lbl)
+        status_dlg.show()
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        email, refresh_token, error = start_oauth_flow(cid, csec)
+        status_dlg.close()
+
+        if error:
+            QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}")
+            return
+
+        self.sec.setup_google(cid, csec, email, refresh_token)
+        QMessageBox.information(self, "Linked",
+            f"Google account '{email}' linked successfully.\n\n"
+            "You can now use 'Sign in with Google' on the login screen.")
+        self.refresh()
+
+
+    def _unlink_google(self):
+        """Remove the linked Google account."""
+        email = self.sec.get_google_email()
+        if not email:
+            return
+        reply = QMessageBox.question(self, "Unlink Google?",
+            f"Remove Google account '{email}'?\nYou will no longer be able to sign in with Google.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.sec.unlink_google()
+            QMessageBox.information(self, "Unlinked", "Google account removed.")
+            self.refresh()
 
     def _change_pw(self):
         pw, ok = QInputDialog_getText(self, "Change Password", "New password:", echo=QLineEdit.Password)
@@ -524,6 +613,20 @@ class SettingsTab(QWidget):
             f"border:none;border-radius:12px;padding:4px 14px;font-size:12px;font-weight:700;}}"
             f"QPushButton:hover{{background:{C['green'] if is_on else C['text2']};}}")
 
+        # Google account status
+        if hasattr(self, 'google_status'):
+            g_email = self.sec.get_google_email()
+            g_linked = self.sec.is_google_linked()
+            if g_linked and g_email:
+                self.google_status.setText(f"\u2713 Linked: {g_email}")
+                self.google_status.setStyleSheet(f"color:{C['green']};font-weight:600;")
+                self.google_link_btn.setText("Re-link (new credentials)")
+                self.google_unlink_btn.setVisible(True)
+            else:
+                self.google_status.setText("\u2717 Not linked")
+                self.google_status.setStyleSheet(f"color:{C['text3']};font-weight:600;")
+                self.google_link_btn.setText("\U0001f517  Link Google Account")
+                self.google_unlink_btn.setVisible(False)
 
         # Load preference values
         if hasattr(self, 'pref_page_size'):

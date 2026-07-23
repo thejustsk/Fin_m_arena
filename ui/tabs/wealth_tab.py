@@ -2589,7 +2589,7 @@ class FDGivePage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=acc_cb.currentData(),
                 pay_method=method_cb.currentData(), tx_type="CREDIT", amount=net, person_org=None,
                 description="FD premature withdrawal" + (f" (fee: {fmt_money(fee)})" if fee > 0 else ""),
-                category_names=("Investment", "Finance")
+                category_names=("Investment", "Finance"), transaction_kind="FD_WITHDRAWAL"
             )
             self.repos["fd"].update_status(fd_id, "PREMATURE_WITHDRAWN")
             self._loaded = False

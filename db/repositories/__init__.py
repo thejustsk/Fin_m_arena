@@ -13,3 +13,4 @@ from db.repositories.cards_repo import CardsRepo
 from db.repositories.budgets_repo import BudgetsRepo
 from db.repositories.recurring_repo import RecurringRepo
 from db.repositories.security_repo import SecurityRepo
+from db.repositories.debit_cards_repo import DebitCardsRepo

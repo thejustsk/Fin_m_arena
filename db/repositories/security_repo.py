@@ -17,6 +17,33 @@ class SecurityRepo:
     def set_recovery_email(self, e):
         self.db.execute("UPDATE app_security SET recovery_email=?, updated_at=?",
                         (e, datetime.now().isoformat())); self.db.commit()
+    def get_google_config(self):
+        """Get Google OAuth config: (client_id, client_secret, email, refresh_token) or None."""
+        row = self.db.execute(
+            "SELECT google_client_id, google_client_secret, google_email, google_refresh_token "
+            "FROM app_security LIMIT 1").fetchone()
+        if not row:
+            return None
+        return {
+            "client_id": row["google_client_id"],
+            "client_secret": row["google_client_secret"],
+            "email": row["google_email"],
+            "refresh_token": row["google_refresh_token"],
+        }
+    def set_google_credentials(self, client_id, client_secret, email, refresh_token):
+        """Save Google OAuth credentials."""
+        self.db.execute(
+            "UPDATE app_security SET google_client_id=?, google_client_secret=?, "
+            "google_email=?, google_refresh_token=?, updated_at=?",
+            (client_id, client_secret, email, refresh_token, datetime.now().isoformat()))
+        self.db.commit()
+    def clear_google(self):
+        """Remove all Google OAuth data."""
+        self.db.execute(
+            "UPDATE app_security SET google_client_id=NULL, google_client_secret=NULL, "
+            "google_email=NULL, google_refresh_token=NULL, updated_at=?",
+            (datetime.now().isoformat(),))
+        self.db.commit()
     def get_period(self, pid):
         return _row(self.db.execute(
             "SELECT * FROM period_locks WHERE period_id=?", (pid,)).fetchone())

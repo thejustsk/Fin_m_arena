@@ -292,8 +292,11 @@ class RazorpaySuccessCard(QFrame):
             self._sd_anims.append(a)
 
     def _dismiss(self):
+        self.done_btn.setEnabled(False)
+        self.dismissed.emit()
         self.hide()
-        QTimer.singleShot(50, lambda: (self.dismissed.emit(), self.deleteLater()))
+        # Defer deletion so signal fully processes first
+        QTimer.singleShot(100, self.deleteLater)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -662,14 +665,26 @@ class TransactionEntryTab(QWidget):
     # DO TRANSFER (Razorpay-style animation)
     # ═══════════════════════════════════
     def _do_transfer(self):
+        # Guard: prevent double transfer (Enter key, rapid clicks)
+        if getattr(self, '_transfer_in_progress', False):
+            return
+        self._transfer_in_progress = True
+        self.tf_btn.setEnabled(False)
+        self.tf_btn.setText("Transferring...")
+
         fid = self.tf_from.get_data(); tid = self.tf_to.get_data()
         mid = self.tf_method.get_data(); amount = self.tf_amt.value()
         if not fid or not tid:
+            self._transfer_in_progress = False
+            self.tf_btn.setEnabled(True)
+            self.tf_btn.setText("💸  Transfer")
             self._set_status(self.tf_status, "⚠ Select both accounts", C['red']); return
         if not mid:
-            self._set_status(self.tf_status, "⚠ Select payment method", C['red']); return
+            self._set_status(self.tf_status, "⚠ Select payment method", C['red'])
+            self._transfer_in_progress = False; self.tf_btn.setEnabled(True); self.tf_btn.setText("💸  Transfer"); return
         if fid == tid:
-            self._set_status(self.tf_status, "⚠ Same account", C['red']); return
+            self._set_status(self.tf_status, "⚠ Same account", C['red'])
+            self._transfer_in_progress = False; self.tf_btn.setEnabled(True); self.tf_btn.setText("💸  Transfer"); return
 
         if not self.db.execute("SELECT 1 FROM payment_methods WHERE method_id=?", (mid,)).fetchone():
             self.db.execute("INSERT OR IGNORE INTO payment_methods(method_id,display_name,is_active,sort_order) VALUES(?,?,1,99)", (mid, mid))
@@ -697,9 +712,22 @@ class TransactionEntryTab(QWidget):
         card.show()
         card.raise_()
         self._overlay_card = card
-        card.dismissed.connect(lambda: (
-            self._load_recent("transfer"), self._refresh_sidebar(),
-            self.tf_from.setFocus(), setattr(self, '_overlay_card', None)))
+        # Focus Done button after animation
+        if hasattr(card, 'done_btn'):
+            card.done_btn.setFocus()
+        def _on_dismiss():
+            # ALWAYS re-enable button, even if other operations fail
+            self._transfer_in_progress = False
+            self.tf_btn.setEnabled(True)
+            self.tf_btn.setText("💸  Transfer")
+            self._overlay_card = None
+            try:
+                self._load_recent("transfer")
+                self._refresh_sidebar()
+            except Exception as e:
+                print(f"[WARN] Post-transfer refresh failed: {e}")
+            self.tf_from.setFocus()
+        card.dismissed.connect(_on_dismiss)
 
         self.tf_amt.setValue(1); self.tf_desc.clear()
 
@@ -710,7 +738,7 @@ class TransactionEntryTab(QWidget):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             fw = self.focusWidget()
             if fw == self.add_btn: self._add_tx(); return
-            if fw == self.tf_btn: self._do_transfer(); return
+            if fw == self.tf_btn and not getattr(self, '_overlay_card', None): self._do_transfer(); return
             if fw == self.dc_btn: self._toggle_dc(); return
             if fw in self.nw_btns: self._set_nw(self.nw_btns.index(fw)); return
             if fw == self.swap_btn: self._swap(); return

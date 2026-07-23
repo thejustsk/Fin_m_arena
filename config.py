@@ -15,3 +15,4 @@ BACKUP_RETENTION = 14
 
 # Encryption placeholder (SQLCipher-ready)
 DB_KEY = ""
+

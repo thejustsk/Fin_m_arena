@@ -294,12 +294,13 @@ class HomeTab(QWidget):
         tiles = [
             ("📝", "Transactions", "transaction_entry", C['accent']),
             ("🗄️", "Database", "database", "#8B5CF6"),
-            ("💳", "Cards", "cards", C['red']),
             ("💰", "Balances", "balances", C['green']),
-            ("⚙️", "Settings", "settings", C['text3']),
+            ("💳", "Credit Cards", "cards", C['red']),
+            ("💳", "Debit Cards", "debit_cards", "#F59E0B"),
             ("🔍", "Audit", "audit", C['amber']),
             ("📈", "Wealth", "wealth", "#10B981"),
             ("📋", "Notes", "notes", "#EC4899"),
+            ("⚙️", "Settings", "settings", C['text3']),
             ("📧", "Gmail", "gmail", "#06B6D4"),
         ]
         for ico, lbl, key, col in tiles:

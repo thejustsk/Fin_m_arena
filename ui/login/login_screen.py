@@ -1,4 +1,4 @@
-"""Login screen — TOTP only. 2FA is mandatory."""
+"""Login screen — TOTP / Password / Google OAuth."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QLineEdit, QPushButton, QFrame)
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer
@@ -132,6 +132,29 @@ class LoginScreen(QWidget):
         self.unlock_btn.clicked.connect(self._try)
         fl.addWidget(self.unlock_btn)
 
+        # Google Sign-In (shown only when linked)
+        self.google_div = QLabel("── or ──")
+        self.google_div.setAlignment(Qt.AlignCenter)
+        self.google_div.setStyleSheet("color: rgba(255,255,255,0.25); font-size: 12px; border: none;")
+        fl.addWidget(self.google_div)
+
+        self.google_btn = QPushButton("📧  Sign in with Google")
+        self.google_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,0.07);
+                color: #E2E8F0; border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 10px; padding: 12px; font-size: 14px; font-weight: 600;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,0.12);
+                border-color: rgba(255,255,255,0.3);
+            }
+        """)
+        self.google_btn.setMinimumHeight(46)
+        self.google_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.google_btn.clicked.connect(self._google_login)
+        fl.addWidget(self.google_btn)
+
         fl.addStretch()
         self.form.hide()
         outer.addWidget(self.card)
@@ -230,6 +253,10 @@ class LoginScreen(QWidget):
             else:
                 self.sub.setText("Enter your password")
                 self.pw_input.setFocus()
+            # Show Google button only if linked
+            g_linked = self.sec.is_google_linked()
+            self.google_btn.setVisible(g_linked)
+            self.google_div.setVisible(g_linked)
         else:
             self.sub.setText("Pull the cord to log in")
             self.err.setText("")
@@ -238,6 +265,47 @@ class LoginScreen(QWidget):
 
     # ══════════════════════════════════════════════
     # AUTHENTICATION — TOTP only
+    # GOOGLE LOGIN
+    def _google_login(self):
+        """Verify Google identity on each login — opens browser for fresh auth."""
+        self.err.setText("")
+        self.sub.setText("Opening browser for Google sign-in...")
+        self.google_btn.setEnabled(False)
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
+        from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+        cid = GOOGLE_CLIENT_ID
+        csec = GOOGLE_CLIENT_SECRET
+        if not cid or not csec:
+            self.err.setText("Google credentials not configured.")
+            self.google_btn.setEnabled(True)
+            return
+
+        # Open browser for fresh Google auth
+        email, refresh_token, error = start_oauth_flow(cid, csec)
+
+        if error:
+            self.err.setText(f"Google sign-in failed: {error}")
+            self.sub.setText("Pull the cord to log in")
+            self.google_btn.setEnabled(True)
+            return
+
+        # Verify the email matches the linked account
+        stored_email = self.sec.get_google_email()
+        if stored_email and email.lower() != stored_email.lower():
+            self.err.setText(f"Wrong account. Expected {stored_email}")
+            self.sub.setText("Pull the cord to log in")
+            self.google_btn.setEnabled(True)
+            return
+
+        # Update stored refresh token if changed
+        if refresh_token:
+            self.sec.setup_google(cid, csec, email, refresh_token)
+
+        self.success.emit()
+
     # ══════════════════════════════════════════════
     def _try(self):
         self.err.setText("")

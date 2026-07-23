@@ -53,6 +53,32 @@ class SecurityService:
         s = self.get_secret()
         return pyotp.TOTP(s).verify(code, valid_window=1) if s else True
 
+    def is_google_linked(self):
+        """Check if a Google account is linked (has client_id + email)."""
+        cfg = self.repo.get_google_config()
+        return bool(cfg and cfg["client_id"] and cfg["email"])
+
+    def get_google_email(self):
+        """Return the linked Google email, or None."""
+        cfg = self.repo.get_google_config()
+        return cfg["email"] if cfg else None
+
+    def setup_google(self, client_id, client_secret, email, refresh_token):
+        """Save Google OAuth credentials after successful linking."""
+        self.repo.set_google_credentials(client_id, client_secret, email, refresh_token)
+
+    def verify_google_login(self):
+        """Verify the stored Google account is still valid. Returns email or None."""
+        from ui.login.google_auth import verify_google_user
+        cfg = self.repo.get_google_config()
+        if not cfg or not cfg["client_id"] or not cfg["refresh_token"]:
+            return None
+        return verify_google_user(cfg["client_id"], cfg["client_secret"], cfg["refresh_token"])
+
+    def unlink_google(self):
+        """Remove Google account link."""
+        self.repo.clear_google()
+
     def is_locked(self, period_id):
         p = self.repo.get_period(period_id)
         return bool(p and p["is_locked"])

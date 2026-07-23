@@ -1,8 +1,8 @@
-"""Setup wizard — 4 steps: Password → 2FA (mandatory) → Accounts → Done."""
+"""Setup wizard — 5 steps: Password → 2FA (optional) → Google (optional) → Accounts → Done."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QLineEdit, QComboBox, QPushButton,
                               QStackedWidget, QFrame, QMessageBox,
-                              QScrollArea)
+                              QScrollArea, QApplication)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import (QCursor, QPixmap)
 import io
@@ -97,6 +97,38 @@ BTN_BACK = """
         color: #F1F5F9;
     }
 """
+BTN_SKIP = """
+    QPushButton {
+        background: transparent;
+        color: rgba(255,255,255,0.35);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-size: 13px;
+        font-weight: 500;
+    }
+    QPushButton:hover {
+        color: rgba(255,255,255,0.6);
+        border-color: rgba(255,255,255,0.2);
+    }
+"""
+
+
+def _auto_label(name, acct_type):
+    """Auto-generate unique label: first 3 chars of name + type suffix.
+    
+    Examples: 'SBI Bank' + 'CURRENT' -> 'SBIC'
+              'Cash' + 'CASH' -> 'CASC'
+              'Paytm' + 'WALLET' -> 'PAYW'
+    """
+    # First 3 alphanumeric chars from name
+    clean = ''.join(c for c in name if c.isalnum())[:3].upper()
+    if len(clean) < 3:
+        clean = clean.ljust(3, acct_type[0])
+    # Type suffix: unique per type
+    type_map = {"CURRENT": "B", "CASH": "H", "WALLET": "W"}
+    suffix = type_map.get(acct_type, "X")
+    return clean + suffix
 
 
 class SetupWizard(QWidget):
@@ -112,7 +144,7 @@ class SetupWizard(QWidget):
         self._build()
 
     def _build(self):
-        self.setWindowTitle("Finance Manager — First Time Setup")
+        self.setWindowTitle("Finance Manager \u2014 First Time Setup")
         self.setMinimumSize(580, 720)
         self.setStyleSheet("background: #0B1120;")
 
@@ -136,18 +168,18 @@ class SetupWizard(QWidget):
         cl.setContentsMargins(36, 28, 36, 28)
         cl.setSpacing(16)
 
-        header = QLabel("💰  Finance Manager")
+        header = QLabel("\U0001f4b0  Finance Manager")
         header.setStyleSheet("font-size: 22px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
         header.setAlignment(Qt.AlignCenter)
         cl.addWidget(header)
 
-        # Progress dots (4 steps)
+        # Progress dots (5 steps)
         dots_row = QHBoxLayout()
         dots_row.setAlignment(Qt.AlignCenter)
         self.dots = []
-        for i in range(4):
-            d = QLabel("●" if i == 0 else "○")
-            d.setStyleSheet(f"font-size: 16px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
+        for i in range(5):
+            d = QLabel("\u25cf" if i == 0 else "\u25cb")
+            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
             dots_row.addWidget(d)
             self.dots.append(d)
         cl.addLayout(dots_row)
@@ -165,19 +197,20 @@ class SetupWizard(QWidget):
 
         cl.addSpacing(8)
 
-        # Stacked pages (4 steps)
+        # Stacked pages (5 steps)
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._page_password())
-        self.stack.addWidget(self._page_2fa())
-        self.stack.addWidget(self._page_accounts())
-        self.stack.addWidget(self._page_done())
+        self.stack.addWidget(self._page_password())    # 0
+        self.stack.addWidget(self._page_2fa())          # 1
+        self.stack.addWidget(self._page_google())       # 2
+        self.stack.addWidget(self._page_accounts())     # 3
+        self.stack.addWidget(self._page_done())         # 4
         cl.addWidget(self.stack, 1)
 
         # Navigation
         nav = QHBoxLayout()
         nav.setSpacing(12)
 
-        self.back_btn = QPushButton("← Back")
+        self.back_btn = QPushButton("\u2190 Back")
         self.back_btn.setStyleSheet(BTN_BACK)
         self.back_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.back_btn.clicked.connect(self._prev)
@@ -186,7 +219,7 @@ class SetupWizard(QWidget):
 
         nav.addStretch()
 
-        self.next_btn = QPushButton("Next  →")
+        self.next_btn = QPushButton("Next  \u2192")
         self.next_btn.setStyleSheet(BTN_NEXT)
         self.next_btn.setCursor(QCursor(Qt.PointingHandCursor))
         self.next_btn.setMinimumHeight(48)
@@ -231,63 +264,151 @@ class SetupWizard(QWidget):
         return page
 
     # ══════════════════════════════════════════════
-    # PAGE 1 — 2FA (mandatory, verify code)
+    # PAGE 1 — 2FA (OPTIONAL)
     # ══════════════════════════════════════════════
     def _page_2fa(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(12)
-        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(10)
+        lay.setContentsMargins(0, 4, 0, 0)
         lay.setAlignment(Qt.AlignCenter)
+
+        # Recommendation note
+        rec = QLabel("\U0001f6e1\ufe0f  Recommended for security")
+        rec.setStyleSheet("font-size: 11px; color: #F59E0B; font-weight: 700; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 6px; padding: 4px 12px;")
+        rec.setAlignment(Qt.AlignCenter)
+        lay.addWidget(rec)
 
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setFixedSize(200, 200)
+        self.qr_label.setFixedSize(160, 160)
         self.qr_label.setStyleSheet(
-            "background: white; border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 8px;")
+            "background: white; border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 4px;")
         lay.addWidget(self.qr_label, alignment=Qt.AlignCenter)
 
-        sec_lbl = QLabel("Can't scan? Enter this key manually:")
-        sec_lbl.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.4); background: transparent; border: none;")
-        sec_lbl.setAlignment(Qt.AlignCenter)
-        lay.addWidget(sec_lbl)
-
+        # Secret key hidden by default — toggle to show
+        self._key_visible = False
         self.secret_label = QLabel()
         self.secret_label.setAlignment(Qt.AlignCenter)
         self.secret_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.secret_label.setStyleSheet(
-            "font-family: 'Courier New', monospace; font-size: 15px; font-weight: 700; "
+            "font-family: 'Courier New', monospace; font-size: 13px; font-weight: 700; "
             "color: #818CF8; background: rgba(79,70,229,0.15); "
-            "padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(79,70,229,0.3); "
+            "padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(79,70,229,0.3); "
             "letter-spacing: 2px;")
+        self.secret_label.hide()
+
+        self.show_key_btn = QPushButton("\U0001f513  Show manual key")
+        self.show_key_btn.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: transparent; border: none; padding: 4px;")
+        self.show_key_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        def _toggle_key():
+            self._key_visible = not self._key_visible
+            self.secret_label.setVisible(self._key_visible)
+            self.show_key_btn.setText("\U0001f512 Hide key" if self._key_visible else "\U0001f513  Show manual key")
+        self.show_key_btn.clicked.connect(_toggle_key)
+        lay.addWidget(self.show_key_btn, alignment=Qt.AlignCenter)
         lay.addWidget(self.secret_label)
 
-        lay.addSpacing(8)
-
         verify_lbl = QLabel("Enter the 6-digit code to verify:")
-        verify_lbl.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.6); background: transparent; border: none;")
+        verify_lbl.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.6); background: transparent; border: none;")
         verify_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(verify_lbl)
 
         self.totp_code = QLineEdit()
         self.totp_code.setPlaceholderText("000000")
         self.totp_code.setMaxLength(6)
-        self.totp_code.setMinimumHeight(48)
+        self.totp_code.setMinimumHeight(44)
         self.totp_code.setStyleSheet(INPUT_STYLE)
         self.totp_code.setAlignment(Qt.AlignCenter)
         self.totp_code.returnPressed.connect(self._next)
         lay.addWidget(self.totp_code)
 
         self.totp_err = QLabel("")
-        self.totp_err.setStyleSheet("color: #EF4444; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        self.totp_err.setStyleSheet("color: #EF4444; font-size: 12px; font-weight: 600; background: transparent; border: none;")
         self.totp_err.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.totp_err)
+
+        # Skip button
+        skip_btn = QPushButton("Skip for now \u2192")
+        skip_btn.setStyleSheet(BTN_SKIP)
+        skip_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        skip_btn.clicked.connect(self._skip_2fa)
+        lay.addWidget(skip_btn, alignment=Qt.AlignCenter)
+
+        note = QLabel("You can enable 2FA later in Settings \u2192 Security")
+        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.25); background: transparent; border: none;")
+        note.setAlignment(Qt.AlignCenter)
+        lay.addWidget(note)
 
         lay.addStretch()
         return page
 
     # ══════════════════════════════════════════════
-    # PAGE 2 — Accounts
+    # PAGE 2 — GOOGLE (OPTIONAL)
+    # ══════════════════════════════════════════════
+    def _page_google(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(16)
+        lay.setContentsMargins(0, 20, 0, 0)
+        lay.setAlignment(Qt.AlignCenter)
+
+        icon = QLabel("\U0001f4e7")
+        icon.setStyleSheet("font-size: 48px; background: transparent; border: none;")
+        icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon)
+
+        desc = QLabel(
+            "Link your Google account for easy sign-in.\n\n"
+            "If you ever forget your password or lose your\n"
+            "authenticator app, you can still log in with Google.\n\n"
+            "This is for login verification only \u2014\n"
+            "no financial data is shared with Google."
+        )
+        desc.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.5); background: transparent; border: none; line-height: 1.4;")
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        self.google_link_btn_wizard = QPushButton("\U0001f517  Sign in with Google")
+        self.google_link_btn_wizard.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,0.07);
+                color: #E2E8F0; border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 10px; padding: 14px 24px;
+                font-size: 15px; font-weight: 600;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,0.12);
+                border-color: rgba(255,255,255,0.3);
+            }
+        """)
+        self.google_link_btn_wizard.setMinimumHeight(48)
+        self.google_link_btn_wizard.setCursor(QCursor(Qt.PointingHandCursor))
+        self.google_link_btn_wizard.clicked.connect(self._wizard_google_link)
+        lay.addWidget(self.google_link_btn_wizard, alignment=Qt.AlignCenter)
+
+        self.google_status_wizard = QLabel("")
+        self.google_status_wizard.setStyleSheet("font-size: 12px; font-weight: 600; background: transparent; border: none;")
+        self.google_status_wizard.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.google_status_wizard)
+
+        skip_btn = QPushButton("Skip for now \u2192")
+        skip_btn.setStyleSheet(BTN_SKIP)
+        skip_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        skip_btn.clicked.connect(self._skip_google)
+        lay.addWidget(skip_btn, alignment=Qt.AlignCenter)
+
+        note = QLabel("You can link Google later in Settings \u2192 Security")
+        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.25); background: transparent; border: none;")
+        note.setAlignment(Qt.AlignCenter)
+        lay.addWidget(note)
+
+        lay.addStretch()
+        return page
+
+    # ══════════════════════════════════════════════
+    # PAGE 3 — Accounts
     # ══════════════════════════════════════════════
     def _page_accounts(self):
         page = QWidget()
@@ -295,7 +416,7 @@ class SetupWizard(QWidget):
         lay.setSpacing(12)
         lay.setContentsMargins(0, 8, 0, 0)
 
-        hint = QLabel("Bank accounts and cash only.\nCredit cards & wallets are added from their own tabs.")
+        hint = QLabel("Bank accounts and cash only.\nCredit cards & wallets are added from their own tabs.\nLabels are auto-generated from name + type.")
         hint.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.35); background: transparent; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         hint.setWordWrap(True)
@@ -312,9 +433,9 @@ class SetupWizard(QWidget):
         scroll.setWidget(scroll_inner)
         lay.addWidget(scroll, 1)
 
-        add_btn = QPushButton("＋  Add Account")
-        add_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        add_btn.setStyleSheet("""
+        self.add_acct_btn = QPushButton("\uff0b  Add Account")
+        self.add_acct_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.add_acct_btn.setStyleSheet("""
             QPushButton {
                 background: rgba(79,70,229,0.12);
                 color: #818CF8;
@@ -326,13 +447,13 @@ class SetupWizard(QWidget):
             }
             QPushButton:hover { background: rgba(79,70,229,0.2); }
         """)
-        add_btn.clicked.connect(self._add_acct_row)
-        lay.addWidget(add_btn)
+        self.add_acct_btn.clicked.connect(self._add_acct_row)
+        lay.addWidget(self.add_acct_btn)
 
         return page
 
     # ══════════════════════════════════════════════
-    # PAGE 3 — Done
+    # PAGE 4 — Done
     # ══════════════════════════════════════════════
     def _page_done(self):
         page = QWidget()
@@ -341,7 +462,7 @@ class SetupWizard(QWidget):
         lay.setContentsMargins(0, 20, 0, 0)
         lay.setAlignment(Qt.AlignCenter)
 
-        check = QLabel("✓")
+        check = QLabel("\u2713")
         check.setStyleSheet("font-size: 72px; color: #10B981; background: transparent; border: none;")
         check.setAlignment(Qt.AlignCenter)
         lay.addWidget(check)
@@ -367,8 +488,7 @@ class SetupWizard(QWidget):
         if self._totp_secret:
             return
         if not HAS_TOTP:
-            QMessageBox.critical(self, "Missing Dependency",
-                                 "2FA requires pyotp and qrcode.\n\nInstall: pip install pyotp qrcode")
+            # TOTP not available, skip automatically
             return
         secret = pyotp.random_base32()
         self._totp_secret = secret
@@ -385,8 +505,49 @@ class SetupWizard(QWidget):
         buf.seek(0)
         pixmap = QPixmap()
         pixmap.loadFromData(buf.read())
-        self.qr_label.setPixmap(pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.qr_label.setPixmap(pixmap.scaled(170, 170, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.secret_label.setText(secret)
+
+    def _skip_2fa(self):
+        """Skip 2FA setup — disable it so login uses password."""
+        self.sec.toggle_2fa(False)
+        self._totp_secret = None
+        self.step = 2  # Go to Google step
+        self._update_ui()
+
+    def _wizard_google_link(self):
+        """Link Google account from setup wizard."""
+        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
+        cid = get_client_id()
+        csec = get_client_secret()
+        if not cid or not csec:
+            self.google_status_wizard.setText("Google credentials not configured.")
+            self.google_status_wizard.setStyleSheet("font-size: 12px; color: #EF4444; font-weight: 600; background: transparent; border: none;")
+            return
+
+        self.google_link_btn_wizard.setEnabled(False)
+        self.google_link_btn_wizard.setText("Opening browser...")
+        QApplication.processEvents()
+
+        email, refresh_token, error = start_oauth_flow(cid, csec)
+
+        if error:
+            self.google_status_wizard.setText(f"Failed: {error}")
+            self.google_status_wizard.setStyleSheet("font-size: 12px; color: #EF4444; font-weight: 600; background: transparent; border: none;")
+            self.google_link_btn_wizard.setEnabled(True)
+            self.google_link_btn_wizard.setText("\U0001f517  Sign in with Google")
+            return
+
+        self.sec.setup_google(cid, csec, email, refresh_token)
+        self.google_status_wizard.setText(f"\u2713 Linked: {email}")
+        self.google_status_wizard.setStyleSheet("font-size: 12px; color: #10B981; font-weight: 700; background: transparent; border: none;")
+        self.google_link_btn_wizard.setText("Linked \u2713")
+        self.google_link_btn_wizard.setEnabled(False)
+
+    def _skip_google(self):
+        """Skip Google linking."""
+        self.step = 3  # Go to Accounts step
+        self._update_ui()
 
     def _add_acct_row(self):
         row = QFrame()
@@ -414,12 +575,12 @@ class SetupWizard(QWidget):
         rl.addWidget(atype, 1)
 
         bal = QLineEdit()
-        bal.setPlaceholderText("₹ Opening balance")
+        bal.setPlaceholderText("\u20b9 Opening balance")
         bal.setMinimumHeight(40)
         bal.setStyleSheet(INPUT_STYLE)
         rl.addWidget(bal, 2)
 
-        x = QPushButton("✕")
+        x = QPushButton("\u2715")
         x.setFixedSize(36, 36)
         x.setCursor(QCursor(Qt.PointingHandCursor))
         x.setStyleSheet("color:#EF4444; background:rgba(239,68,68,0.1); border:none; border-radius:8px; font-size:16px; font-weight:bold;")
@@ -433,6 +594,14 @@ class SetupWizard(QWidget):
 
         self.acct_layout.addWidget(row)
         self.acct_rows.append(entry)
+
+        # Keyboard navigation: Enter on balance → add new row
+        def _on_bal_enter():
+            if bal.text().strip() or name.text().strip():
+                self._add_acct_row()
+        bal.returnPressed.connect(_on_bal_enter)
+        name.returnPressed.connect(lambda: atype.setFocus())
+
         name.setFocus()
 
     # ══════════════════════════════════════════════
@@ -443,7 +612,8 @@ class SetupWizard(QWidget):
 
         titles = [
             ("Create Your Password", "Secure your financial data with a strong password"),
-            ("Set Up Two-Factor Authentication", "Scan the QR code, then enter the code to verify"),
+            ("Two-Factor Authentication", "Scan the QR code with Google Authenticator or similar app"),
+            ("Sign in with Google", "Optional \u2014 alternative login if you forget your password"),
             ("Add Your Accounts", "Add your bank accounts and cash wallets"),
             ("All Set!", "You're ready to start managing your finances"),
         ]
@@ -451,14 +621,14 @@ class SetupWizard(QWidget):
         self.step_sub.setText(titles[self.step][1])
 
         for i, d in enumerate(self.dots):
-            d.setText("●" if i == self.step else "○")
-            d.setStyleSheet(f"font-size: 16px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
+            d.setText("\u25cf" if i == self.step else "\u25cb")
+            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
 
-        self.back_btn.setVisible(self.step > 0 and self.step < 4)
+        self.back_btn.setVisible(self.step > 0 and self.step < 5)
 
-        btn_texts = ["Next  →", "Next  →", "Finish  ✓", "Go to Home  ✓"]
+        btn_texts = ["Next  \u2192", "Next  \u2192", "Next  \u2192", "Finish  \u2713", "Go to Home  \u2713"]
         self.next_btn.setText(btn_texts[self.step])
-        self.next_btn.setStyleSheet(BTN_DONE if self.step >= 2 else BTN_NEXT)
+        self.next_btn.setStyleSheet(BTN_DONE if self.step >= 3 else BTN_NEXT)
 
     def _next(self):
         # Step 0: Password
@@ -475,11 +645,12 @@ class SetupWizard(QWidget):
             self._update_ui()
             return
 
-        # Step 1: 2FA verify
+        # Step 1: 2FA verify (optional — can also skip via button)
         if self.step == 1:
             code = self.totp_code.text().strip()
             if not code:
-                self.totp_err.setText("Enter the 6-digit code"); return
+                self.totp_err.setText("Enter the 6-digit code, or click 'Skip for now'")
+                return
             if not self.sec.verify_totp(code):
                 self.totp_err.setText("Invalid code. Check your authenticator app."); return
             self.totp_err.setText("")
@@ -487,10 +658,22 @@ class SetupWizard(QWidget):
             self._update_ui()
             return
 
-        # Step 2: Accounts
+        # Step 2: Google (optional — can also skip via button)
         if self.step == 2:
+            self.step = 3
+            self._update_ui()
+            return
+
+        # Step 3: Accounts (at least 1 required)
+        if self.step == 3:
             created = 0
             seen_names = set()
+            # Count non-empty rows first
+            non_empty = [e for e in self.acct_rows if e[0].text().strip()]
+            if not non_empty:
+                QMessageBox.warning(self, "Required", "Please add at least one account to continue.")
+                self._add_acct_row()
+                return
             for name_edit, type_combo, bal_edit in self.acct_rows:
                 nm = name_edit.text().strip()
                 if not nm:
@@ -507,20 +690,32 @@ class SetupWizard(QWidget):
                 except ValueError:
                     b = 0
                 self.repo.create(
-                    display_name=nm, short_label=nm[:4].upper(),
+                    display_name=nm, short_label=_auto_label(nm, type_combo.currentText()),
                     account_type=type_combo.currentText(),
                     opening_balance=b, color_hex="#4F46E5")
                 created += 1
+
+            # Build summary
+            summary_parts = [f"{created} account(s) created."]
+            if self.sec.is_2fa():
+                summary_parts.append("\u2713 Two-Factor Authentication enabled")
+            else:
+                summary_parts.append("\u25cb 2FA not set \u2014 enable in Settings \u2192 Security")
+            if self.sec.is_google_linked():
+                summary_parts.append(f"\u2713 Google: {self.sec.get_google_email()}")
+            else:
+                summary_parts.append("\u25cb Google not linked \u2014 link in Settings \u2192 Security")
+
             self.done_detail.setText(
-                f"{created} account(s) created.\n\n"
+                "\n".join(summary_parts) + "\n\n"
                 "Credit cards & wallets can be added later\n"
                 "from the Cards and Settings tabs.")
-            self.step = 3
+            self.step = 4
             self._update_ui()
             return
 
-        # Step 3: Done
-        if self.step == 3:
+        # Step 4: Done
+        if self.step == 4:
             self.done.emit()
             return
 

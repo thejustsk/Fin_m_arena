@@ -14,7 +14,7 @@ from db.schema import run_migrations
 from db.repositories import (
     AccountsRepo, TransactionsRepo, LookupsRepo, SecurityRepo,
     LoansRepo, BorrowedRepo, DepositsRepo, FDRepo, MFRepo,
-    NotesRepo, CardsRepo, AuditRepo, BudgetsRepo, RecurringRepo
+    NotesRepo, CardsRepo, DebitCardsRepo, AuditRepo, BudgetsRepo, RecurringRepo
 )
 from services.balance_service import BalanceService
 from services.security_service import SecurityService
@@ -40,7 +40,7 @@ def main():
         "audit": AuditRepo(db), "loans": LoansRepo(db),
         "borrowed": BorrowedRepo(db), "deposits": DepositsRepo(db),
         "fd": FDRepo(db), "mf": MFRepo(db), "notes": NotesRepo(db),
-        "cards": CardsRepo(db), "budgets": BudgetsRepo(db),
+        "cards": CardsRepo(db), "debit_cards": DebitCardsRepo(db), "budgets": BudgetsRepo(db),
         "recurring": RecurringRepo(db),
     }
     services = {

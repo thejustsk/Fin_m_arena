@@ -33,7 +33,7 @@ class MainWindow(QMainWindow):
         self._tab_map = {
             "home": 0, "transaction_entry": 1, "database": 2,
             "audit": 3, "wealth": 4, "notes": 5, "cards": 6,
-            "balances": 7, "settings": 8, "gmail": 9
+            "debit_cards": 7, "balances": 8, "settings": 9, "gmail": 10
         }
 
         # Import and create each tab
@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         from ui.tabs.wealth_tab import WealthTab
         from ui.tabs.notes_tab import NotesTab
         from ui.tabs.cards_tab import CardsTab
+        from ui.tabs.debit_cards_tab import DebitCardsTab
         from ui.tabs.balances_tab import BalancesTab
         from ui.tabs.settings_tab import SettingsTab
         from ui.tabs.gmail_tab import GmailTab
@@ -56,6 +57,7 @@ class MainWindow(QMainWindow):
             ("wealth", WealthTab),
             ("notes", NotesTab),
             ("cards", CardsTab),
+            ("debit_cards", DebitCardsTab),
             ("balances", BalancesTab),
             ("settings", SettingsTab),
             ("gmail", GmailTab),
@@ -103,6 +105,8 @@ class MainWindow(QMainWindow):
     def _nav(self, key):
         idx = self._tab_map.get(key, 0)
         self.stack.setCurrentIndex(idx)
+        # Update sidebar highlight
+        self.sidebar.highlight(key)
         tab = self.stack.widget(idx)
         if hasattr(tab, "refresh"):
             try:

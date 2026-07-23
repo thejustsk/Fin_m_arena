@@ -81,7 +81,7 @@ FILTER_FIELDS = [
     {"key": "category", "label": "Category", "type": "combo", "source": "categories"},
     {"key": "method", "label": "Payment Method", "type": "combo", "source": "methods"},
     {"key": "tx_type", "label": "Type", "type": "combo", "values": ["CREDIT", "DEBIT"]},
-    {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER", "LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT", "FD_DEPOSIT", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT", "MF_PURCHASE", "MF_REDEMPTION"]},
+    {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER", "LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT", "FD_DEPOSIT", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT", "MF_PURCHASE", "MF_REDEMPTION", "FD_WITHDRAWAL"]},
     {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "None"]},
     {"key": "pf_category", "label": "PF Category", "type": "combo", "source": "pf_categories"},
     {"key": "person_org", "label": "Person/Org", "type": "text"},
@@ -191,6 +191,7 @@ def _tx_card(tx, running_bal=None):
         "FD_DEPOSIT": "FD Deposit", "DEPOSIT_RECEIVED": "Deposit Received",
         "DEPOSIT_REPAYMENT": "Deposit Repayment",
         "MF_PURCHASE": "MF Purchase", "MF_REDEMPTION": "MF Redemption",
+    "FD_WITHDRAWAL": "FD Withdrawal",
     }
     is_wealth = kind in _KIND_LABELS
     amount = tx["amount"]; tx_type = tx["tx_type"]
