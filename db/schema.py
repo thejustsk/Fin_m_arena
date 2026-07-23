@@ -314,4 +314,40 @@ def run_migrations(db):
         except Exception:
             pass  # column already exists
 
+    # ── Migrate existing wealth-linked transactions to correct transaction_kind ──
+    _KIND_SQL = [
+        ("UPDATE transactions SET transaction_kind='LOAN_GIVEN' "
+         "WHERE id IN (SELECT trxn_id FROM loans WHERE trxn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='LOAN_REPAYMENT' "
+         "WHERE id IN (SELECT linked_txn_id FROM repayments WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='LOAN_TAKEN' "
+         "WHERE id IN (SELECT linked_txn_id FROM borrowed_loans WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='EMI_PAYMENT' "
+         "WHERE id IN (SELECT linked_txn_id FROM borrowed_loan_repayments WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='DEPOSIT_RECEIVED' "
+         "WHERE id IN (SELECT linked_txn_id FROM deposits_from_others WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='DEPOSIT_REPAYMENT' "
+         "WHERE id IN (SELECT linked_txn_id FROM deposit_repayments_to_others WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='FD_DEPOSIT' "
+         "WHERE id IN (SELECT linked_txn_id FROM fixed_deposits WHERE linked_txn_id IS NOT NULL) "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='MF_PURCHASE' "
+         "WHERE id IN (SELECT linked_txn_id FROM mf_transactions WHERE linked_txn_id IS NOT NULL AND txn_type='PURCHASE') "
+         "AND transaction_kind='REGULAR'"),
+        ("UPDATE transactions SET transaction_kind='MF_REDEMPTION' "
+         "WHERE id IN (SELECT linked_txn_id FROM mf_transactions WHERE linked_txn_id IS NOT NULL AND txn_type='REDEMPTION') "
+         "AND transaction_kind='REGULAR'"),
+    ]
+    for sql in _KIND_SQL:
+        try:
+            c.execute(sql)
+        except Exception:
+            pass
+
     c.commit()

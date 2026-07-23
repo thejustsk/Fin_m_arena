@@ -19,13 +19,13 @@ class AuditService:
             "SELECT COALESCE(SUM(t.amount),0) FROM transactions t "
             "JOIN categories c ON c.category_id=t.category "
             "WHERE t.tx_type='CREDIT' AND t.tx_date>=? AND t.tx_date<? "
-            "AND t.transaction_kind='REGULAR' AND c.default_pf_category='nc'",
+            "AND t.transaction_kind != 'TRANSFER' AND c.default_pf_category='nc'",
             (d_from, d_to)).fetchone()[0]
         exp = c.execute(
             "SELECT COALESCE(SUM(t.amount),0) FROM transactions t "
             "JOIN categories c ON c.category_id=t.category "
             "WHERE t.tx_type='DEBIT' AND t.tx_date>=? AND t.tx_date<? "
-            "AND t.transaction_kind='REGULAR' "
+            "AND t.transaction_kind != 'TRANSFER' "
             "AND c.default_pf_category IN ('commitment','consumption','growth','safety')",
             (d_from, d_to)).fetchone()[0]
         return inc - exp

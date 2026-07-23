@@ -81,7 +81,7 @@ FILTER_FIELDS = [
     {"key": "category", "label": "Category", "type": "combo", "source": "categories"},
     {"key": "method", "label": "Payment Method", "type": "combo", "source": "methods"},
     {"key": "tx_type", "label": "Type", "type": "combo", "values": ["CREDIT", "DEBIT"]},
-    {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER"]},
+    {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER", "LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT", "FD_DEPOSIT", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT", "MF_PURCHASE", "MF_REDEMPTION"]},
     {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "None"]},
     {"key": "pf_category", "label": "PF Category", "type": "combo", "source": "pf_categories"},
     {"key": "person_org", "label": "Person/Org", "type": "text"},
@@ -182,11 +182,18 @@ def _tx_card(tx, running_bal=None):
     text_col.addWidget(sub_lbl)
     lay.addLayout(text_col, 1)
 
-    amt_col = QVBoxLayout(); amt_col.setSpacing(3)
-    amt_col.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    amount = tx["amount"]; tx_type = tx["tx_type"]
+    # ── Amount column (amount top-right, badges + type bottom-right) ──
     kind = tx.get("transaction_kind", "REGULAR")
-    # Transfers: show sign but keep gray color
+    is_updated = bool(tx.get("updated_at"))
+    _KIND_LABELS = {
+        "LOAN_GIVEN": "Loan Given", "LOAN_REPAYMENT": "Loan Repayment",
+        "LOAN_TAKEN": "Loan Taken", "EMI_PAYMENT": "EMI Payment",
+        "FD_DEPOSIT": "FD Deposit", "DEPOSIT_RECEIVED": "Deposit Received",
+        "DEPOSIT_REPAYMENT": "Deposit Repayment",
+        "MF_PURCHASE": "MF Purchase", "MF_REDEMPTION": "MF Redemption",
+    }
+    is_wealth = kind in _KIND_LABELS
+    amount = tx["amount"]; tx_type = tx["tx_type"]
     if kind == "TRANSFER":
         color = "#6B7280"
         prefix = "−" if tx_type == "DEBIT" else "+"
@@ -194,19 +201,41 @@ def _tx_card(tx, running_bal=None):
         color = "#EF4444"; prefix = "−"
     else:
         color = "#10B981"; prefix = "+"
+
+    amt_col = QVBoxLayout(); amt_col.setSpacing(4)
+    amt_col.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+    # Top: amount
     amt_lbl = QLabel(f"{prefix}{fmt_money(amount)}")
     amt_lbl.setStyleSheet(f"color:{color};font-size:16px;font-weight:800;")
     amt_lbl.setAlignment(Qt.AlignRight)
     amt_col.addWidget(amt_lbl)
-    # Type label: show "Transfer (Debit)" or "Transfer (Credit)" for transfers
+
+    # Bottom row: [Updated] [Link Badge] [stretch] [DEBIT/CREDIT]
+    bottom = QHBoxLayout()
+    bottom.setSpacing(6)
+    bottom.setAlignment(Qt.AlignRight)
+    if is_updated:
+        upd = QLabel("Updated")
+        upd.setStyleSheet(
+            "color:#4F46E5;background:#EEF2FF;border-radius:10px;"
+            "padding:2px 8px;font-size:10px;font-weight:700;border:none;")
+        bottom.addWidget(upd)
+    if is_wealth:
+        lk = QLabel(f"🔗 {_KIND_LABELS.get(kind, kind)}")
+        lk.setStyleSheet(
+            "color:#4F46E5;background:#EEF2FF;border-radius:10px;"
+            "padding:2px 8px;font-size:10px;font-weight:700;border:none;")
+        bottom.addWidget(lk)
     if kind == "TRANSFER":
         type_text = f"Transfer ({tx_type})"
     else:
         type_text = tx_type
     type_lbl = QLabel(type_text)
     type_lbl.setStyleSheet(f"color:{color};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
-    type_lbl.setAlignment(Qt.AlignRight)
-    amt_col.addWidget(type_lbl)
+    bottom.addWidget(type_lbl)
+    amt_col.addLayout(bottom)
+
     lay.addLayout(amt_col)
     return card
 
@@ -860,8 +889,8 @@ class DatabaseTab(QWidget):
             itm = self.ms_acct_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
 
-        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t["transaction_kind"] == "REGULAR")
-        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t["transaction_kind"] == "REGULAR")
+        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t["transaction_kind"] != "TRANSFER")
+        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t["transaction_kind"] != "TRANSFER")
         tr = sum(t["amount"] for t in txns if t["transaction_kind"] == "TRANSFER" and t["tx_type"] == "DEBIT")
         net = cr - db
 
@@ -996,8 +1025,8 @@ class DatabaseTab(QWidget):
         if not filepath: return
 
         # Compute raw numbers (not formatted strings) for accuracy
-        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t["transaction_kind"] == "REGULAR")
-        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t["transaction_kind"] == "REGULAR")
+        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t["transaction_kind"] != "TRANSFER")
+        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t["transaction_kind"] != "TRANSFER")
         tr = sum(t["amount"] for t in txns if t["transaction_kind"] == "TRANSFER" and t["tx_type"] == "DEBIT")
         net = cr - db
 
@@ -1418,8 +1447,8 @@ class DatabaseTab(QWidget):
         filter_str = " | ".join(filter_desc) if filter_desc else period
 
         # Raw numbers
-        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
-        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
+        cr = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") != "TRANSFER")
+        db = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t.get("transaction_kind", "REGULAR") != "TRANSFER")
         tr = sum(t["amount"] for t in txns if t.get("transaction_kind") == "TRANSFER" and t["tx_type"] == "DEBIT")
         summary = {"credits": cr, "debits": db, "net": cr - db, "transfers": tr}
 

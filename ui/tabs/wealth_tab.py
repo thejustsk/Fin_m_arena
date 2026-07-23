@@ -203,13 +203,14 @@ def _category_id(db, preferred_names, fallback=None):
 
 
 def _log_ledger_txn(tx_repo, db, *, account_id, pay_method, tx_type, amount,
-                     person_org=None, description=None, category_names=("Finance", "Other")):
+                     person_org=None, description=None, category_names=("Finance", "Other"),
+                     transaction_kind="REGULAR"):
     cat = _category_id(db, category_names)
     try:
         return tx_repo.create(
             tx_date=TODAY(), account_id=account_id, pay_method=pay_method,
             tx_type=tx_type, amount=round(float(amount), 2), person_org=person_org,
-            description=description, transaction_kind="REGULAR", category=cat,
+            description=description, transaction_kind=transaction_kind, category=cat,
             neednwant=0, pf_category=None
         )
     except Exception as e:
@@ -1098,7 +1099,8 @@ class LoansGivePage(_FunctionPage):
         txn_id = _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="DEBIT", amount=amount, person_org=borrower_name,
-            description=f"Loan given to {borrower_name}", category_names=("Finance", "Other")
+            description=f"Loan given to {borrower_name}", category_names=("Finance", "Other"),
+            transaction_kind="LOAN_GIVEN"
         )
         rate = self.lg_loan_rate.value()
         imethod = "COMPOUND" if self.lg_loan_method_type.currentIndex() == 1 else "SIMPLE"
@@ -1138,7 +1140,7 @@ class LoansGivePage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="CREDIT", amount=amount, person_org=loan["borrower_name"] if loan else None,
             description=f"Loan repayment from {loan['borrower_name']}" if loan else "Loan repayment",
-            category_names=("Finance", "Other")
+            category_names=("Finance", "Other"), transaction_kind="LOAN_REPAYMENT"
         )
         self.repos["loans"].add_repayment(
             loan_id=lid, amount_paid=amount,
@@ -1787,7 +1789,8 @@ class LoansTakePage(_FunctionPage):
         txn_id = _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
             tx_type="CREDIT", amount=principal, person_org=lender_name,
-            description=f"Loan taken from {lender_name}", category_names=("Finance", "Other")
+            description=f"Loan taken from {lender_name}", category_names=("Finance", "Other"),
+            transaction_kind="LOAN_TAKEN"
         )
         self.repos["borrowed"].create_loan(
             lender_id=lid, principal_amount=principal, interest_rate=rate, emi_amount=emi,
@@ -1830,7 +1833,7 @@ class LoansTakePage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="DEBIT", amount=amount, person_org=loan["lender_name"] if loan else None,
             description=f"EMI payment ({desc_extra}) to {loan['lender_name']}" if loan else f"EMI payment ({desc_extra})",
-            category_names=("Finance", "Other")
+            category_names=("Finance", "Other"), transaction_kind="EMI_PAYMENT"
         )
         self.repos["borrowed"].add_repayment(
             loan_id=lid, amount_paid=amount,
@@ -2277,7 +2280,8 @@ class FDGivePage(_FunctionPage):
         txn_id = _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method_id,
             tx_type="DEBIT", amount=p, person_org=None,
-            description=f"FD deposit at {account_name}", category_names=("Investment", "Finance")
+            description=f"FD deposit at {account_name}", category_names=("Investment", "Finance"),
+            transaction_kind="FD_DEPOSIT"
         )
         freq_vals = ["ANNUAL", "SEMI_ANNUAL", "QUARTERLY"]
         imethod = "COMPOUND" if self.fd_method_type.currentIndex() == 1 else "SIMPLE"
@@ -2717,7 +2721,8 @@ class FDOthersPage(_FunctionPage):
         txn_id = _log_ledger_txn(
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="CREDIT", amount=amount, person_org=name,
-            description=f"Deposit received from {name}", category_names=("Finance", "Other")
+            description=f"Deposit received from {name}", category_names=("Finance", "Other"),
+            transaction_kind="DEPOSIT_RECEIVED"
         )
         rate = None if self.fo_dep_interest_free.isChecked() else self.fo_dep_rate.value()
         imethod = "COMPOUND" if self.fo_dep_method_type.currentIndex() == 1 else "SIMPLE"
@@ -2760,7 +2765,7 @@ class FDOthersPage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="DEBIT", amount=amount, person_org=dep["depositor_name"] if dep else None,
             description=f"Repayment to {dep['depositor_name']}" if dep else "Deposit repayment",
-            category_names=("Finance", "Other")
+            category_names=("Finance", "Other"), transaction_kind="DEPOSIT_REPAYMENT"
         )
         self.repos["deposits"].add_repayment(
             deposit_id=did, amount_paid=amount,
@@ -3514,7 +3519,7 @@ class MFPage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="DEBIT", amount=amount, person_org=None,
             description=f"MF {self.mf_buy_type.currentText().title()} \u2014 {scheme_label}",
-            category_names=("Investment", "Finance")
+            category_names=("Investment", "Finance"), transaction_kind="MF_PURCHASE"
         )
         self.repos["mf"].add_txn(
             scheme_id=sid, txn_type=self.mf_buy_type.currentText(),
@@ -3547,7 +3552,7 @@ class MFPage(_FunctionPage):
             self.repos["transactions"], self.db, account_id=account_id, pay_method=method,
             tx_type="CREDIT", amount=amount, person_org=None,
             description=f"MF Redemption \u2014 {scheme_label}",
-            category_names=("Investment", "Finance")
+            category_names=("Investment", "Finance"), transaction_kind="MF_REDEMPTION"
         )
         self.repos["mf"].add_txn(
             scheme_id=sid, txn_type="REDEMPTION",

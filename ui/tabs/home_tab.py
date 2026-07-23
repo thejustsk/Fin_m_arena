@@ -403,7 +403,7 @@ class HomeTab(QWidget):
         acct_db = {}
         for t in txns:
             an = t.get("account_name") or t["account_id"]
-            if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") == "REGULAR":
+            if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") != "TRANSFER":
                 acct_cr[an] = acct_cr.get(an, 0) + t["amount"]
             elif t["tx_type"] == "DEBIT":
                 acct_db[an] = acct_db.get(an, 0) + t["amount"]
@@ -455,8 +455,8 @@ class HomeTab(QWidget):
         # Fully clear — delete widgets AND layouts
         self._clear_layout(self.savings_inner)
 
-        income = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
-        expense = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t.get("transaction_kind", "REGULAR") == "REGULAR")
+        income = sum(t["amount"] for t in txns if t["tx_type"] == "CREDIT" and t.get("transaction_kind", "REGULAR") != "TRANSFER")
+        expense = sum(t["amount"] for t in txns if t["tx_type"] == "DEBIT" and t.get("transaction_kind", "REGULAR") != "TRANSFER")
         savings = income - expense
         if income > 0:
             rate = (savings / income) * 100
