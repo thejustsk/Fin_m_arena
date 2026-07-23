@@ -302,6 +302,15 @@ class CarouselView(QGraphicsView):
             u=(utilizations or{}).get(data.get("account_id",""),0.0)
             item=CardItem(data,i,u); item.stripe_clicked.connect(self.card_clicked.emit)
             self.scene.addItem(item); self.items.append(item)
+    def showEvent(self, e):
+        """Start timer when carousel becomes visible."""
+        super().showEvent(e)
+        if self.card_count > 0:
+            self.timer.start(16)
+    def hideEvent(self, e):
+        """Stop timer when carousel becomes hidden."""
+        self.timer.stop()
+        super().hideEvent(e)
     def _on_tick(self):
         self.progress+=(self.target_progress-self.progress)*EASE_FACTOR
         cx=self.viewport().width()/2; cy=self.viewport().height()/2
@@ -1052,7 +1061,7 @@ class CardsTab(QWidget):
                 due_edit = QDateEdit(); due_edit.setCalendarPopup(True); due_edit.setDisplayFormat("dd MMM yyyy")
                 due_edit.setFixedHeight(28); due_edit.setMinimumWidth(130)
                 due_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-                due_edit.setStyleSheet(f"QDateEdit{{border:1px solid {C['border']};border-radius:4px;padding:2px 6px;font-size:11px;background:white;color:{C['text']};}}")
+                # Global QSS handles date edit styling
                 # Get due_date: use from cycle data (hybrid), then DB lookup, then default
                 saved_due = cd.get("due_date", "") or ""
                 if not saved_due:

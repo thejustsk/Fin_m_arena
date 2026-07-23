@@ -396,7 +396,7 @@ class TransactionEntryTab(QWidget):
         r2.addWidget(self.method_combo, 2)
         self.date_edit = QDateEdit(); self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setCalendarPopup(True); self.date_edit.setMinimumHeight(42)
-        self.date_edit.setStyleSheet(_input_css()); self.date_edit.dateChanged.connect(self._on_date)
+        self.date_edit.dateChanged.connect(self._on_date)
         r2.addWidget(self.date_edit)
         lay.addLayout(r2)
 
@@ -473,7 +473,7 @@ class TransactionEntryTab(QWidget):
         r2.addWidget(self.tf_method, 2)
         self.tf_date = QDateEdit(); self.tf_date.setDate(QDate.currentDate())
         self.tf_date.setCalendarPopup(True); self.tf_date.setMinimumHeight(42)
-        self.tf_date.setStyleSheet(_input_css()); self.tf_date.dateChanged.connect(self._on_date)
+        self.tf_date.dateChanged.connect(self._on_date)
         r2.addWidget(self.tf_date)
         lay.addLayout(r2)
 

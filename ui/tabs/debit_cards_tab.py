@@ -17,6 +17,7 @@ from PyQt5.QtGui import (QCursor, QPainter, QColor, QLinearGradient, QFont,
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header
+import sip
 import uuid
 
 
@@ -167,15 +168,19 @@ class DCCarouselView(QGraphicsView):
         self.timer.stop()
         super().hideEvent(e)
     def load_cards(self, cards_data):
+        self.timer.stop()
         for i in self.items: self.scene.removeItem(i)
         self.items.clear(); self.card_count=len(cards_data); self.progress=0.0; self.target_progress=0.0
         for i, data in enumerate(cards_data):
             item=DCCardItem(data,i); item.stripe_clicked.connect(self.card_clicked.emit)
             self.scene.addItem(item); self.items.append(item)
-        # Start timer if visible
-        if self.isVisible():
+        # Start timer only if visible
+        if self.isVisible() and self.card_count > 0:
             self.timer.start(16)
     def _on_tick(self):
+        if not self.items:
+            self.timer.stop()
+            return
         self.progress+=(self.target_progress-self.progress)*DC_EASE
         cx=self.viewport().width()/2; cy=self.viewport().height()/2
         for item in self.items:
@@ -498,8 +503,15 @@ class DebitCardsTab(QWidget):
     def _switch_sub(self, idx):
         for i, b in enumerate(self._sub_btns): b.setStyleSheet(_dc_tab_active() if i == idx else _dc_tab_inactive())
         self._selected_card = None
-        self.details_container.hide()
         self.header_container.hide()
+        # Clear transaction area immediately (prevents stale widgets from previous visit)
+        while self.details_lay.count():
+            itm = self.details_lay.takeAt(0)
+            w = itm.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+        self.details_container.hide()
         self._load_cards()
 
     def _load_cards(self):
@@ -521,10 +533,15 @@ class DebitCardsTab(QWidget):
         self._selected_card = card; self._show_details(card)
 
     def _show_details(self, card):
-        # Clear details_lay (same as CC tab _show_details)
+        # Clear details_lay immediately (same as CC tab _show_details)
         while self.details_lay.count():
             itm = self.details_lay.takeAt(0)
-            if itm.widget(): itm.widget().deleteLater()
+            w = itm.widget()
+            if w:
+                try:
+                    sip.delete(w)
+                except Exception:
+                    w.deleteLater()
 
         # Clear header_container
         while self.header_lay.count():
@@ -647,6 +664,12 @@ class DebitCardsTab(QWidget):
 
     def refresh(self):
         self._selected_card = None
-        self.details_container.hide()
         self.header_container.hide()
+        while self.details_lay.count():
+            itm = self.details_lay.takeAt(0)
+            w = itm.widget()
+            if w:
+                try: sip.delete(w)
+                except: w.deleteLater()
+        self.details_container.hide()
         self._load_cards()
