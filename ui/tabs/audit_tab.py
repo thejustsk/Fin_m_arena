@@ -738,10 +738,18 @@ class _AuditSubTab(QWidget):
             for r in day_txns:
                 tx_id = r["id"]
                 link = self._link_map.get(tx_id, {})
-                display_r = dict(r)
+                # Keep original transaction_kind so _tx_card shows proper badge
+                card = _tx_card(r)
+
+                # Embed link details inside the card's text column
                 if link:
-                    display_r["transaction_kind"] = link.get("group", r.get("transaction_kind", "REGULAR"))
-                card = _tx_card(display_r)
+                    link_info = QLabel(f"\U0001f517 {link.get('group', '')}: {link.get('label', '')}")
+                    link_info.setStyleSheet(f"color:{C['accent']};font-size:10px;font-weight:600;")
+                    link_info.setWordWrap(True)
+                    # Add to the card's text column (2nd item in QHBoxLayout)
+                    _text_col = card.layout().itemAt(1).layout()
+                    if _text_col:
+                        _text_col.addWidget(link_info)
 
                 row_widget = QWidget()
                 row_widget.setStyleSheet("background:transparent;border:none;")
@@ -749,25 +757,26 @@ class _AuditSubTab(QWidget):
                 row_lay.setContentsMargins(0, 0, 0, 0)
                 row_lay.setSpacing(8)
 
-                # Checkbox
-                chk = QPushButton("\u25CB")
-                chk.setFixedSize(34, 34)
+                # Checkbox with "Select" text
+                chk = QPushButton("  Select  ")
+                chk.setFixedHeight(34)
+                chk.setMinimumWidth(82)
                 chk.setFocusPolicy(Qt.NoFocus)
                 chk.setCursor(QCursor(Qt.PointingHandCursor))
                 chk.setStyleSheet(
                     f"QPushButton{{background:{C['surface']};color:{C['text3']};"
-                    f"border:2px solid {C['border']};border-radius:8px;font-size:14px;font-weight:700;}}"
+                    f"border:2px solid {C['border']};border-radius:8px;font-size:12px;font-weight:700;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                 self._check_states[tx_id] = False
                 def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
                     self._check_states[_tid] = not self._check_states[_tid]
                     is_on = self._check_states[_tid]
-                    _btn.setText("\u2713" if is_on else "\u25CB")
+                    _btn.setText("  \u2713 Done  " if is_on else "  Select  ")
                     _btn.setStyleSheet(
                         f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
                         f"color:{'white' if is_on else C['text3']};"
                         f"border:2px solid {C['accent'] if is_on else C['border']};"
-                        f"border-radius:8px;font-size:14px;font-weight:700;}}"
+                        f"border-radius:8px;font-size:12px;font-weight:700;}}"
                         f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                     self._update_bulk_count()
                 chk.clicked.connect(_toggle_chk)
@@ -776,25 +785,21 @@ class _AuditSubTab(QWidget):
                 # Card
                 row_lay.addWidget(card, 1)
 
-                # Edit button
-                edit_btn = QPushButton("\u270f\ufe0f")
-                edit_btn.setFixedSize(34, 34)
+                # Edit button with "Edit" text
+                edit_btn = QPushButton("\u270f\ufe0f Edit")
+                edit_btn.setFixedHeight(34)
+                edit_btn.setMinimumWidth(72)
                 edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
                 edit_btn.setStyleSheet(
                     f"QPushButton{{background:{C['surface']};color:{C['accent']};"
-                    f"border:1.5px solid {C['border']};border-radius:8px;font-size:16px;}}"
+                    f"border:1.5px solid {C['border']};border-radius:8px;font-size:12px;font-weight:600;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                 edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
                 row_lay.addWidget(edit_btn, 0, Qt.AlignVCenter)
 
                 self._all_render_items.append(("card", row_widget))
-
-                # Link label
-                if link:
-                    link_lbl = QLabel(f"  \U0001f517 {link.get('group', '')}: {link.get('label', '')}")
-                    link_lbl.setStyleSheet(f"color:{C['accent']};font-size:11px;font-weight:600;")
-                    self._all_render_items.append(("link", link_lbl))
+                # Link info is now embedded inside the card — no separate widget
 
         # Lazy render: first batch
         page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
