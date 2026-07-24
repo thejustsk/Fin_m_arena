@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QSpinBox, QCheckBox, QFrame, QScrollArea, QGridLayout,
                               QSizePolicy)
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QCursor
 from datetime import datetime
 from ui.theme import C
 from ui.sidebar import fmt_money
@@ -866,32 +867,17 @@ class SettingsTab(QWidget):
         return w
 
     def _guide_walkthrough(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
-        content = QLabel(
-            "<h3>\U0001f4d6 Walk Through</h3>"
-            "<p><b>Step 1: Set up your accounts</b><br>"
-            "Go to Settings \u2192 Accounts. Add your bank accounts, cash, and wallets. "
-            "Each account tracks its own balance.</p>"
-            "<p><b>Step 2: Add your cards</b><br>"
-            "Go to Credit Cards or Debit Cards tab. Link cards to your accounts. "
-            "Credit cards track billing cycles and due dates.</p>"
-            "<p><b>Step 3: Record transactions</b><br>"
-            "Use the Transactions tab to record daily income and expenses. "
-            "Transfers between accounts are also supported.</p>"
-            "<p><b>Step 4: Track wealth</b><br>"
-            "Use the Wealth tab for loans, FDs, and mutual funds. "
-            "Each item has detailed tracking and repayment history.</p>"
-            "<p><b>Step 5: Review in Audit</b><br>"
-            "The Audit tab shows all transactions with filters, bulk editing, "
-            "and wealth-linked badges.</p>"
-        )
-        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
-        content.setWordWrap(True)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        scroll.setWidget(content)
-        l.addWidget(scroll, 1)
-        return w
+        from ui.walkthrough import WalkthroughPage
+        page = WalkthroughPage()
+        # Connect navigate_to signal to find and call main window _nav
+        def _navigate(tab_key):
+            parent = self.parent()
+            while parent and not hasattr(parent, '_nav'):
+                parent = parent.parent()
+            if parent:
+                parent._nav(tab_key)
+        page.navigate_to.connect(_navigate)
+        return page
 
     def _guide_functions(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
