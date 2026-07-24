@@ -1,7 +1,7 @@
 """Login screen — TOTP / Password / Google OAuth."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QLineEdit, QPushButton, QFrame)
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer
+                              QLineEdit, QPushButton, QFrame, QDialog)
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QThread
 from PyQt5.QtGui import (QPainter, QColor, QRadialGradient, QLinearGradient,
                           QPen, QPainterPath, QCursor)
 from ui.theme import C
@@ -95,7 +95,7 @@ class LoginScreen(QWidget):
         fl.addWidget(title)
 
         self.sub = QLabel("Pull the cord to log in")
-        self.sub.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 13px; border: none;")
+        self.sub.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 13px; border: none;")
         fl.addWidget(self.sub)
 
         fl.addSpacing(12)
@@ -135,7 +135,7 @@ class LoginScreen(QWidget):
         # Google Sign-In (shown only when linked)
         self.google_div = QLabel("── or ──")
         self.google_div.setAlignment(Qt.AlignCenter)
-        self.google_div.setStyleSheet("color: rgba(255,255,255,0.25); font-size: 12px; border: none;")
+        self.google_div.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 12px; border: none;")
         fl.addWidget(self.google_div)
 
         self.google_btn = QPushButton("📧  Sign in with Google")
@@ -271,40 +271,105 @@ class LoginScreen(QWidget):
         self.err.setText("")
         self.sub.setText("Opening browser for Google sign-in...")
         self.google_btn.setEnabled(False)
-        from PyQt5.QtWidgets import QApplication
-        QApplication.processEvents()
 
-        from ui.login.google_auth import start_oauth_flow, get_client_id, get_client_secret
+        from ui.login.google_auth import start_oauth_flow
         from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
         cid = GOOGLE_CLIENT_ID
         csec = GOOGLE_CLIENT_SECRET
         if not cid or not csec:
             self.err.setText("Google credentials not configured.")
             self.google_btn.setEnabled(True)
-            return
-
-        # Open browser for fresh Google auth
-        email, refresh_token, error = start_oauth_flow(cid, csec)
-
-        if error:
-            self.err.setText(f"Google sign-in failed: {error}")
             self.sub.setText("Pull the cord to log in")
-            self.google_btn.setEnabled(True)
             return
 
-        # Verify the email matches the linked account
-        stored_email = self.sec.get_google_email()
-        if stored_email and email.lower() != stored_email.lower():
-            self.err.setText(f"Wrong account. Expected {stored_email}")
+        # Show modal auth dialog — blocks login screen, prevents "Not Responding"
+        auth_dlg = QDialog(self)
+        auth_dlg.setWindowTitle("Authenticating")
+        auth_dlg.setFixedSize(340, 160)
+        auth_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        auth_dlg.setModal(True)
+        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; }")
+        al = QVBoxLayout(auth_dlg)
+        al.setContentsMargins(24, 20, 24, 20)
+        al.setSpacing(10)
+
+        icon_lbl = QLabel("\U0001f510")
+        icon_lbl.setStyleSheet("font-size: 28px; background: transparent; border: none;")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        al.addWidget(icon_lbl)
+
+        auth_msg = QLabel("Waiting for Google sign-in...\nPlease complete in your browser.")
+        auth_msg.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        auth_msg.setAlignment(Qt.AlignCenter)
+        auth_msg.setWordWrap(True)
+        al.addWidget(auth_msg)
+
+        # Run OAuth in background thread
+        class _OAuthWorker(QThread):
+            finished = pyqtSignal(str, str, str)  # email, refresh_token, error
+
+            def __init__(self, _cid, _csec):
+                super().__init__()
+                self._cid = _cid
+                self._csec = _csec
+
+            def run(self):
+                try:
+                    _email, _token, _err = start_oauth_flow(self._cid, self._csec)
+                    self.finished.emit(_email or "", _token or "", _err or "")
+                except Exception as e:
+                    self.finished.emit("", "", str(e))
+
+        def _on_oauth_done(email, refresh_token, error):
+            auth_dlg.accept()
+            if error:
+                self.err.setText(f"Google sign-in failed: {error}")
+                self.sub.setText("Pull the cord to log in")
+                self.google_btn.setEnabled(True)
+                return
+
+            # Verify the email matches the linked account
+            stored_email = self.sec.get_google_email()
+            if stored_email and email.lower() != stored_email.lower():
+                self.err.setText(f"Wrong account. Expected {stored_email}")
+                self.sub.setText("Pull the cord to log in")
+                self.google_btn.setEnabled(True)
+                return
+
+            # Update stored refresh token if changed
+            if refresh_token:
+                self.sec.setup_google(cid, csec, email, refresh_token)
+
+            self.success.emit()
+
+        worker = _OAuthWorker(cid, csec)
+        worker.finished.connect(_on_oauth_done)
+
+        # Cancel button in dialog
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; "
+            "padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { color: rgba(255,255,255,0.8); }")
+        cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        def _cancel_auth():
+            worker.terminate()
+            auth_dlg.reject()
+            self.google_btn.setEnabled(True)
             self.sub.setText("Pull the cord to log in")
+            self.err.setText("")
+        cancel_btn.clicked.connect(_cancel_auth)
+        al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
+
+        worker.start()
+        auth_dlg.exec_()
+
+        # If dialog was closed without result (cancelled), re-enable button
+        if not worker.isFinished():
+            worker.terminate()
             self.google_btn.setEnabled(True)
-            return
-
-        # Update stored refresh token if changed
-        if refresh_token:
-            self.sec.setup_google(cid, csec, email, refresh_token)
-
-        self.success.emit()
+            self.sub.setText("Pull the cord to log in")
 
     # ══════════════════════════════════════════════
     def _try(self):

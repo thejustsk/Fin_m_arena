@@ -53,7 +53,7 @@ def main():
     from ui.theme import QSS
     app.setStyleSheet(QSS)
 
-    def show_main_window():
+    def show_main_window(show_walkthrough_prompt=False):
         from ui.loading_dialog import LoadingDialog
         from PyQt5.QtCore import QTimer
 
@@ -84,10 +84,72 @@ def main():
             QTimer.singleShot(300, lambda: _close_splash(splash))
             # Continue pre-loading wealth + notes in background (non-blocking)
             QTimer.singleShot(500, lambda: _preload_pages(mw, 0))
+            # Show walkthrough prompt after setup wizard
+            if show_walkthrough_prompt:
+                QTimer.singleShot(800, lambda: _ask_walkthrough(mw))
 
         def _close_splash(splash):
             splash.close()
             splash.deleteLater()
+
+        def _ask_walkthrough(mw):
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+            from ui.theme import C
+
+            dlg = QDialog(mw)
+            dlg.setWindowTitle("Welcome!")
+            dlg.setMinimumWidth(440)
+            dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(28, 24, 28, 24)
+            lay.setSpacing(16)
+
+            icon = QLabel("\U0001f9ed")
+            icon.setStyleSheet("font-size:48px;background:transparent;border:none;")
+            icon.setAlignment(Qt.AlignCenter)
+            lay.addWidget(icon)
+
+            title = QLabel("Welcome to Finance Manager!")
+            title.setStyleSheet(f"font-size:18px;font-weight:800;color:{C['text']};background:transparent;border:none;")
+            title.setAlignment(Qt.AlignCenter)
+            lay.addWidget(title)
+
+            desc = QLabel("Setup complete! Would you like to take a quick walkthrough\nto learn how the app works?")
+            desc.setStyleSheet(f"font-size:13px;color:{C['text2']};background:transparent;border:none;")
+            desc.setAlignment(Qt.AlignCenter)
+            desc.setWordWrap(True)
+            lay.addWidget(desc)
+
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(12)
+
+            skip_btn = QPushButton("Skip")
+            skip_btn.setStyleSheet(
+                f"QPushButton{{background:{C['surface']};color:{C['text2']};border:1px solid {C['border']};"
+                f"border-radius:8px;padding:10px 24px;font-size:13px;font-weight:600;}}"
+                f"QPushButton:hover{{border-color:{C['accent']};color:{C['accent']};}}")
+            skip_btn.setCursor(Qt.PointingHandCursor)
+            skip_btn.setMinimumHeight(42)
+            skip_btn.clicked.connect(dlg.reject)
+            btn_row.addWidget(skip_btn)
+
+            go_btn = QPushButton("\U0001f9ed  Take Walkthrough")
+            go_btn.setStyleSheet(
+                f"QPushButton{{background:{C['accent']};color:white;border:none;"
+                f"border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;}}"
+                f"QPushButton:hover{{background:#4338CA;}}")
+            go_btn.setCursor(Qt.PointingHandCursor)
+            go_btn.setMinimumHeight(42)
+            go_btn.clicked.connect(dlg.accept)
+            btn_row.addWidget(go_btn)
+
+            lay.addLayout(btn_row)
+
+            if dlg.exec_() == QDialog.Accepted:
+                mw._nav("settings")
+                settings_tab = mw._tabs.get("settings")
+                if settings_tab and hasattr(settings_tab, "go_to_walkthrough"):
+                    settings_tab.go_to_walkthrough()
 
         def _preload_pages(mw, idx):
             """Pre-load wealth + notes pages in background after splash closes."""
@@ -118,7 +180,7 @@ def main():
         def on_setup_done():
             wizard.close()
             wizard.deleteLater()
-            show_main_window()
+            show_main_window(show_walkthrough_prompt=True)
 
         wizard.done.connect(on_setup_done)
         wizard.show()

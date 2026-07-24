@@ -2,12 +2,15 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QLineEdit, QComboBox, QPushButton,
                               QStackedWidget, QFrame, QMessageBox,
-                              QScrollArea, QApplication)
-from PyQt5.QtCore import pyqtSignal, Qt
+                              QScrollArea, QApplication, QDoubleSpinBox,
+                              QDialog)
+from PyQt5.QtCore import pyqtSignal, Qt, QThread
 from PyQt5.QtGui import (QCursor, QPixmap)
 import io
+import re
 from ui.theme import C
 from ui.widgets.metric_card import add_shadow
+from ui.uppercase import force_upper
 
 try:
     import pyotp, qrcode
@@ -100,18 +103,101 @@ BTN_BACK = """
 BTN_SKIP = """
     QPushButton {
         background: transparent;
-        color: rgba(255,255,255,0.35);
-        border: 1px solid rgba(255,255,255,0.1);
+        color: rgba(255,255,255,0.55);
+        border: 1px solid rgba(255,255,255,0.2);
         border-radius: 8px;
         padding: 10px 20px;
         font-size: 13px;
-        font-weight: 500;
+        font-weight: 600;
     }
     QPushButton:hover {
-        color: rgba(255,255,255,0.6);
-        border-color: rgba(255,255,255,0.2);
+        color: rgba(255,255,255,0.8);
+        border-color: rgba(255,255,255,0.4);
+        background: rgba(255,255,255,0.06);
     }
 """
+
+SPIN_STYLE = """
+    QDoubleSpinBox {
+        background: rgba(255,255,255,0.07);
+        border: none;
+        border-bottom: 2px solid rgba(255,255,255,0.2);
+        border-radius: 0px;
+        padding: 12px 4px;
+        font-size: 15px;
+        font-weight: 500;
+        color: #FFFFFF;
+    }
+    QDoubleSpinBox:focus {
+        border-bottom: 2px solid #818CF8;
+        background: rgba(255,255,255,0.10);
+    }
+    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+        background: rgba(255,255,255,0.08);
+        border: none;
+        width: 20px;
+    }
+    QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+        background: rgba(255,255,255,0.15);
+    }
+    QDoubleSpinBox::up-arrow {
+        image: none;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-bottom: 5px solid rgba(255,255,255,0.5);
+    }
+    QDoubleSpinBox::down-arrow {
+        image: none;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid rgba(255,255,255,0.5);
+    }
+"""
+
+
+def _show_dark_warning(parent, title, message):
+    """Styled warning dialog that matches the dark wizard theme."""
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setMinimumWidth(360)
+    dlg.setStyleSheet("QDialog { background: #1E293B; }")
+    lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(24, 20, 24, 20)
+    lay.setSpacing(12)
+
+    icon_lbl = QLabel("\u26a0\ufe0f")
+    icon_lbl.setStyleSheet("font-size: 28px; background: transparent; border: none;")
+    icon_lbl.setAlignment(Qt.AlignCenter)
+    lay.addWidget(icon_lbl)
+
+    title_lbl = QLabel(title)
+    title_lbl.setStyleSheet("font-size: 16px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
+    title_lbl.setAlignment(Qt.AlignCenter)
+    lay.addWidget(title_lbl)
+
+    msg = QLabel(message)
+    msg.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.7); background: transparent; border: none;")
+    msg.setAlignment(Qt.AlignCenter)
+    msg.setWordWrap(True)
+    lay.addWidget(msg)
+
+    ok_btn = QPushButton("OK")
+    ok_btn.setStyleSheet("""
+        QPushButton {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #4F46E5, stop:1 #7C3AED);
+            color: #FFFFFF; border: none; border-radius: 10px;
+            padding: 12px; font-size: 14px; font-weight: 700;
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #4338CA, stop:1 #6D28D9);
+        }
+    """)
+    ok_btn.setCursor(QCursor(Qt.PointingHandCursor))
+    ok_btn.setMinimumHeight(42)
+    ok_btn.clicked.connect(dlg.accept)
+    lay.addWidget(ok_btn)
+
+    dlg.exec_()
 
 
 def _auto_label(name, acct_type):
@@ -179,7 +265,7 @@ class SetupWizard(QWidget):
         self.dots = []
         for i in range(5):
             d = QLabel("\u25cf" if i == 0 else "\u25cb")
-            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
+            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.4)'}; background: transparent; border: none;")
             dots_row.addWidget(d)
             self.dots.append(d)
         cl.addLayout(dots_row)
@@ -190,7 +276,7 @@ class SetupWizard(QWidget):
         cl.addWidget(self.step_title)
 
         self.step_sub = QLabel("Secure your financial data with a strong password")
-        self.step_sub.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.4); background: transparent; border: none;")
+        self.step_sub.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.6); background: transparent; border: none;")
         self.step_sub.setAlignment(Qt.AlignCenter)
         self.step_sub.setWordWrap(True)
         cl.addWidget(self.step_sub)
@@ -218,6 +304,13 @@ class SetupWizard(QWidget):
         nav.addWidget(self.back_btn)
 
         nav.addStretch()
+
+        self.skip_btn = QPushButton("Skip for now \u2192")
+        self.skip_btn.setStyleSheet(BTN_SKIP)
+        self.skip_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.skip_btn.clicked.connect(self._skip_step)
+        self.skip_btn.hide()
+        nav.addWidget(self.skip_btn)
 
         self.next_btn = QPushButton("Next  \u2192")
         self.next_btn.setStyleSheet(BTN_NEXT)
@@ -269,74 +362,67 @@ class SetupWizard(QWidget):
     def _page_2fa(self):
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(10)
-        lay.setContentsMargins(0, 4, 0, 0)
+        lay.setSpacing(6)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setAlignment(Qt.AlignCenter)
 
         # Recommendation note
         rec = QLabel("\U0001f6e1\ufe0f  Recommended for security")
         rec.setStyleSheet("font-size: 11px; color: #F59E0B; font-weight: 700; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 6px; padding: 4px 12px;")
         rec.setAlignment(Qt.AlignCenter)
+        rec.setFixedHeight(26)
         lay.addWidget(rec)
 
+        # QR Code (centered)
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setFixedSize(160, 160)
+        self.qr_label.setFixedSize(110, 110)
         self.qr_label.setStyleSheet(
-            "background: white; border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 4px;")
+            "background: white; border: 2px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 3px;")
         lay.addWidget(self.qr_label, alignment=Qt.AlignCenter)
 
-        # Secret key hidden by default — toggle to show
-        self._key_visible = False
+        # Manual Key (below QR, centered)
+        key_hint = QLabel("\U0001f511  Manual Key")
+        key_hint.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.6); background: transparent; border: none; font-weight: 700;")
+        key_hint.setAlignment(Qt.AlignCenter)
+        lay.addWidget(key_hint)
+
         self.secret_label = QLabel()
         self.secret_label.setAlignment(Qt.AlignCenter)
         self.secret_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.secret_label.setStyleSheet(
-            "font-family: 'Courier New', monospace; font-size: 13px; font-weight: 700; "
+            "font-family: 'Courier New', monospace; font-size: 12px; font-weight: 700; "
             "color: #818CF8; background: rgba(79,70,229,0.15); "
-            "padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(79,70,229,0.3); "
+            "padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(79,70,229,0.3); "
             "letter-spacing: 2px;")
-        self.secret_label.hide()
+        lay.addWidget(self.secret_label, alignment=Qt.AlignCenter)
 
-        self.show_key_btn = QPushButton("\U0001f513  Show manual key")
-        self.show_key_btn.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.4); background: transparent; border: none; padding: 4px;")
-        self.show_key_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        def _toggle_key():
-            self._key_visible = not self._key_visible
-            self.secret_label.setVisible(self._key_visible)
-            self.show_key_btn.setText("\U0001f512 Hide key" if self._key_visible else "\U0001f513  Show manual key")
-        self.show_key_btn.clicked.connect(_toggle_key)
-        lay.addWidget(self.show_key_btn, alignment=Qt.AlignCenter)
-        lay.addWidget(self.secret_label)
+        lay.addSpacing(4)
 
+        # Verification code (below key)
         verify_lbl = QLabel("Enter the 6-digit code to verify:")
-        verify_lbl.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.6); background: transparent; border: none;")
+        verify_lbl.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.7); background: transparent; border: none;")
         verify_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(verify_lbl)
 
         self.totp_code = QLineEdit()
         self.totp_code.setPlaceholderText("000000")
         self.totp_code.setMaxLength(6)
-        self.totp_code.setMinimumHeight(44)
+        self.totp_code.setFixedWidth(160)
+        self.totp_code.setMinimumHeight(38)
         self.totp_code.setStyleSheet(INPUT_STYLE)
         self.totp_code.setAlignment(Qt.AlignCenter)
         self.totp_code.returnPressed.connect(self._next)
-        lay.addWidget(self.totp_code)
+        lay.addWidget(self.totp_code, alignment=Qt.AlignCenter)
 
         self.totp_err = QLabel("")
         self.totp_err.setStyleSheet("color: #EF4444; font-size: 12px; font-weight: 600; background: transparent; border: none;")
         self.totp_err.setAlignment(Qt.AlignCenter)
+        self.totp_err.setFixedHeight(18)
         lay.addWidget(self.totp_err)
 
-        # Skip button
-        skip_btn = QPushButton("Skip for now \u2192")
-        skip_btn.setStyleSheet(BTN_SKIP)
-        skip_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        skip_btn.clicked.connect(self._skip_2fa)
-        lay.addWidget(skip_btn, alignment=Qt.AlignCenter)
-
         note = QLabel("You can enable 2FA later in Settings \u2192 Security")
-        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.25); background: transparent; border: none;")
+        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.45); background: transparent; border: none;")
         note.setAlignment(Qt.AlignCenter)
         lay.addWidget(note)
 
@@ -365,7 +451,7 @@ class SetupWizard(QWidget):
             "This is for login verification only \u2014\n"
             "no financial data is shared with Google."
         )
-        desc.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.5); background: transparent; border: none; line-height: 1.4;")
+        desc.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.65); background: transparent; border: none; line-height: 1.4;")
         desc.setAlignment(Qt.AlignCenter)
         desc.setWordWrap(True)
         lay.addWidget(desc)
@@ -393,14 +479,8 @@ class SetupWizard(QWidget):
         self.google_status_wizard.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.google_status_wizard)
 
-        skip_btn = QPushButton("Skip for now \u2192")
-        skip_btn.setStyleSheet(BTN_SKIP)
-        skip_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        skip_btn.clicked.connect(self._skip_google)
-        lay.addWidget(skip_btn, alignment=Qt.AlignCenter)
-
         note = QLabel("You can link Google later in Settings \u2192 Security")
-        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.25); background: transparent; border: none;")
+        note.setStyleSheet("font-size: 10px; color: rgba(255,255,255,0.45); background: transparent; border: none;")
         note.setAlignment(Qt.AlignCenter)
         lay.addWidget(note)
 
@@ -417,7 +497,7 @@ class SetupWizard(QWidget):
         lay.setContentsMargins(0, 8, 0, 0)
 
         hint = QLabel("Bank accounts and cash only.\nCredit cards & wallets are added from their own tabs.\nLabels are auto-generated from name + type.")
-        hint.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.35); background: transparent; border: none;")
+        hint.setStyleSheet("font-size: 12px; color: rgba(255,255,255,0.55); background: transparent; border: none;")
         hint.setAlignment(Qt.AlignCenter)
         hint.setWordWrap(True)
         lay.addWidget(hint)
@@ -473,7 +553,7 @@ class SetupWizard(QWidget):
         lay.addWidget(self.done_title)
 
         self.done_detail = QLabel("")
-        self.done_detail.setStyleSheet("font-size: 14px; color: rgba(255,255,255,0.5); background: transparent; border: none;")
+        self.done_detail.setStyleSheet("font-size: 14px; color: rgba(255,255,255,0.65); background: transparent; border: none;")
         self.done_detail.setAlignment(Qt.AlignCenter)
         self.done_detail.setWordWrap(True)
         lay.addWidget(self.done_detail)
@@ -505,15 +585,8 @@ class SetupWizard(QWidget):
         buf.seek(0)
         pixmap = QPixmap()
         pixmap.loadFromData(buf.read())
-        self.qr_label.setPixmap(pixmap.scaled(170, 170, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.qr_label.setPixmap(pixmap.scaled(110, 110, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.secret_label.setText(secret)
-
-    def _skip_2fa(self):
-        """Skip 2FA setup — disable it so login uses password."""
-        self.sec.toggle_2fa(False)
-        self._totp_secret = None
-        self.step = 2  # Go to Google step
-        self._update_ui()
 
     def _wizard_google_link(self):
         """Link Google account from setup wizard."""
@@ -527,27 +600,83 @@ class SetupWizard(QWidget):
 
         self.google_link_btn_wizard.setEnabled(False)
         self.google_link_btn_wizard.setText("Opening browser...")
-        QApplication.processEvents()
 
-        email, refresh_token, error = start_oauth_flow(cid, csec)
+        # Show modal auth dialog
+        auth_dlg = QDialog(self)
+        auth_dlg.setWindowTitle("Authenticating")
+        auth_dlg.setFixedSize(340, 160)
+        auth_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        auth_dlg.setModal(True)
+        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; }")
+        al = QVBoxLayout(auth_dlg)
+        al.setContentsMargins(24, 20, 24, 20)
+        al.setSpacing(10)
 
-        if error:
-            self.google_status_wizard.setText(f"Failed: {error}")
-            self.google_status_wizard.setStyleSheet("font-size: 12px; color: #EF4444; font-weight: 600; background: transparent; border: none;")
+        icon_lbl = QLabel("\U0001f510")
+        icon_lbl.setStyleSheet("font-size: 28px; background: transparent; border: none;")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        al.addWidget(icon_lbl)
+
+        auth_msg = QLabel("Waiting for Google sign-in...\nPlease complete in your browser.")
+        auth_msg.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        auth_msg.setAlignment(Qt.AlignCenter)
+        auth_msg.setWordWrap(True)
+        al.addWidget(auth_msg)
+
+        class _OAuthWorker(QThread):
+            finished = pyqtSignal(str, str, str)
+
+            def __init__(self, _cid, _csec):
+                super().__init__()
+                self._cid = _cid
+                self._csec = _csec
+
+            def run(self):
+                try:
+                    _email, _token, _err = start_oauth_flow(self._cid, self._csec)
+                    self.finished.emit(_email or "", _token or "", _err or "")
+                except Exception as e:
+                    self.finished.emit("", "", str(e))
+
+        def _on_done(email, refresh_token, error):
+            auth_dlg.accept()
+            if error:
+                self.google_status_wizard.setText(f"Failed: {error}")
+                self.google_status_wizard.setStyleSheet("font-size: 12px; color: #EF4444; font-weight: 600; background: transparent; border: none;")
+                self.google_link_btn_wizard.setEnabled(True)
+                self.google_link_btn_wizard.setText("\U0001f517  Sign in with Google")
+                return
+            self.sec.setup_google(cid, csec, email, refresh_token)
+            self.google_status_wizard.setText(f"\u2713 Linked: {email}")
+            self.google_status_wizard.setStyleSheet("font-size: 12px; color: #10B981; font-weight: 700; background: transparent; border: none;")
+            self.google_link_btn_wizard.setText("Linked \u2713")
+            self.google_link_btn_wizard.setEnabled(False)
+
+        worker = _OAuthWorker(cid, csec)
+        worker.finished.connect(_on_done)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; "
+            "padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { color: rgba(255,255,255,0.8); }")
+        cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        def _cancel():
+            worker.terminate()
+            auth_dlg.reject()
             self.google_link_btn_wizard.setEnabled(True)
             self.google_link_btn_wizard.setText("\U0001f517  Sign in with Google")
-            return
+        cancel_btn.clicked.connect(_cancel)
+        al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
 
-        self.sec.setup_google(cid, csec, email, refresh_token)
-        self.google_status_wizard.setText(f"\u2713 Linked: {email}")
-        self.google_status_wizard.setStyleSheet("font-size: 12px; color: #10B981; font-weight: 700; background: transparent; border: none;")
-        self.google_link_btn_wizard.setText("Linked \u2713")
-        self.google_link_btn_wizard.setEnabled(False)
+        worker.start()
+        auth_dlg.exec_()
 
-    def _skip_google(self):
-        """Skip Google linking."""
-        self.step = 3  # Go to Accounts step
-        self._update_ui()
+        if not worker.isFinished():
+            worker.terminate()
+            self.google_link_btn_wizard.setEnabled(True)
+            self.google_link_btn_wizard.setText("\U0001f517  Sign in with Google")
 
     def _add_acct_row(self):
         row = QFrame()
@@ -566,6 +695,7 @@ class SetupWizard(QWidget):
         name.setPlaceholderText("Account name")
         name.setMinimumHeight(40)
         name.setStyleSheet(INPUT_STYLE)
+        force_upper(name)
         rl.addWidget(name, 3)
 
         atype = QComboBox()
@@ -574,10 +704,13 @@ class SetupWizard(QWidget):
         atype.setStyleSheet(COMBO_STYLE)
         rl.addWidget(atype, 1)
 
-        bal = QLineEdit()
-        bal.setPlaceholderText("\u20b9 Opening balance")
+        bal = QDoubleSpinBox()
+        bal.setPrefix("\u20b9 ")
+        bal.setRange(-99999999, 99999999)
+        bal.setDecimals(2)
+        bal.setValue(0)
         bal.setMinimumHeight(40)
-        bal.setStyleSheet(INPUT_STYLE)
+        bal.setStyleSheet(SPIN_STYLE)
         rl.addWidget(bal, 2)
 
         x = QPushButton("\u2715")
@@ -595,12 +728,9 @@ class SetupWizard(QWidget):
         self.acct_layout.addWidget(row)
         self.acct_rows.append(entry)
 
-        # Keyboard navigation: Enter on balance → add new row
-        def _on_bal_enter():
-            if bal.text().strip() or name.text().strip():
-                self._add_acct_row()
-        bal.returnPressed.connect(_on_bal_enter)
+        # Keyboard navigation: Enter on name -> type combo
         name.returnPressed.connect(lambda: atype.setFocus())
+        atype.activated.connect(lambda: bal.setFocus())
 
         name.setFocus()
 
@@ -622,13 +752,25 @@ class SetupWizard(QWidget):
 
         for i, d in enumerate(self.dots):
             d.setText("\u25cf" if i == self.step else "\u25cb")
-            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.2)'}; background: transparent; border: none;")
+            d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.4)'}; background: transparent; border: none;")
 
         self.back_btn.setVisible(self.step > 0 and self.step < 5)
+        # Show skip button on optional steps (1=2FA, 2=Google)
+        self.skip_btn.setVisible(self.step in (1, 2))
 
         btn_texts = ["Next  \u2192", "Next  \u2192", "Next  \u2192", "Finish  \u2713", "Go to Home  \u2713"]
         self.next_btn.setText(btn_texts[self.step])
         self.next_btn.setStyleSheet(BTN_DONE if self.step >= 3 else BTN_NEXT)
+
+    def _skip_step(self):
+        """Skip the current optional step (2FA or Google)."""
+        if self.step == 1:
+            self.sec.toggle_2fa(False)
+            self._totp_secret = None
+            self.step = 2
+        elif self.step == 2:
+            self.step = 3
+        self._update_ui()
 
     def _next(self):
         # Step 0: Password
@@ -671,24 +813,21 @@ class SetupWizard(QWidget):
             # Count non-empty rows first
             non_empty = [e for e in self.acct_rows if e[0].text().strip()]
             if not non_empty:
-                QMessageBox.warning(self, "Required", "Please add at least one account to continue.")
+                _show_dark_warning(self, "Required", "Please add at least one account to continue.")
                 self._add_acct_row()
                 return
-            for name_edit, type_combo, bal_edit in self.acct_rows:
+            for name_edit, type_combo, bal_spin in self.acct_rows:
                 nm = name_edit.text().strip()
                 if not nm:
                     continue
                 if nm.lower() in seen_names:
-                    QMessageBox.warning(self, "Duplicate", f"'{nm}' is entered twice.")
+                    _show_dark_warning(self, "Duplicate", f"'{nm}' is entered twice.")
                     name_edit.setFocus(); return
                 seen_names.add(nm.lower())
                 if self.repo.exists(nm):
-                    QMessageBox.warning(self, "Duplicate", f"Account '{nm}' already exists.")
+                    _show_dark_warning(self, "Duplicate", f"Account '{nm}' already exists.")
                     name_edit.setFocus(); return
-                try:
-                    b = float(bal_edit.text() or "0")
-                except ValueError:
-                    b = 0
+                b = bal_spin.value()
                 self.repo.create(
                     display_name=nm, short_label=_auto_label(nm, type_combo.currentText()),
                     account_type=type_combo.currentText(),

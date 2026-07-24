@@ -14,6 +14,7 @@ from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header
+from ui.uppercase import force_upper
 import uuid
 
 CARD_W = 320; CARD_H = 200; CARD_RADIUS = 16; GAP = 40
@@ -412,7 +413,7 @@ class AddCardDialog(QDialog):
         self._card = card; self._is_edit = card is not None
         title = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
         self.setWindowTitle(title); self.setMinimumWidth(640)
-        # Global QSS handles dialog background; self._build()
+        self._build()
         if self._is_edit: self._prefill()
     def _build(self):
         lay=QHBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(20)
@@ -420,13 +421,13 @@ class AddCardDialog(QDialog):
         hdr_text = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
         hdr=QLabel(hdr_text); hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
         form=QFormLayout(); form.setSpacing(8); form.setLabelAlignment(Qt.AlignRight)
-        self.card_name=QLineEdit(); self.card_name.setPlaceholderText("e.g. AMAZON PAY ICICI CARD"); self.card_name.textChanged.connect(self._upd); form.addRow("Card Name *",self.card_name)
-        self.issuer=QLineEdit(); self.issuer.setPlaceholderText("e.g. ICICI BANK"); self.issuer.textChanged.connect(self._upd); form.addRow("Bank *",self.issuer)
-        self.brand=QLineEdit(); self.brand.setPlaceholderText("e.g. AMAZON PAY"); self.brand.textChanged.connect(self._upd); form.addRow("Co-Brand",self.brand)
+        self.card_name=QLineEdit(); self.card_name.setPlaceholderText("e.g. AMAZON PAY ICICI CARD"); self.card_name.textChanged.connect(self._upd); force_upper(self.card_name); form.addRow("Card Name *",self.card_name)
+        self.issuer=QLineEdit(); self.issuer.setPlaceholderText("e.g. ICICI BANK"); self.issuer.textChanged.connect(self._upd); force_upper(self.issuer); form.addRow("Bank *",self.issuer)
+        self.brand=QLineEdit(); self.brand.setPlaceholderText("e.g. AMAZON PAY"); self.brand.textChanged.connect(self._upd); force_upper(self.brand); form.addRow("Co-Brand",self.brand)
         self.network=QComboBox(); self.network.addItems(["VISA","MASTERCARD","RUPAY","AMEX","DINERS","BAJAJ","OTHER"]); self.network.currentTextChanged.connect(self._upd); form.addRow("Network",self.network)
         self.card_class=QLineEdit(); self.card_class.setPlaceholderText("e.g. Platinum, Signature"); self.card_class.textChanged.connect(self._upd); form.addRow("Class",self.card_class)
         self.last_four=QLineEdit(); self.last_four.setMaxLength(4); self.last_four.setPlaceholderText("Last 4 digits"); self.last_four.textChanged.connect(self._upd); form.addRow("Last 4 Digits",self.last_four)
-        self.cardholder=QLineEdit(); self.cardholder.setPlaceholderText("Name as on card"); self.cardholder.textChanged.connect(self._upd); form.addRow("Cardholder Name",self.cardholder)
+        self.cardholder=QLineEdit(); self.cardholder.setPlaceholderText("Name as on card"); self.cardholder.textChanged.connect(self._upd); force_upper(self.cardholder); form.addRow("Cardholder Name",self.cardholder)
         self.credit_limit=QDoubleSpinBox(); self.credit_limit.setRange(0,99999999); self.credit_limit.setPrefix("₹ "); self.credit_limit.setDecimals(0); form.addRow("Credit Limit *",self.credit_limit)
         er=QHBoxLayout(); self.expiry_month=QSpinBox(); self.expiry_month.setRange(1,12); self.expiry_month.setValue(12); self.expiry_year=QSpinBox(); self.expiry_year.setRange(2024,2040); self.expiry_year.setValue(2028)
         self.expiry_month.valueChanged.connect(self._upd); self.expiry_year.valueChanged.connect(self._upd)

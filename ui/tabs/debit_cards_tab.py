@@ -17,6 +17,7 @@ from PyQt5.QtGui import (QCursor, QPainter, QColor, QLinearGradient, QFont,
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header
+from ui.uppercase import force_upper
 import sip
 import uuid
 
@@ -51,26 +52,10 @@ DC_GRADIENTS = [
     ("#e3d8b8", "#7b6b43"),  # Champagne Metal
 ]
 DC_GRAD_NAMES = [
-    "Titanium",
-    "Gunmetal",
-    "Platinum",
-    "Silverforge",
-    "Aurum",
-    "Bullion",
-    "Copperline",
-    "Bronzework",
-    "Ironclad",
-    "Graphite",
-    "Chrome",
-    "Carbon",
-    "Pewter",
-    "Nickel",
-    "Zinc",
-    "Palladium",
-    "Forge",
-    "Alloy",
-    "Blacksteel",
-    "Champagne",
+    "Titanium", "Gunmetal", "Platinum", "Silverforge", "Aurum",
+    "Bullion", "Copperline", "Bronzework", "Ironclad", "Graphite",
+    "Chrome", "Carbon", "Pewter", "Nickel", "Zinc",
+    "Palladium", "Forge", "Alloy", "Blacksteel", "Champagne",
 ]
 
 
@@ -322,12 +307,12 @@ class DebitCardAddDialog(QDialog):
         hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
         form = QFormLayout(); form.setSpacing(8); form.setLabelAlignment(Qt.AlignRight)
 
-        self.card_name = QLineEdit(); self.card_name.setPlaceholderText("e.g. SBI Debit Card"); self.card_name.textChanged.connect(self._upd); form.addRow("Card Name *", self.card_name)
+        self.card_name = QLineEdit(); self.card_name.setPlaceholderText("e.g. SBI Debit Card"); self.card_name.textChanged.connect(self._upd); force_upper(self.card_name); form.addRow("Card Name *", self.card_name)
         self.bank_combo = QComboBox(); self.bank_combo.setMinimumHeight(36); self._refresh_bank_combo(); self.bank_combo.currentIndexChanged.connect(self._upd); form.addRow("Bank (Current Acct) *", self.bank_combo)
         self.network = QComboBox(); self.network.addItems(["VISA","MASTERCARD","RUPAY","AMEX","OTHER"]); self.network.currentTextChanged.connect(self._upd); form.addRow("Network", self.network)
         self.card_class = QLineEdit(); self.card_class.setPlaceholderText("e.g. Classic, Platinum"); self.card_class.textChanged.connect(self._upd); form.addRow("Class", self.card_class)
         self.last_four = QLineEdit(); self.last_four.setMaxLength(4); self.last_four.setPlaceholderText("Last 4 digits"); self.last_four.textChanged.connect(self._upd); form.addRow("Last 4 Digits", self.last_four)
-        self.cardholder = QLineEdit(); self.cardholder.setPlaceholderText("Name as on card"); self.cardholder.textChanged.connect(self._upd); form.addRow("Cardholder Name", self.cardholder)
+        self.cardholder = QLineEdit(); self.cardholder.setPlaceholderText("Name as on card"); self.cardholder.textChanged.connect(self._upd); force_upper(self.cardholder); form.addRow("Cardholder Name", self.cardholder)
         er = QHBoxLayout(); self.expiry_month = QSpinBox(); self.expiry_month.setRange(1,12); self.expiry_month.setValue(12)
         self.expiry_year = QSpinBox(); self.expiry_year.setRange(2024,2040); self.expiry_year.setValue(2028)
         self.expiry_month.valueChanged.connect(self._upd); self.expiry_year.valueChanged.connect(self._upd)

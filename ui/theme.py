@@ -58,6 +58,7 @@ QDateEdit:disabled {{
 }}
 QDateEdit::drop-down {{
     border: none;
+    background: transparent;
     width: 28px;
     subcontrol-position: center right;
 }}
@@ -214,16 +215,16 @@ QComboBox:disabled {{
 }}
 QComboBox::drop-down {{
     border: none;
-    width: 28px;
+    background: transparent;
+    width: 22px;
     subcontrol-position: center right;
-    padding-right: 4px;
 }}
 QComboBox::down-arrow {{
     image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid {C['text3']};
-    margin-right: 8px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {C['text3']};
+    margin-right: 6px;
 }}
 QComboBox::down-arrow:hover {{
     border-top-color: {C['accent']};
