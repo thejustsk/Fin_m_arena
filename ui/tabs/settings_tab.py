@@ -880,92 +880,256 @@ class SettingsTab(QWidget):
         return page
 
     def _guide_functions(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
-        content = QLabel(
-            "<h3>\U0001f527 Functions</h3>"
-            "<p><b>\U0001f4dd Transactions</b> \u2014 Record income (credit) and expenses (debit). "
-            "Supports categories, payment methods, and need/want tagging.</p>"
-            "<p><b>\U0001f50d Audit</b> \u2014 View all transactions with advanced filters. "
-            "Bulk update categories, need/want, and PF categories. "
-            "Delete and edit with verification.</p>"
-            "<p><b>\U0001f4c8 Wealth</b> \u2014 Track loans (given/taken), FDs, deposits, "
-            "and mutual funds. Each has status tracking, repayment history, and detailed analysis.</p>"
-            "<p><b>\U0001f4b3 Credit Cards</b> \u2014 Manage credit cards with billing cycles, "
-            "FIFO payment allocation, due date reminders, and settlement tracking.</p>"
-            "<p><b>\U0001f4b3 Debit Cards</b> \u2014 Manage debit cards linked to current accounts. "
-            "View account transactions with monthly grouping.</p>"
-            "<p><b>\U0001f4cb Notes</b> \u2014 Create and organize notes with tags. "
-            "Link notes to transactions for reference.</p>"
-        )
-        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
-        content.setWordWrap(True)
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(0)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        scroll.setWidget(content)
+        inner = QWidget(); inner.setStyleSheet("background:transparent;")
+        il = QVBoxLayout(inner); il.setSpacing(16); il.setContentsMargins(4, 4, 12, 4)
+
+        # Header
+        hdr = QLabel("\U0001f527  Functions")
+        hdr.setStyleSheet(f"font-size:20px;font-weight:800;color:{C['text']};background:transparent;border:none;")
+        il.addWidget(hdr)
+        sub = QLabel("Every feature in the app, explained.")
+        sub.setStyleSheet(f"font-size:12px;color:{C['text3']};background:transparent;border:none;margin-bottom:8px;")
+        il.addWidget(sub)
+
+        sections = [
+            ("\U0001f4dd  Transactions", "#4F46E5", [
+                ("Regular Entry", "Record income (CREDIT) and expenses (DEBIT) with account, category, payment method, need/want tagging, person/org, and description. Auto-creates payment methods if not found."),
+                ("Transfer", "Move money between your own accounts. Creates two linked transactions (DEBIT + CREDIT) with a shared transfer_group_id. Swap button to flip From/To. Razorpay-style success animation on completion."),
+                ("Gmail Queue", "Coming Soon. Will show transactions suggested from Gmail inbox sync."),
+            ]),
+            ("\U0001f5c4\ufe0f  Database", "#8B5CF6", [
+                ("Complete View", "All transactions with running balances. Search by person, description, amount, category, or account. Infinite lazy scroll (configurable page size). Month and day grouping."),
+                ("Monthly View", "Select month/year to see transactions, summary (5 KPI cards + account grid), and visualization (4 Chart.js charts). Print Statement exports to PDF."),
+                ("Filtered View", "11 filter fields with multi-value chip selection. Exact or Sequential mode. Stats bar shows count, credits, debits, net. Print filtered results to PDF."),
+            ]),
+            ("\U0001f4b0  Balances", "#10B981", [
+                ("Net Worth", "Hero card showing total net worth with breakdown by account type (Current, Credit Card, Wallet, Cash). Credit cards show negative (money owed)."),
+                ("Account Drill-down", "Click any account to see its transactions. Non-CC: paginated with running balances. CC: FIFO cycle headers with Spent/Paid/Remaining, editable due dates. Back button to return."),
+            ]),
+            ("\U0001f4b3  Credit Cards", "#EF4444", [
+                ("Card Carousel", "3D carousel with 60fps animation. Drag/scroll to browse, click to flip (front shows bank/brand/utilization, back shows cardholder/number/expiry). Click stripe to view details."),
+                ("Billing Cycles", "FIFO (First-In-First-Out) payment allocation. Statement cycles computed from statement_date. Cycle headers show Spent, Paid, Remaining, editable Due Date."),
+                ("Settlement", "Footer with Amount Due / Current Outstanding / Custom. Source account (excludes CCs), method, date. Creates transfer pair. Refreshes everything after."),
+                ("Reminders", "Right panel: overdue alerts, statement approaching, high-value transactions, card expiry warnings. Up to 15 reminders sorted by urgency."),
+            ]),
+            ("\U0001f4b3  Debit Cards", "#F59E0B", [
+                ("Card Carousel", "Same 3D carousel pattern. 20 metallic gradient themes (Titanium, Gunmetal, Platinum, etc.). Completely independent from CC tab."),
+                ("Account Transactions", "Linked to a CURRENT account. Monthly grouping with Debits/Credits/Surplus headers. Smart lazy scroll: 1 month first, expand if < 4 txns, then 3 months per batch."),
+            ]),
+            ("\U0001f4c8  Wealth", "#059669", [
+                ("Loans I Give", "Track money lent to others. Entry: borrower, amount, interest rate/method, dates. List: color-coded cards by status, progress bar, inline edit, repayment history, Print PDF."),
+                ("Loans I Take", "Track money borrowed. EMI and Non-EMI types. EMI preview on entry. Amount types: Updated EMI, Original EMI, Full Pay, Custom. Alerts for overdue and upcoming EMIs."),
+                ("FD I Deposit", "Track fixed deposits. Simple/Compound interest with compounding frequency. Maturity preview on entry. Mark Matured, Mark Withdrawn (with premature fee calculation)."),
+                ("FD Others Deposit", "Track deposits received from others. Interest-free toggle. Log repayments. Mark as Closed when fully returned."),
+                ("Mutual Funds", "Track MF investments. Purchase/SIP and Redemption. Auto-fetch NAV from api.mfapi.in. Background NAV fetch on app start. Search & link fund schemes."),
+            ]),
+            ("\U0001f50d  Audit", "#D97706", [
+                ("Filters & Records", "11 filter fields with multi-value chips. Regular and Wealth transaction sub-tabs. Each card has Select (for bulk) and Edit buttons. Lazy scroll with configurable page size."),
+                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, PF Category. Both require 2FA/password verification. Progress popup during updates."),
+                ("Insights", "Analytics with quick period buttons. 4 KPI cards + 4 Chart.js charts. Auto-aggregates by month if range > 90 days."),
+            ]),
+            ("\U0001f4cb  Notes", "#EC4899", [
+                ("All Notes", "Search by title or tag. Expandable cards with accent-colored borders. Click to expand: content, linked transactions, Print/Edit/Delete buttons. Lazy scroll."),
+                ("New / Edit Note", "Two-column: left has title, tag chips (with autocomplete), content editor. Right has transaction linker with filters and checkbox toggles. Linked IDs stored as JSON array."),
+                ("Trash & Recovery", "Soft-delete with Recover and Delete Forever options. Shows title, tags, deleted date."),
+                ("Print PDF", "Styled PDF with title, tags, content, linked transactions (card-style), summary, security table (Doc ID, hash, watermark), QR code."),
+            ]),
+            ("\u2699\ufe0f  Settings", "#6B7280", [
+                ("Accounts", "Grouped by type. Single-line rows with name, label, type badge, opening balance, status. Add/Edit/Activate/Deactivate. CC accounts redirect to card editor."),
+                ("Categories", "Icon picker (96 emoji palette), color disc picker (24 colors), PF category, tax deductible flag. Instant update on save."),
+                ("Payment Methods", "Add new, activate/deactivate toggle (does NOT delete, just hides from dropdowns)."),
+                ("Security", "2FA toggle, Edit 2FA Key (QR code), Google OAuth link/unlink, Change Password, Tab Security (per-tab password protection)."),
+                ("Preferences", "Pagination settings for Database, Wealth, Notes. High-value transaction alert threshold."),
+                ("Data Management", "Backup with retention, storage info. Coming Soon: Export, Import, Take Down, Cloud Sync."),
+            ]),
+        ]
+
+        for title, color, items in sections:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-top:3px solid {color};border-radius:10px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            cl = QVBoxLayout(card); cl.setContentsMargins(16, 14, 16, 14); cl.setSpacing(10)
+            cl.addWidget(self._guide_section_title(title, color))
+            for name, desc in items:
+                cl.addWidget(self._guide_item(name, desc, color))
+            il.addWidget(card)
+
+        il.addStretch()
+        scroll.setWidget(inner)
         l.addWidget(scroll, 1)
         return w
 
     def _guide_scheme(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
-        content = QLabel(
-            "<h3>\u2699\ufe0f Working Scheme</h3>"
-            "<p><b>Data Storage</b><br>"
-            "All data is stored locally in a SQLite database (finance.db). "
-            "No internet connection required. No data is sent to external servers.</p>"
-            "<p><b>Security</b><br>"
-            "Password protection with optional TOTP (2FA). "
-            "Tab-level security for sensitive areas. "
-            "Google OAuth for alternative login.</p>"
-            "<p><b>Wealth Linking</b><br>"
-            "Wealth items (loans, FDs, MFs) create linked transactions automatically. "
-            "Edits in Audit cascade to wealth records. "
-            "Status is auto-calculated (Active, Overdue, Repaid, Closed).</p>"
-            "<p><b>Card Billing</b><br>"
-            "Credit cards use FIFO (First-In-First-Out) payment allocation. "
-            "Statement cycles are computed from statement date. "
-            "Reminders track due dates and overdue amounts.</p>"
-            "<p><b>Backup</b><br>"
-            "Automatic backups in finance_data/backups/. "
-            "Keeps last 14 backups. Manual backup available in Settings \u2192 Data Management.</p>"
-        )
-        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
-        content.setWordWrap(True)
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(0)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        scroll.setWidget(content)
+        inner = QWidget(); inner.setStyleSheet("background:transparent;")
+        il = QVBoxLayout(inner); il.setSpacing(16); il.setContentsMargins(4, 4, 12, 4)
+
+        hdr = QLabel("\u2699\ufe0f  Working Scheme")
+        hdr.setStyleSheet(f"font-size:20px;font-weight:800;color:{C['text']};background:transparent;border:none;")
+        il.addWidget(hdr)
+        sub = QLabel("How the app works under the hood.")
+        sub.setStyleSheet(f"font-size:12px;color:{C['text3']};background:transparent;border:none;margin-bottom:8px;")
+        il.addWidget(sub)
+
+        sections = [
+            ("\U0001f4be  Data Storage", "#4F46E5", [
+                ("SQLite Database", "All data stored locally in finance.db. No internet required. No data sent to external servers. Single file, easy to backup and move."),
+                ("Schema", "Tables: accounts, transactions, categories, payment_methods, cards, card_cycles, debit_cards, loans, borrowers, repayments, borrowed_loans, lenders, borrowed_loan_repayments, fixed_deposits, deposits_from_others, depositors, deposit_repayments_to_others, mf_schemes, mf_transactions, notes, notes_trash, tags, audit_log, tab_security, preferences, settings."),
+                ("Relationships", "Transactions link to accounts. Wealth items (loans, FDs, MFs, deposits) create linked transactions via linked_txn_id. Transfers use transfer_group_id. Notes link to transactions via JSON array."),
+                ("Migrations", "Schema upgrades happen automatically on app start. New columns/tables added via ALTER TABLE or CREATE TABLE IF NOT EXISTS. Data preserved across upgrades."),
+            ]),
+            ("\U0001f510  Security", "#EF4444", [
+                ("Password", "Bcrypt-hashed master password. Required for login. Change password with confirmation dialog."),
+                ("2FA / TOTP", "Optional Time-based One-Time Password. QR code setup with authenticator app (Google Authenticator, Authy, etc.). 6-digit code required for login and wealth edits when enabled."),
+                ("Google OAuth", "Optional alternative login. Links Google account via browser OAuth flow. Verifies with Google each time (no stored password). Email and refresh token stored locally."),
+                ("Tab Security", "Optional per-tab password protection. Toggles for: Wealth, Audit, Database, Credit Cards, Notes, Gmail, Settings. Each toggle requires password/TOTP verification to change."),
+                ("Edit Verification", "All wealth edits and audit edits require 2FA/password verification. Custom 400px styled dialog. Cancel reverts the operation."),
+            ]),
+            ("\U0001f517  Wealth Linking", "#059669", [
+                ("Auto-Linking", "When you give a loan, create an FD, or purchase MF units, a linked transaction is automatically created in the transactions table. The linked_txn_id connects them."),
+                ("Cascade on Edit", "Editing a transaction's amount in Audit cascades to the linked wealth record (loan_amount, principal_amount, etc.). Editing the date cascades similarly. Status is auto-recalculated."),
+                ("Cascade on Delete", "Deleting a transaction in Audit unlinks the wealth record (sets linked_txn_id to NULL). Transfer transactions are deleted in pairs."),
+                ("Status Auto-Calc", "Status is computed automatically: ACTIVE (no payments), PARTIALLY_PAID (some payments), OVERDUE (past due date), REPAID (fully paid), CLOSED (manually marked). Recalculated on every refresh."),
+                ("Transfer Cascade", "Transfers create two linked transactions. Editing one cascades to the other (except tx_type). Deleting one deletes both."),
+            ]),
+            ("\U0001f4b3  Card Billing (FIFO)", "#D97706", [
+                ("Statement Cycles", "Computed from statement_date (e.g., '6th' means cycles run from 7th of one month to 6th of next). Cycles built going backwards from today."),
+                ("FIFO Allocation", "Payments (CREDIT transactions) are allocated to the oldest cycle with remaining balance first. First In, First Out. Each cycle tracks: debits, paid, remaining."),
+                ("Amount Due", "Sum of remaining from ALL previous cycles (not current). Current cycle is excluded because its bill hasn't generated yet."),
+                ("Due Dates", "Default: cycle end date + grace_days. Editable per cycle in the card details view. Changes saved to card_cycles table."),
+                ("Reminders", "Statement approaching (5 days before, if balance > 0). Overdue (past due date with remaining). High-value transactions (configurable threshold). Card expiry warnings."),
+            ]),
+            ("\U0001f4ca  Charts & Visualization", "#8B5CF6", [
+                ("Chart.js", "All charts use Chart.js 4.4.0 loaded via CDN. Rendered in QWebEngineView. HTML built with data injected as JSON, written to temp file, loaded locally."),
+                ("Home Charts", "4 charts: Spending by Category (doughnut), Spending Trend (line), Need vs Want (stacked bar), Income vs Expense by Account (horizontal bar)."),
+                ("Monthly Charts", "Same 4 charts for selected month. Forced resize when switching to Visualization tab (QWebEngineView layout fix)."),
+                ("Audit Insights", "Same chart template. Auto-aggregates by month if date range > 90 days, else by day."),
+            ]),
+            ("\U0001f4e6  Backup", "#F59E0B", [
+                ("Automatic", "Backup created on app close (configurable). Stored in finance_data/backups/. Retention: last 14 backups (oldest auto-deleted)."),
+                ("Manual", "Settings > Data Management > Backup Now. Creates a copy of finance.db with timestamp in filename."),
+                ("Storage", "Database size and backup size shown in Settings > Data Management. Backup files are standard SQLite databases — can be opened with any SQLite viewer."),
+                ("Restore", "Replace finance.db with a backup file. Restart the app. All data restored."),
+            ]),
+        ]
+
+        for title, color, items in sections:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-top:3px solid {color};border-radius:10px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            cl = QVBoxLayout(card); cl.setContentsMargins(16, 14, 16, 14); cl.setSpacing(10)
+            cl.addWidget(self._guide_section_title(title, color))
+            for name, desc in items:
+                cl.addWidget(self._guide_item(name, desc, color))
+            il.addWidget(card)
+
+        il.addStretch()
+        scroll.setWidget(inner)
         l.addWidget(scroll, 1)
         return w
 
     def _guide_ui(self):
-        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
-        content = QLabel(
-            "<h3>\U0001f5bc\ufe0f UI Details</h3>"
-            "<p><b>Sidebar</b><br>"
-            "Left navigation with collapsible icon mode. "
-            "Click the header to toggle. Shows payment due reminders when expanded.</p>"
-            "<p><b>Home</b><br>"
-            "Dashboard with KPI cards (today, week, month, year). "
-            "Quick access tiles for all tabs.</p>"
-            "<p><b>Carousel</b><br>"
-            "Credit and Debit card tabs use a 3D carousel. "
-            "Drag to scroll, click to flip (show back), click stripe to view details.</p>"
-            "<p><b>Smart Scroll</b><br>"
-            "Transaction lists use lazy loading. "
-            "Wealth cards load in batches. "
-            "Debit card transactions load by month groups.</p>"
-            "<p><b>Theme</b><br>"
-            "Light theme with indigo accent (#4F46E5). "
-            "Consistent styling across all inputs, buttons, and dialogs.</p>"
-            "<p><b>Keyboard Shortcuts</b><br>"
-            "Tab: Move between fields. Enter: Submit form. "
-            "Left/Right arrows: Scroll carousel. Space: Flip card.</p>"
-        )
-        content.setStyleSheet(f"font-size:13px;color:{C['text2']};line-height:1.6;")
-        content.setWordWrap(True)
+        w = QWidget(); l = QVBoxLayout(w); l.setSpacing(0)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
         scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        scroll.setWidget(content)
+        inner = QWidget(); inner.setStyleSheet("background:transparent;")
+        il = QVBoxLayout(inner); il.setSpacing(16); il.setContentsMargins(4, 4, 12, 4)
+
+        hdr = QLabel("\U0001f5bc\ufe0f  UI Details")
+        hdr.setStyleSheet(f"font-size:20px;font-weight:800;color:{C['text']};background:transparent;border:none;")
+        il.addWidget(hdr)
+        sub = QLabel("Visual design, layout patterns, and interaction details.")
+        sub.setStyleSheet(f"font-size:12px;color:{C['text3']};background:transparent;border:none;margin-bottom:8px;")
+        il.addWidget(sub)
+
+        sections = [
+            ("\U0001f3e0  Sidebar", "#4F46E5", [
+                ("Navigation", "Left sidebar with collapsible icon mode. Click header to toggle between full labels and icon-only. Sections: MAIN (Home, Transactions, Database, Balances), CARDS (Credit Cards, Debit Cards), WEALTH (Wealth), RECORDS (Audit, Notes), SYSTEM (Settings, Gmail)."),
+                ("Need/Want Counter", "Shows count of untagged transactions (neednwant is NULL). Clicking scrolls to the first untagged transaction in Transaction Entry."),
+                ("Card Reminders", "When expanded, shows credit card payment due reminders below the navigation."),
+                ("Highlight", "Active tab highlighted with indigo background. Called via sidebar.highlight(key) from main window on tab switch."),
+            ]),
+            ("\U0001f3a8  Theme", "#8B5CF6", [
+                ("Colors", "Light theme with indigo accent (#4F46E5). Semantic colors: green (income/success), red (expense/danger), amber (warning), text3 (secondary text). All defined in theme.py as C dict."),
+                ("Global QSS", "All input widgets styled globally: QDialog (themed bg), QMessageBox (white bg, dark text), QComboBox (rounded, dropdown arrow), QDateEdit (rounded, calendar styled), QSpinBox/QDoubleSpinBox (rounded), QLineEdit (rounded, hover/focus states)."),
+                ("Cards", "Standard card: white bg, 1px #E5E7EB border, 12px radius. Hover: #C7D2FE border, #FAFBFF bg. Accent cards: colored border + tinted bg (e.g., accent_bg for indigo)."),
+                ("Buttons", "Primary: indigo bg, white text, no border. Ghost: transparent bg, text2 color, border. Pill: rounded, accent border. All have hover states."),
+                ("Typography", "Segoe UI / system-ui font family. Sizes: 24px (page titles), 18px (section titles), 14px (card titles), 13px (body), 12px (secondary), 11px (captions), 10px (labels). Weights: 800 (titles), 700 (emphasis), 600 (labels), 500 (body)."),
+            ]),
+            ("\U0001f4b3  Carousel Pattern", "#EF4444", [
+                ("3D Carousel", "QGraphicsView + QGraphicsScene + QGraphicsObject. Continuous 60fps timer (16ms). FullViewportUpdate mode. Cards positioned using smoothstep easing."),
+                ("Card Rendering", "Custom QPainter in _draw_front (bank, brand, chip, utilization bar, network) and _draw_back (stripe, cardholder, number, expiry). Flip animation via QPropertyAnimation on flipScale."),
+                ("Interaction", "Drag to scroll, scroll wheel, Left/Right arrows, Space to flip nearest card. Click card to flip. Click 'VIEW CARD DETAILS' stripe to open details."),
+                ("Timer Management", "showEvent starts timer, hideEvent stops timer. Prevents dual-timer lag when switching between CC and DC tabs."),
+                ("Independence", "CC and DC carousels are completely independent. Zero imports between cards_tab.py and debit_cards_tab.py. Each has own CardItem, CarouselView, PreviewWidget classes."),
+            ]),
+            ("\U0001f4f1  Smart Scroll", "#10B981", [
+                ("Lazy Loading", "Transaction lists load in batches (configurable page size, default 150). Scroll trigger: load more when within 400px of bottom. Configurable in Settings > Preferences."),
+                ("Wealth Cards", "Cards pre-built in memory, then rendered in batches. Configurable page size (default 150). Scroll connects to _on_scroll for lazy loading."),
+                ("DC Transactions", "Smart initial load: 1 month first, expand if < 4 transactions (up to 6 months), then 3 months per batch on scroll. setUpdatesEnabled(False) during widget addition."),
+                ("Notes", "Lazy scroll with configurable page size (default 50) and scroll trigger (default 200px)."),
+                ("Audit", "Lazy scroll with configurable page size. Disconnects scroll signal when all items loaded."),
+            ]),
+            ("\u2328\ufe0f  Keyboard Shortcuts", "#D97706", [
+                ("General", "Tab: Move between fields. Enter: Submit form / activate button. Escape: Close dialog / cancel."),
+                ("Carousel", "Left/Right arrows: Scroll carousel. Space: Flip nearest card. Scroll wheel: Browse cards."),
+                ("Transaction Entry", "Enter on DEBIT button: Toggle DEBIT/CREDIT. Enter on Need/Want buttons: Activate that option. Enter on Add button: Submit. Enter blocked during transfer animation."),
+                ("SearchableCombo", "Type to filter dropdown. Up/Down arrows navigate filtered results. Enter selects highlighted item. Escape closes dropdown."),
+                ("Notes", "Tag input: Type + Enter to add tag. Up/Down arrows navigate suggestions. Enter selects suggestion. Escape hides suggestions."),
+            ]),
+            ("\U0001f9ed  Walkthrough", "#EC4899", [
+                ("Location", "Settings > User Guide > Walk Through. Full-page guided tour of the entire app."),
+                ("Structure", "11 topics with 33 sub-tabs. Left panel: accordion sidebar (one topic expanded at a time). Right panel: Live Prototype (Titanium gradient background) + How It Works explanation."),
+                ("Navigation", "Previous/Next buttons with step counter (Step 1 of 33). 'Go to this tab' button navigates to the actual tab in the app."),
+                ("Prototypes", "Real Qt widgets with sample data. Each prototype shows the actual UI components you'll see in the app, not screenshots."),
+            ]),
+        ]
+
+        for title, color, items in sections:
+            card = QFrame()
+            card.setStyleSheet(
+                f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-top:3px solid {color};border-radius:10px;}}"
+                f"QLabel{{background:transparent;border:none;}}")
+            cl = QVBoxLayout(card); cl.setContentsMargins(16, 14, 16, 14); cl.setSpacing(10)
+            cl.addWidget(self._guide_section_title(title, color))
+            for name, desc in items:
+                cl.addWidget(self._guide_item(name, desc, color))
+            il.addWidget(card)
+
+        il.addStretch()
+        scroll.setWidget(inner)
         l.addWidget(scroll, 1)
+        return w
+
+    # ══════════════════════════════════════════════
+    # USER GUIDE HELPERS
+    # ══════════════════════════════════════════════
+    @staticmethod
+    def _guide_section_title(text, color):
+        """Section title with colored left bar."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"font-size:15px;font-weight:800;color:{color};background:transparent;border:none;padding:2px 0;")
+        return lbl
+
+    @staticmethod
+    def _guide_item(name, desc, accent):
+        """Single item: bold name + description."""
+        w = QWidget(); w.setStyleSheet("background:transparent;border:none;")
+        lay = QVBoxLayout(w); lay.setContentsMargins(12, 0, 0, 0); lay.setSpacing(2)
+        nl = QLabel(name)
+        nl.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};background:transparent;border:none;")
+        lay.addWidget(nl)
+        dl = QLabel(desc)
+        dl.setStyleSheet(f"font-size:11px;color:{C['text3']};background:transparent;border:none;")
+        dl.setWordWrap(True)
+        lay.addWidget(dl)
         return w
 
     # ══════════════════════════════════════════════
