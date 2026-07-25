@@ -601,46 +601,6 @@ class SetupWizard(QWidget):
         self.google_link_btn_wizard.setEnabled(False)
         self.google_link_btn_wizard.setText("Opening browser...")
 
-<<<<<<< HEAD
-        # Show auth notification in bottom-left corner (modal)
-        auth_dlg = QDialog(self)
-        auth_dlg.setFixedSize(320, 100)
-        auth_dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        auth_dlg.setModal(True)
-        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; }")
-        al = QVBoxLayout(auth_dlg)
-        al.setContentsMargins(16, 12, 16, 12)
-        al.setSpacing(8)
-
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-        icon_lbl = QLabel("\U0001f510")
-        icon_lbl.setStyleSheet("font-size: 18px; background: transparent; border: none;")
-        top_row.addWidget(icon_lbl)
-        title_lbl = QLabel("Waiting for Google sign-in...")
-        title_lbl.setStyleSheet("color: #F1F5F9; font-size: 13px; font-weight: 700; background: transparent; border: none;")
-        top_row.addWidget(title_lbl, 1)
-        al.addLayout(top_row)
-
-        sub_lbl = QLabel("Complete the sign-in in your browser, then return here.")
-        sub_lbl.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 11px; background: transparent; border: none;")
-        al.addWidget(sub_lbl)
-
-        abort_btn = QPushButton("Abort")
-        abort_btn.setFixedHeight(26)
-        abort_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        abort_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
-            "border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; "
-            "padding: 2px 14px; font-size: 11px; font-weight: 600; }"
-            "QPushButton:hover { color: #EF4444; border-color: #EF4444; }")
-        al.addWidget(abort_btn, alignment=Qt.AlignRight)
-
-        # Position in bottom-left corner of screen
-        from PyQt5.QtWidgets import QApplication
-        screen = QApplication.primaryScreen().geometry()
-        auth_dlg.move(screen.x() + 20, screen.height() - 120)
-=======
         # Show modal auth dialog
         auth_dlg = QDialog(self)
         auth_dlg.setWindowTitle("Authenticating")
@@ -662,7 +622,6 @@ class SetupWizard(QWidget):
         auth_msg.setAlignment(Qt.AlignCenter)
         auth_msg.setWordWrap(True)
         al.addWidget(auth_msg)
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
 
         class _OAuthWorker(QThread):
             finished = pyqtSignal(str, str, str)
@@ -696,8 +655,6 @@ class SetupWizard(QWidget):
         worker = _OAuthWorker(cid, csec)
         worker.finished.connect(_on_done)
 
-<<<<<<< HEAD
-=======
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setStyleSheet(
             "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
@@ -705,18 +662,13 @@ class SetupWizard(QWidget):
             "padding: 6px 16px; font-size: 12px; }"
             "QPushButton:hover { color: rgba(255,255,255,0.8); }")
         cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
         def _cancel():
             worker.terminate()
             auth_dlg.reject()
             self.google_link_btn_wizard.setEnabled(True)
             self.google_link_btn_wizard.setText("\U0001f517  Sign in with Google")
-<<<<<<< HEAD
-        abort_btn.clicked.connect(_cancel)
-=======
         cancel_btn.clicked.connect(_cancel)
         al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
 
         worker.start()
         auth_dlg.exec_()
