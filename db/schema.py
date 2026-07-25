@@ -256,6 +256,7 @@ def run_migrations(db):
         ("health", "Health", "#EF4444", "safety", 0),
         ("education", "Education", "#06B6D4", "growth", 0),
         ("entertainment", "Entertainment", "#F472B6", "consumption", 0),
+        ("finance", "Finance", "#D97706", "growth", 0),
         ("transfer", "Transfer", "#6B7280", "internal_transfer", 0),
         ("other", "Other", "#9CA3AF", "nc", 0),
     ]:

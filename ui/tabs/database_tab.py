@@ -94,7 +94,7 @@ CAT_ICONS = {
     "food_dining": "🍔", "transport": "🚗", "shopping": "🛍️",
     "bills_utilities": "💡", "rent": "🏠", "salary": "💰",
     "investment": "📈", "health": "🏥", "education": "📚",
-    "entertainment": "🎬", "transfer": "🔄", "other": "📋",
+    "entertainment": "🎬", "finance": "💸", "transfer": "🔄", "other": "📋",
 }
 
 

@@ -5,12 +5,15 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QFormLayout, QDialog, QDialogButtonBox, QMessageBox,
                               QSpinBox, QCheckBox, QFrame, QScrollArea, QGridLayout,
                               QSizePolicy)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal as _Signal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
 from datetime import datetime
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.widgets.metric_card import mk_table
+from ui.uppercase import force_upper
+from ui.uppercase import force_upper
 
 
 # Default icons for categories (same as database_tab CAT_ICONS)
@@ -18,7 +21,8 @@ _CAT_ICONS = {
     "food_dining": "\U0001f354", "transport": "\U0001f697", "shopping": "\U0001f6cd\ufe0f",
     "bills_utilities": "\U0001f4a1", "rent": "\U0001f3e0", "salary": "\U0001f4b0",
     "investment": "\U0001f4c8", "health": "\U0001f3e5", "education": "\U0001f4da",
-    "entertainment": "\U0001f3ac", "transfer": "\U0001f504", "other": "\U0001f4cb",
+    "entertainment": "\U0001f3ac", "finance": "\U0001f4b8", "transfer": "\U0001f504", "other": "\U0001f4cb",
+    "entertainment": "\U0001f3ac", "finance": "\U0001f4b8", "transfer": "\U0001f504", "other": "\U0001f4cb",
 }
 
 # Icon palette for selection
@@ -1111,6 +1115,28 @@ class SettingsTab(QWidget):
     # ══════════════════════════════════════════════
     # USER GUIDE HELPERS
     # ══════════════════════════════════════════════
+    def go_to_walkthrough(self):
+        """Navigate to User Guide > Walk Through tab."""
+        # Switch to User Guide tab (index 5)
+        self.tabs.setCurrentIndex(5)
+        # Find the inner QTabWidget and switch to Walk Through (index 0)
+        user_guide_widget = self.tabs.widget(5)
+        if user_guide_widget:
+            inner_tabs = user_guide_widget.findChild(QTabWidget)
+            if inner_tabs:
+                inner_tabs.setCurrentIndex(0)
+
+    def go_to_walkthrough(self):
+        """Navigate to User Guide > Walk Through tab."""
+        # Switch to User Guide tab (index 5)
+        self.tabs.setCurrentIndex(5)
+        # Find the inner QTabWidget and switch to Walk Through (index 0)
+        user_guide_widget = self.tabs.widget(5)
+        if user_guide_widget:
+            inner_tabs = user_guide_widget.findChild(QTabWidget)
+            if inner_tabs:
+                inner_tabs.setCurrentIndex(0)
+
     @staticmethod
     def _guide_section_title(text, color):
         """Section title with colored left bar."""
@@ -1161,7 +1187,8 @@ class SettingsTab(QWidget):
 
     def _add_account(self):
         d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
-        n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
+        n = QLineEdit(); n.setPlaceholderText("Account name"); force_upper(n); f.addRow("Name:", n)
+        n = QLineEdit(); n.setPlaceholderText("Account name"); force_upper(n); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setPlaceholderText("4-char label"); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"]); f.addRow("Type:", t)
         ob = QDoubleSpinBox(); ob.setPrefix("\u20b9 "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
@@ -1191,12 +1218,12 @@ class SettingsTab(QWidget):
                 return
         d = QDialog(self); d.setWindowTitle("Edit Account"); d.setMinimumWidth(400)
         f = QFormLayout(d)
-        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); f.addRow("Name:", n)
+        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); force_upper(n); f.addRow("Name:", n)
+        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); force_upper(n); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setText(acct_data.get("short_label", "")); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"])
         idx = t.findText(acct_type)
         if idx >= 0: t.setCurrentIndex(idx)
-        t.setEnabled(False)
         f.addRow("Type:", t)
         ob = QDoubleSpinBox(); ob.setPrefix("\u20b9 "); ob.setRange(-99999999, 99999999)
         ob.setValue(acct_data.get("opening_balance", 0)); f.addRow("Opening Balance:", ob)
@@ -1206,6 +1233,7 @@ class SettingsTab(QWidget):
         if d.exec_() == QDialog.Accepted and n.text().strip():
             self.acct.update(aid, display_name=n.text().strip(),
                              short_label=(lb.text() or n.text()[:4]).upper(),
+                             account_type=t.currentText(),
                              opening_balance=ob.value())
             self.refresh()
 
@@ -1307,17 +1335,90 @@ class SettingsTab(QWidget):
         if existing: msg = f"Currently linked: {existing}\n\n" + msg
         reply = QMessageBox.question(self, "Link Google Account", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if reply != QMessageBox.Yes: return
-        status_dlg = QDialog(self); status_dlg.setWindowTitle("Linking..."); status_dlg.setMinimumWidth(320)
-        sl = QVBoxLayout(status_dlg); sl.setContentsMargins(24, 20, 24, 20)
-        sl_lbl = QLabel("Opening browser...\nPlease sign in with your Google account.")
-        sl_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;"); sl_lbl.setAlignment(Qt.AlignCenter); sl.addWidget(sl_lbl)
-        status_dlg.show()
-        from PyQt5.QtWidgets import QApplication; QApplication.processEvents()
-        email, refresh_token, error = start_oauth_flow(cid, csec); status_dlg.close()
-        if error: QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}"); return
-        self.sec.setup_google(cid, csec, email, refresh_token)
-        QMessageBox.information(self, "Linked", f"Google account '{email}' linked successfully.\n\nYou can now use 'Sign in with Google' on the login screen.")
-        self.refresh()
+
+        # Show auth notification in bottom-left corner (modal)
+        auth_dlg = QDialog(self)
+        auth_dlg.setFixedSize(320, 100)
+        auth_dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        auth_dlg.setModal(True)
+        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; }")
+        al = QVBoxLayout(auth_dlg)
+        al.setContentsMargins(16, 12, 16, 12)
+        al.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        icon_lbl = QLabel("\U0001f510")
+        icon_lbl.setStyleSheet("font-size: 18px; background: transparent; border: none;")
+        top_row.addWidget(icon_lbl)
+        title_lbl = QLabel("Waiting for Google sign-in...")
+        title_lbl.setStyleSheet("color: #F1F5F9; font-size: 13px; font-weight: 700; background: transparent; border: none;")
+        top_row.addWidget(title_lbl, 1)
+        al.addLayout(top_row)
+
+        sub_lbl = QLabel("Complete the sign-in in your browser, then return here.")
+        sub_lbl.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 11px; background: transparent; border: none;")
+        al.addWidget(sub_lbl)
+
+        abort_btn = QPushButton("Abort")
+        abort_btn.setFixedHeight(26)
+        abort_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        abort_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; "
+            "padding: 2px 14px; font-size: 11px; font-weight: 600; }"
+            "QPushButton:hover { color: #EF4444; border-color: #EF4444; }")
+        al.addWidget(abort_btn, alignment=Qt.AlignRight)
+
+        # Position in bottom-left corner of screen
+        from PyQt5.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        auth_dlg.move(screen.x() + 20, screen.height() - 120)
+
+        class _OAuthWorker(QThread):
+            finished = _Signal(str, str, str)
+
+            def __init__(self, _cid, _csec):
+                super().__init__()
+                self._cid = _cid
+                self._csec = _csec
+
+            def run(self):
+                try:
+                    _email, _token, _err = start_oauth_flow(self._cid, self._csec)
+                    self.finished.emit(_email or "", _token or "", _err or "")
+                except Exception as e:
+                    self.finished.emit("", "", str(e))
+
+        def _on_done(email, refresh_token, error):
+            auth_dlg.accept()
+            if error:
+                QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}"); return
+            self.sec.setup_google(cid, csec, email, refresh_token)
+            QMessageBox.information(self, "Linked", f"Google account '{email}' linked successfully.\n\nYou can now use 'Sign in with Google' on the login screen.")
+            self.refresh()
+
+        worker = _OAuthWorker(cid, csec)
+        worker.finished.connect(_on_done)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; "
+            "padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { color: rgba(255,255,255,0.8); }")
+        cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        def _cancel():
+            worker.terminate()
+            auth_dlg.reject()
+        abort_btn.clicked.connect(_cancel)
+        al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
+
+        worker.start()
+        auth_dlg.exec_()
+
+        if not worker.isFinished():
+            worker.terminate()
 
     def _unlink_google(self):
         email = self.sec.get_google_email()

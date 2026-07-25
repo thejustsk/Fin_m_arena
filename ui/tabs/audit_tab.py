@@ -1307,6 +1307,25 @@ class _AuditSubTab(QWidget):
                 old_val = tx.get(field)
                 if old_val != new_val:
                     self.audit.log(tid, field, old_val, new_val, reason="Bulk recategorize via Audit tab")
+            # Cascade to related transfer transaction (same transfer_group_id)
+            transfer_group = tx.get("transfer_group_id")
+            if transfer_group:
+                related = self.db.execute(
+                    "SELECT id FROM transactions WHERE transfer_group_id=? AND id!=?",
+                    (transfer_group, tid)).fetchone()
+                if related:
+                    rel_id = related["id"]
+                    # Skip tx_type — keep opposite type for transfer pair
+                    rel_updates = {k: v for k, v in updates.items() if k != "tx_type"}
+                    if rel_updates:
+                        self.tx.update(rel_id, **rel_updates)
+                        self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), rel_id))
+                        self.db.commit()
+                        self._mark_wealth_updated(rel_id)
+                        for field, new_val in rel_updates.items():
+                            old_val = tx.get(field)
+                            if old_val != new_val:
+                                self.audit.log(rel_id, field, old_val, new_val, reason="Transfer cascade from bulk update")
             # Keep UI responsive during bulk update
             if (i + 1) % 10 == 0:
                 upd_lbl.setText(f"\U0001f504  Updating {i+1}/{len(ids)}...")

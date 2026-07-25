@@ -14,6 +14,7 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.widgets.searchable_combo import SearchableCombo
 from ui.tabs.database_tab import _tx_card
+from ui.uppercase import force_upper
 
 PAYMENT_METHODS = [
     "PHONEPAY", "SLICE", "DIRECT TRANSFER", "CASH", "AMAZON PAY",
@@ -408,6 +409,7 @@ class TransactionEntryTab(QWidget):
             r3.addWidget(b); self.nw_btns.append(b)
         self.person_edit = QLineEdit(); self.person_edit.setPlaceholderText("Person / Org")
         self.person_edit.setMinimumHeight(42); self.person_edit.setStyleSheet(_input_css())
+        force_upper(self.person_edit)
         r3.addWidget(self.person_edit, 1)
         self.desc_edit = QLineEdit(); self.desc_edit.setPlaceholderText("Description")
         self.desc_edit.setMinimumHeight(42); self.desc_edit.setStyleSheet(_input_css())

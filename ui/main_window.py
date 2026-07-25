@@ -14,16 +14,22 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(1280, 800)
 
-        # Set app icon (💸 emoji as window icon — inherited by all dialogs)
-        from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont
-        from PyQt5.QtCore import QSize
-        _icon_px = QPixmap(64, 64)
-        _icon_px.fill(Qt.transparent)
-        _p = QPainter(_icon_px)
-        _p.setFont(QFont("Segoe UI Emoji", 36))
-        _p.drawText(_icon_px.rect(), Qt.AlignCenter, "\U0001f4b8")
-        _p.end()
-        self.setWindowIcon(QIcon(_icon_px))
+        # Set app icon from file (inherited by all dialogs)
+        from PyQt5.QtGui import QIcon
+        from pathlib import Path
+        _icon_path = Path(__file__).resolve().parent.parent / "app_icon.png"
+        if _icon_path.exists():
+            self.setWindowIcon(QIcon(str(_icon_path)))
+        else:
+            # Fallback to emoji icon
+            from PyQt5.QtGui import QPixmap, QPainter, QFont
+            _icon_px = QPixmap(64, 64)
+            _icon_px.fill(Qt.transparent)
+            _p = QPainter(_icon_px)
+            _p.setFont(QFont("Segoe UI Emoji", 36))
+            _p.drawText(_icon_px.rect(), Qt.AlignCenter, "\U0001f4b8")
+            _p.end()
+            self.setWindowIcon(QIcon(_icon_px))
         self._build()
 
     def _build(self):
