@@ -282,7 +282,6 @@ class LoginScreen(QWidget):
             self.sub.setText("Pull the cord to log in")
             return
 
-<<<<<<< HEAD
         # Show auth notification in bottom-left corner (modal, blocks app only)
         auth_dlg = QDialog(self)
         auth_dlg.setFixedSize(320, 100)
@@ -321,29 +320,6 @@ class LoginScreen(QWidget):
         from PyQt5.QtWidgets import QApplication
         screen = QApplication.primaryScreen().geometry()
         auth_dlg.move(screen.x() + 20, screen.height() - 120)
-=======
-        # Show modal auth dialog — blocks login screen, prevents "Not Responding"
-        auth_dlg = QDialog(self)
-        auth_dlg.setWindowTitle("Authenticating")
-        auth_dlg.setFixedSize(340, 160)
-        auth_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        auth_dlg.setModal(True)
-        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; }")
-        al = QVBoxLayout(auth_dlg)
-        al.setContentsMargins(24, 20, 24, 20)
-        al.setSpacing(10)
-
-        icon_lbl = QLabel("\U0001f510")
-        icon_lbl.setStyleSheet("font-size: 28px; background: transparent; border: none;")
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        al.addWidget(icon_lbl)
-
-        auth_msg = QLabel("Waiting for Google sign-in...\nPlease complete in your browser.")
-        auth_msg.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 13px; font-weight: 600; background: transparent; border: none;")
-        auth_msg.setAlignment(Qt.AlignCenter)
-        auth_msg.setWordWrap(True)
-        al.addWidget(auth_msg)
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
 
         # Run OAuth in background thread
         class _OAuthWorker(QThread):
@@ -386,29 +362,14 @@ class LoginScreen(QWidget):
         worker = _OAuthWorker(cid, csec)
         worker.finished.connect(_on_oauth_done)
 
-<<<<<<< HEAD
-=======
-        # Cancel button in dialog
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
-            "border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; "
-            "padding: 6px 16px; font-size: 12px; }"
-            "QPushButton:hover { color: rgba(255,255,255,0.8); }")
-        cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
         def _cancel_auth():
             worker.terminate()
             auth_dlg.reject()
             self.google_btn.setEnabled(True)
             self.sub.setText("Pull the cord to log in")
             self.err.setText("")
-<<<<<<< HEAD
         abort_btn.clicked.connect(_cancel_auth)
-=======
-        cancel_btn.clicked.connect(_cancel_auth)
         al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
->>>>>>> 9a6ea6b4e2ef63e5fc178c3d5d2314c2d6586933
 
         worker.start()
         auth_dlg.exec_()
