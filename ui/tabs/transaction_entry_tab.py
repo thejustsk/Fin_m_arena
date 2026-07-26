@@ -311,6 +311,7 @@ class TransactionEntryTab(QWidget):
         self.acct_repo = repos["accounts"]
         self.tx_repo = repos["transactions"]
         self.lu = repos["lookups"]
+        self.split_repo = repos.get("split")
         self._cat_pf = {}
         self._is_debit = True
         self._nw = 0
@@ -531,6 +532,9 @@ class TransactionEntryTab(QWidget):
                         padding:8px 16px;font-size:13px;font-weight:600;
                     }}
                 """)
+        if idx == 2:  # Gmail tab — no recent to load
+            return
+        self.recent_label.setText("Recent Transactions")
         self._load_recent("transfer" if idx == 1 else "regular")
 
     # ═══════════════════════════════════

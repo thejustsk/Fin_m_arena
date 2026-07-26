@@ -220,9 +220,63 @@ CREATE TABLE IF NOT EXISTS debit_cards (
     sort_order      INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS split_contacts (
+    contact_id      TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    phone           TEXT,
+    is_self         INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS split_groups (
+    group_id        TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    is_active       INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS split_group_members (
+    member_id       TEXT PRIMARY KEY,
+    group_id        TEXT NOT NULL REFERENCES split_groups,
+    contact_id      TEXT NOT NULL REFERENCES split_contacts,
+    created_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS split_expenses (
+    expense_id      TEXT PRIMARY KEY,
+    group_id        TEXT NOT NULL REFERENCES split_groups,
+    paid_by         TEXT NOT NULL REFERENCES split_contacts,
+    amount          REAL NOT NULL,
+    description     TEXT,
+    expense_date    TEXT NOT NULL,
+    split_type      TEXT DEFAULT 'EQUAL',
+    created_at      TEXT NOT NULL,
+    linked_txn_id   TEXT REFERENCES transactions
+);
+CREATE TABLE IF NOT EXISTS split_shares (
+    share_id        TEXT PRIMARY KEY,
+    expense_id      TEXT NOT NULL REFERENCES split_expenses,
+    contact_id      TEXT NOT NULL REFERENCES split_contacts,
+    share_amount    REAL NOT NULL,
+    paid_amount     REAL DEFAULT 0,
+    status          TEXT DEFAULT 'PENDING',
+    created_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS split_settlements (
+    settlement_id   TEXT PRIMARY KEY,
+    group_id        TEXT NOT NULL REFERENCES split_groups,
+    from_contact    TEXT NOT NULL REFERENCES split_contacts,
+    to_contact      TEXT NOT NULL REFERENCES split_contacts,
+    amount          REAL NOT NULL,
+    settle_date     TEXT NOT NULL,
+    method          TEXT DEFAULT 'CASH',
+    description     TEXT,
+    linked_txn_id   TEXT REFERENCES transactions,
+    created_at      TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(tx_date);
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
+CREATE INDEX IF NOT EXISTS idx_split_expense_group ON split_expenses(group_id);
+CREATE INDEX IF NOT EXISTS idx_split_share_expense ON split_shares(expense_id);
+CREATE INDEX IF NOT EXISTS idx_split_settlement_group ON split_settlements(group_id);
 """
 
 

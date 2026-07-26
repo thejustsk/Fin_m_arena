@@ -32,6 +32,7 @@ NAV_GROUPS = [
         ("transaction_entry", "📝", "Transactions"),
         ("database", "🗄️", "Database"),
         ("balances", "💰", "Balances"),
+        ("split", "🤝", "Split"),
     ]),
     ("CARDS", [
         ("cards", "💳", "Credit Cards"),

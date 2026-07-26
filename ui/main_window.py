@@ -51,7 +51,8 @@ class MainWindow(QMainWindow):
         self._tab_map = {
             "home": 0, "transaction_entry": 1, "database": 2,
             "audit": 3, "wealth": 4, "notes": 5, "cards": 6,
-            "debit_cards": 7, "balances": 8, "settings": 9, "gmail": 10
+            "debit_cards": 7, "balances": 8, "settings": 9, "gmail": 10,
+            "split": 11
         }
 
         # Import and create each tab
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         from ui.tabs.balances_tab import BalancesTab
         from ui.tabs.settings_tab import SettingsTab
         from ui.tabs.gmail_tab import GmailTab
+        from ui.tabs.split_tab import SplitTab
 
         tab_classes = [
             ("home", HomeTab),
@@ -79,6 +81,7 @@ class MainWindow(QMainWindow):
             ("balances", BalancesTab),
             ("settings", SettingsTab),
             ("gmail", GmailTab),
+            ("split", SplitTab),
         ]
         for key, cls in tab_classes:
             tab = cls(self.db, self.repos, self.services)

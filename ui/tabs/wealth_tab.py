@@ -4,7 +4,7 @@ from datetime import date, datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QDateEdit, QDoubleSpinBox, QSpinBox, QFrame, QScrollArea,
-    QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy
+    QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy, QCheckBox
 )
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
@@ -3904,7 +3904,599 @@ class NavFetchDialog(QDialog):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  WEALTH TAB — 5 top-level pages
+#  SPLIT EXPENSES PAGE (Wealth tab)
+# ══════════════════════════════════════════════════════════════════════════
+class SplitPage(QWidget):
+    """Split Expenses page for the Wealth tab.
+
+    Overview: balance matrix, settlement suggestions, recent expenses.
+    Entry: record expenses and settlements.
+    """
+
+    def __init__(self, repos, services, parent=None):
+        super().__init__(parent)
+        self.repos = repos
+        self.services = services
+        self.db = repos["accounts"].db
+        self.sr = repos.get("split")
+        self._wealth_tab_ref = None
+        self._loaded = False
+        self._members = []
+        self._share_spins = {}
+        self._self_id = self.sr.get_self_contact() if self.sr else None
+        self._build()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setSpacing(12)
+
+        hdr = QLabel("\U0001f91d  Split Expenses")
+        hdr.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        lay.addWidget(hdr)
+
+        # Group selector
+        grp_row = QHBoxLayout()
+        grp_row.setSpacing(8)
+        grp_lbl = QLabel("Group:")
+        grp_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
+        grp_row.addWidget(grp_lbl)
+        self.group_combo = QComboBox()
+        self.group_combo.setMinimumHeight(36)
+        self.group_combo.currentIndexChanged.connect(self._on_group_changed)
+        grp_row.addWidget(self.group_combo, 1)
+        new_grp_btn = QPushButton("+ New Group")
+        new_grp_btn.setMinimumHeight(36)
+        new_grp_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        new_grp_btn.clicked.connect(self._new_group)
+        grp_row.addWidget(new_grp_btn)
+        lay.addLayout(grp_row)
+
+        # Stats row
+        self.stats_row = QHBoxLayout()
+        lay.addLayout(self.stats_row)
+
+        # Sub-navigation
+        nav = QHBoxLayout()
+        nav.setSpacing(8)
+        self.btn_overview = QPushButton("\U0001f4ca Overview")
+        self.btn_expense = QPushButton("\U0001f4b0 Record Expense")
+        self.btn_settle = QPushButton("\U0001f4b8 Record Settlement")
+        self._sub_btns = [self.btn_overview, self.btn_expense, self.btn_settle]
+        for b in self._sub_btns:
+            b.setMinimumHeight(32)
+            b.setCursor(QCursor(Qt.PointingHandCursor))
+            nav.addWidget(b)
+        nav.addStretch()
+        lay.addLayout(nav)
+
+        self.sub_stack = QStackedWidget()
+        lay.addWidget(self.sub_stack, 1)
+        self.sub_stack.addWidget(self._build_overview())
+        self.sub_stack.addWidget(self._build_expense_form())
+        self.sub_stack.addWidget(self._build_settle_form())
+
+        self.btn_overview.clicked.connect(lambda: self._goto(0))
+        self.btn_expense.clicked.connect(lambda: self._goto(1))
+        self.btn_settle.clicked.connect(lambda: self._goto(2))
+        _switch_tabs(self._sub_btns, 0)
+        self.sub_stack.setCurrentIndex(0)
+
+    # ── Navigation ─────────────────────────────────────────────
+    def _goto(self, idx):
+        _switch_tabs(self._sub_btns, idx)
+        self.sub_stack.setCurrentIndex(idx)
+        if idx == 0:
+            self._refresh_overview()
+
+    def refresh(self):
+        self._load_groups()
+
+    def load_list(self, force=False):
+        if self._loaded and not force:
+            return
+        self._loaded = True
+        self._load_groups()
+
+    def _notify_data_changed(self):
+        if self._wealth_tab_ref:
+            self._wealth_tab_ref._notify_data_changed()
+
+    # ── Groups ─────────────────────────────────────────────────
+    def _load_groups(self):
+        if not self.sr:
+            return
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItem("-- Select Group --", None)
+        for g in self.sr.list_groups():
+            self.group_combo.addItem(g["name"], g["group_id"])
+        self.group_combo.blockSignals(False)
+        if self.group_combo.count() > 1:
+            self.group_combo.setCurrentIndex(1)
+
+    def _on_group_changed(self):
+        gid = self.group_combo.currentData()
+        if not gid:
+            self._members = []
+            self._clear_shares()
+            return
+        self._members = self.sr.list_group_members(gid)
+        self._populate_combos()
+        self._refresh_overview()
+        self._update_shares()
+
+    def _populate_combos(self):
+        for combo in (self.exp_paid_by, self.stl_from, self.stl_to):
+            combo.blockSignals(True)
+            combo.clear()
+            for m in self._members:
+                combo.addItem(m["name"], m["contact_id"])
+            combo.blockSignals(False)
+
+    # ── Overview page ──────────────────────────────────────────
+    def _build_overview(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        inner = QWidget()
+        inner.setStyleSheet("background:transparent;")
+        self.overview_lay = QVBoxLayout(inner)
+        self.overview_lay.setContentsMargins(0, 0, 0, 0)
+        self.overview_lay.setSpacing(10)
+        scroll.setWidget(inner)
+        lay.addWidget(scroll)
+        return page
+
+    def _refresh_overview(self):
+        gid = self.group_combo.currentData()
+        if not gid or not self.sr:
+            return
+        _clear_layout(self.overview_lay)
+
+        # Stats
+        summary = self.sr.get_group_summary(gid)
+        _clear_layout(self.stats_row)
+        self.stats_row.addWidget(
+            _metric_card("Total Expenses", fmt_money(summary["total_expenses"]), C["accent"]))
+        self.stats_row.addWidget(
+            _metric_card("Pending", fmt_money(summary["total_pending"]), C["amber"]))
+        self.stats_row.addWidget(
+            _metric_card("Settled", fmt_money(summary["total_settled"]), C["green"]))
+
+        # Balance matrix
+        bal_title = QLabel("\U0001f4ca Balance Matrix")
+        bal_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        self.overview_lay.addWidget(bal_title)
+
+        balances = self.sr.get_group_balances(gid)
+        contacts = {c["contact_id"]: c["name"] for c in self.sr.list_contacts()}
+
+        if balances:
+            for cid, balance in sorted(balances.items(), key=lambda x: -x[1]):
+                name = contacts.get(cid, "?")
+                card = QFrame()
+                if balance > 0.01:
+                    card.setStyleSheet(
+                        f"QFrame{{background:{_hex_rgba(C['green'], 0.08)};"
+                        f"border:1px solid {C['green']};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}")
+                    text = f"{name} is owed {fmt_money(balance)}"
+                    color = C["green"]
+                elif balance < -0.01:
+                    card.setStyleSheet(
+                        f"QFrame{{background:{_hex_rgba(C['red'], 0.08)};"
+                        f"border:1px solid {C['red']};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}")
+                    text = f"{name} owes {fmt_money(abs(balance))}"
+                    color = C["red"]
+                else:
+                    card.setStyleSheet(
+                        f"QFrame{{background:{C['surface']};"
+                        f"border:1px solid {C['border2']};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}")
+                    text = f"{name} \u2014 settled"
+                    color = C["text3"]
+                cl = QHBoxLayout(card)
+                cl.setContentsMargins(12, 8, 12, 8)
+                lbl = QLabel(text)
+                lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{color};")
+                cl.addWidget(lbl)
+                self.overview_lay.addWidget(card)
+
+        # Settlement suggestions
+        sug_title = QLabel("\U0001f4a1 Settlement Suggestions")
+        sug_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        self.overview_lay.addWidget(sug_title)
+
+        suggestions = self.sr.suggest_settlements(gid)
+        if suggestions:
+            for from_id, from_name, to_id, to_name, amount in suggestions:
+                card = QFrame()
+                card.setStyleSheet(
+                    f"QFrame{{background:{_hex_rgba(C['accent'], 0.06)};"
+                    f"border:1px solid {_hex_rgba(C['accent'], 0.2)};border-radius:8px;}}"
+                    f"QLabel{{background:transparent;border:none;}}")
+                cl = QHBoxLayout(card)
+                cl.setContentsMargins(12, 8, 12, 8)
+                lbl = QLabel(f"{from_name}  \u2192  {to_name}")
+                lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+                cl.addWidget(lbl, 1)
+                amt = QLabel(fmt_money(amount))
+                amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['accent']};")
+                cl.addWidget(amt)
+                self.overview_lay.addWidget(card)
+        else:
+            lbl = QLabel("All settled! No transfers needed.")
+            lbl.setStyleSheet(f"color:{C['green']};font-size:12px;font-weight:600;")
+            self.overview_lay.addWidget(lbl)
+
+        # Recent expenses
+        exp_title = QLabel("\U0001f4cb Recent Expenses")
+        exp_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        self.overview_lay.addWidget(exp_title)
+
+        expenses = self.sr.list_expenses(gid)
+        if expenses:
+            for exp in expenses[:10]:
+                card = QFrame()
+                card.setStyleSheet(
+                    f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;}}"
+                    f"QLabel{{background:transparent;border:none;}}")
+                cl = QHBoxLayout(card)
+                cl.setContentsMargins(12, 8, 12, 8)
+                desc = exp["description"] or "Expense"
+                info = QLabel(f"{desc} \u2014 paid by {exp['paid_by_name']}")
+                info.setStyleSheet(f"font-size:12px;color:{C['text']};font-weight:600;")
+                cl.addWidget(info, 1)
+                date_lbl = QLabel(exp["expense_date"])
+                date_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};")
+                cl.addWidget(date_lbl)
+                amt = QLabel(fmt_money(exp["amount"]))
+                amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['red']};")
+                cl.addWidget(amt)
+                self.overview_lay.addWidget(card)
+        else:
+            lbl = QLabel("No expenses yet.")
+            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+            self.overview_lay.addWidget(lbl)
+
+        self.overview_lay.addStretch()
+
+    # ── Expense form ───────────────────────────────────────────
+    def _build_expense_form(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(0, 8, 0, 0)
+        form.setSpacing(8)
+
+        self.exp_paid_by = QComboBox()
+        self.exp_paid_by.setMinimumHeight(36)
+
+        self.exp_amount = QDoubleSpinBox()
+        self.exp_amount.setRange(0, 99999999)
+        self.exp_amount.setPrefix("\u20b9 ")
+        self.exp_amount.setDecimals(2)
+        self.exp_amount.setMinimumHeight(36)
+        self.exp_amount.valueChanged.connect(self._on_exp_amount_changed)
+
+        self.exp_desc = QLineEdit()
+        self.exp_desc.setPlaceholderText("e.g. Dinner at KFC")
+        self.exp_desc.setMinimumHeight(36)
+
+        self.exp_date = QDateEdit(QDate.currentDate())
+        self.exp_date.setCalendarPopup(True)
+        self.exp_date.setMinimumHeight(36)
+
+        self.exp_account = QComboBox()
+        self.exp_account.setMinimumHeight(36)
+        for a in self.repos["accounts"].list_active():
+            self.exp_account.addItem(a["display_name"], a["account_id"])
+        self.exp_method = QComboBox()
+        self.exp_method.setMinimumHeight(36)
+        for m in self.repos["lookups"].list_methods():
+            self.exp_method.addItem(m["display_name"], m["method_id"])
+
+        self.exp_split_type = QComboBox()
+        self.exp_split_type.addItems(["Equal", "Custom"])
+        self.exp_split_type.setMinimumHeight(36)
+        self.exp_split_type.currentIndexChanged.connect(self._on_split_type_changed)
+
+        self.shares_container = QWidget()
+        self.shares_container.setStyleSheet("background:transparent;")
+        self.shares_lay = QVBoxLayout(self.shares_container)
+        self.shares_lay.setContentsMargins(0, 0, 0, 0)
+        self.shares_lay.setSpacing(4)
+
+        add_btn = QPushButton("\U0001f4b0  Add Expense")
+        add_btn.setObjectName("primary")
+        add_btn.setMinimumHeight(42)
+        add_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        add_btn.clicked.connect(self._add_expense)
+
+        form.addRow("Paid by *", self.exp_paid_by)
+        form.addRow("Amount *", self.exp_amount)
+        form.addRow("Description", self.exp_desc)
+        form.addRow("Date", self.exp_date)
+        form.addRow("Account *", self.exp_account)
+        form.addRow("Method *", self.exp_method)
+        form.addRow("Split Type", self.exp_split_type)
+        form.addRow("Shares", self.shares_container)
+        form.addRow("", add_btn)
+        return page
+
+    # ── Settlement form ────────────────────────────────────────
+    def _build_settle_form(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(0, 8, 0, 0)
+        form.setSpacing(8)
+
+        self.stl_from = QComboBox()
+        self.stl_from.setMinimumHeight(36)
+        self.stl_to = QComboBox()
+        self.stl_to.setMinimumHeight(36)
+
+        self.stl_amount = QDoubleSpinBox()
+        self.stl_amount.setRange(0, 99999999)
+        self.stl_amount.setPrefix("\u20b9 ")
+        self.stl_amount.setDecimals(2)
+        self.stl_amount.setMinimumHeight(36)
+
+        self.stl_method = QComboBox()
+        self.stl_method.addItems(
+            ["CASH", "PHONEPAY", "GOOGLE PAY", "BHIM UPI", "NETBANKING", "OTHER"])
+        self.stl_method.setMinimumHeight(36)
+
+        self.stl_account = QComboBox()
+        self.stl_account.setMinimumHeight(36)
+        for a in self.repos["accounts"].list_active():
+            self.stl_account.addItem(a["display_name"], a["account_id"])
+
+        settle_btn = QPushButton("\U0001f4b8  Record Settlement")
+        settle_btn.setMinimumHeight(42)
+        settle_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        settle_btn.clicked.connect(self._add_settlement)
+
+        form.addRow("From *", self.stl_from)
+        form.addRow("To *", self.stl_to)
+        form.addRow("Amount *", self.stl_amount)
+        form.addRow("Method", self.stl_method)
+        form.addRow("Account *", self.stl_account)
+        form.addRow("", settle_btn)
+        return page
+
+    # ── Shares logic ───────────────────────────────────────────
+    def _on_split_type_changed(self):
+        self._clear_shares()
+        if not self._members:
+            return
+        is_equal = self.exp_split_type.currentIndex() == 0
+        for m in self._members:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            lbl = QLabel(m["name"])
+            lbl.setStyleSheet(f"font-size:12px;color:{C['text']};")
+            lbl.setFixedWidth(100)
+            row.addWidget(lbl)
+            spin = QDoubleSpinBox()
+            spin.setRange(0, 99999999)
+            spin.setPrefix("\u20b9 ")
+            spin.setDecimals(2)
+            spin.setMinimumHeight(32)
+            spin.setEnabled(not is_equal)
+            self._share_spins[m["contact_id"]] = spin
+            row.addWidget(spin, 1)
+            w = QWidget()
+            w.setStyleSheet("background:transparent;")
+            w.setLayout(row)
+            self.shares_lay.addWidget(w)
+        if is_equal:
+            self._on_exp_amount_changed()
+
+    def _on_exp_amount_changed(self):
+        if self.exp_split_type.currentIndex() != 0:
+            return
+        amt = self.exp_amount.value()
+        n = len(self._members)
+        if n == 0:
+            return
+        share = round(amt / n, 2)
+        for i, m in enumerate(self._members):
+            spin = self._share_spins.get(m["contact_id"])
+            if spin:
+                if i == n - 1:
+                    spin.setValue(amt - share * (n - 1))
+                else:
+                    spin.setValue(share)
+
+    def _clear_shares(self):
+        while self.shares_lay.count():
+            itm = self.shares_lay.takeAt(0)
+            if itm.widget():
+                itm.widget().deleteLater()
+        self._share_spins.clear()
+
+    def _update_shares(self):
+        self._clear_shares()
+        self._on_split_type_changed()
+
+    # ── Actions ────────────────────────────────────────────────
+    def _add_expense(self):
+        gid = self.group_combo.currentData()
+        if not gid:
+            QMessageBox.warning(self, "No Group", "Select a group first.")
+            return
+        paid_by = self.exp_paid_by.currentData()
+        amount = self.exp_amount.value()
+        if not paid_by or amount <= 0:
+            QMessageBox.warning(self, "Missing", "Select who paid and enter an amount.")
+            return
+        shares = []
+        for m in self._members:
+            spin = self._share_spins.get(m["contact_id"])
+            if spin:
+                shares.append((m["contact_id"], spin.value()))
+        if not shares:
+            QMessageBox.warning(self, "No Shares", "No participants to split with.")
+            return
+        total_shares = sum(s[1] for s in shares)
+        if abs(total_shares - amount) > 0.01:
+            QMessageBox.warning(self, "Mismatch",
+                                f"Shares total ({total_shares}) doesn't match amount ({amount}).")
+            return
+        split_type = "EQUAL" if self.exp_split_type.currentIndex() == 0 else "EXACT"
+        # Create linked transaction ONLY if self paid (money left your account)
+        txn_id = None
+        tx_repo = self.repos.get("transactions")
+        if (paid_by == self._self_id and tx_repo
+                and self.exp_account.currentData() and self.exp_method.currentData()):
+            txn_id = tx_repo.create(
+                tx_date=self.exp_date.date().toString("yyyy-MM-dd"),
+                account_id=self.exp_account.currentData(),
+                pay_method=self.exp_method.currentData(),
+                tx_type="DEBIT", amount=amount,
+                person_org=self.exp_desc.text().strip() or "Split expense",
+                description=f"Split: {self.exp_desc.text().strip() or 'Expense'}",
+                transaction_kind="SPLIT", category="other",
+                neednwant=0, pf_category=None)
+        self.sr.create_expense(
+            gid, paid_by, amount,
+            self.exp_desc.text().strip() or None,
+            self.exp_date.date().toString("yyyy-MM-dd"),
+            split_type, shares, linked_txn_id=txn_id)
+        self.exp_amount.setValue(0)
+        self.exp_desc.clear()
+        self._refresh_overview()
+        self._notify_data_changed()
+        QMessageBox.information(self, "Done", f"Expense of {fmt_money(amount)} recorded.")
+
+    def _add_settlement(self):
+        gid = self.group_combo.currentData()
+        if not gid:
+            QMessageBox.warning(self, "No Group", "Select a group first.")
+            return
+        from_id = self.stl_from.currentData()
+        to_id = self.stl_to.currentData()
+        amount = self.stl_amount.value()
+        if not from_id or not to_id or amount <= 0:
+            QMessageBox.warning(self, "Missing", "Select from, to, and amount.")
+            return
+        if from_id == to_id:
+            QMessageBox.warning(self, "Same", "From and To must be different.")
+            return
+        # Create linked transaction ONLY if self is involved
+        txn_id = None
+        tx_repo = self.repos.get("transactions")
+        settle_date = date.today().isoformat()
+        self_involved = (from_id == self._self_id or to_id == self._self_id)
+        if self_involved and tx_repo and self.stl_account.currentData():
+            # DEBIT if self is paying, CREDIT if self is receiving
+            tx_type = "DEBIT" if from_id == self._self_id else "CREDIT"
+            txn_id = tx_repo.create(
+                tx_date=settle_date,
+                account_id=self.stl_account.currentData(),
+                pay_method=self.stl_method.currentText(),
+                tx_type=tx_type, amount=amount,
+                person_org=f"{self.stl_from.currentText()} \u2192 {self.stl_to.currentText()}",
+                description="Split settlement",
+                transaction_kind="SPLIT_SETTLEMENT", category="finance",
+                neednwant=0, pf_category=None)
+        self.sr.create_settlement(
+            gid, from_id, to_id, amount,
+            settle_date, self.stl_method.currentText(), linked_txn_id=txn_id)
+        self.stl_amount.setValue(0)
+        self._refresh_overview()
+        self._notify_data_changed()
+        QMessageBox.information(self, "Done", f"Settlement of {fmt_money(amount)} recorded.")
+
+    # ── New group ──────────────────────────────────────────────
+    def _new_group(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Split Group")
+        dlg.setMinimumWidth(400)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("Group name (e.g. Goa Trip)")
+        name_input.setMinimumHeight(38)
+        lay.addWidget(name_input)
+
+        lay.addWidget(QLabel("Members:"))
+        contacts = self.sr.list_contacts()
+        checks = []
+        for c in contacts:
+            if c["is_self"]:
+                continue
+            cb = QCheckBox(c["name"])
+            cb.setChecked(True)
+            cb.contact_id = c["contact_id"]
+            lay.addWidget(cb)
+            checks.append(cb)
+
+        new_row = QHBoxLayout()
+        new_row.setSpacing(6)
+        new_name = QLineEdit()
+        new_name.setPlaceholderText("New member name")
+        new_name.setMinimumHeight(36)
+        new_row.addWidget(new_name, 1)
+        add_btn = QPushButton("+ Add")
+        add_btn.setMinimumHeight(36)
+
+        def _add_contact():
+            nm = new_name.text().strip()
+            if not nm:
+                return
+            cid = self.sr.create_contact(nm)
+            cb = QCheckBox(nm)
+            cb.setChecked(True)
+            cb.contact_id = cid
+            lay.insertWidget(lay.count() - 2, cb)
+            checks.append(cb)
+            new_name.clear()
+
+        add_btn.clicked.connect(_add_contact)
+        new_row.addWidget(add_btn)
+        lay.addLayout(new_row)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel)
+        ok = QPushButton("Create Group")
+        ok.clicked.connect(dlg.accept)
+        btn_row.addWidget(ok)
+        lay.addLayout(btn_row)
+
+        if dlg.exec_() == QDialog.Accepted:
+            gname = name_input.text().strip()
+            if not gname:
+                QMessageBox.warning(self, "Missing", "Enter a group name.")
+                return
+            self_id = self.sr.get_self_contact()
+            member_ids = [self_id]
+            for cb in checks:
+                if cb.isChecked():
+                    member_ids.append(cb.contact_id)
+            self.sr.create_group(gname, member_ids)
+            self._load_groups()
+            for i in range(self.group_combo.count()):
+                if self.group_combo.itemText(i) == gname:
+                    self.group_combo.setCurrentIndex(i)
+                    break
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  WEALTH TAB — 6 top-level pages (added Split)
 # ══════════════════════════════════════════════════════════════════════════
 class WealthTab(QWidget):
     def __init__(self, db, repos, services, parent=None):

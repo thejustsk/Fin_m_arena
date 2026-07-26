@@ -16,6 +16,7 @@ from db.repositories import (
     LoansRepo, BorrowedRepo, DepositsRepo, FDRepo, MFRepo,
     NotesRepo, CardsRepo, DebitCardsRepo, AuditRepo, BudgetsRepo, RecurringRepo
 )
+from db.repositories.split_repo import SplitRepo
 from services.balance_service import BalanceService
 from services.security_service import SecurityService
 from services.audit_service import AuditService
@@ -47,7 +48,7 @@ def main():
         "borrowed": BorrowedRepo(db), "deposits": DepositsRepo(db),
         "fd": FDRepo(db), "mf": MFRepo(db), "notes": NotesRepo(db),
         "cards": CardsRepo(db), "debit_cards": DebitCardsRepo(db), "budgets": BudgetsRepo(db),
-        "recurring": RecurringRepo(db),
+        "recurring": RecurringRepo(db), "split": SplitRepo(db),
     }
     services = {
         "balance": BalanceService(repos["accounts"]),
