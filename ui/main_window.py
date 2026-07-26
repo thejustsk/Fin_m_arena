@@ -235,4 +235,19 @@ class MainWindow(QMainWindow):
             self.db.backup()
         except:
             pass
+        # Auto-backup to Google Drive if frequency is "on_close"
+        try:
+            row = self.db.execute("SELECT value FROM preferences WHERE key='gdrive_backup_freq'").fetchone()
+            if row and row["value"] == "on_close":
+                from services.drive_backup import backup_to_drive
+                from datetime import datetime
+                ret_row = self.db.execute("SELECT value FROM preferences WHERE key='gdrive_backup_retention'").fetchone()
+                retention = int(ret_row["value"]) if ret_row else 14
+                success, _ = backup_to_drive(retention=retention)
+                if success:
+                    self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
+                                    ("gdrive_last_backup", datetime.now().isoformat()))
+                    self.db.commit()
+        except:
+            pass  # Non-critical — don't block app close
         event.accept()

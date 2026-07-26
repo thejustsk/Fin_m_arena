@@ -1467,10 +1467,11 @@ class LoansGivePage(_FunctionPage):
                 case_parts.append("WHEN loan_id=? THEN ?")
                 case_ids.extend([l["loan_id"], new_status])
         if case_parts:
-            phs = ", ".join(case_parts)
+            phs = " ".join(case_parts)
+            where_ids = [case_ids[i] for i in range(0, len(case_ids), 2)]
             self.db.execute(
-                f"UPDATE loans SET status=CASE {phs} ELSE status END WHERE loan_id IN ({','.join(['?']*len(case_ids))})",
-                case_ids + case_ids)
+                f"UPDATE loans SET status=CASE {phs} ELSE status END WHERE loan_id IN ({','.join(['?']*len(where_ids))})",
+                case_ids + where_ids)
             self.db.commit()
         # Store for _render_list (no second list_loans call)
         self._list_data = loans

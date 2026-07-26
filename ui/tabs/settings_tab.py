@@ -11,6 +11,7 @@ from datetime import datetime
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.widgets.metric_card import mk_table
+from ui.uppercase import force_upper
 
 
 # Default icons for categories (same as database_tab CAT_ICONS)
@@ -18,7 +19,7 @@ _CAT_ICONS = {
     "food_dining": "\U0001f354", "transport": "\U0001f697", "shopping": "\U0001f6cd\ufe0f",
     "bills_utilities": "\U0001f4a1", "rent": "\U0001f3e0", "salary": "\U0001f4b0",
     "investment": "\U0001f4c8", "health": "\U0001f3e5", "education": "\U0001f4da",
-    "entertainment": "\U0001f3ac", "transfer": "\U0001f504", "other": "\U0001f4cb",
+    "entertainment": "\U0001f3ac", "finance": "\U0001f4b8", "transfer": "\U0001f504", "other": "\U0001f4cb",
 }
 
 # Icon palette for selection
@@ -786,11 +787,13 @@ class SettingsTab(QWidget):
     def _data_mgmt_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(16)
 
+        # ── Local Backup ──
         bk_frame = QFrame()
         bk_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         bf = QVBoxLayout(bk_frame); bf.setContentsMargins(16,16,16,16); bf.setSpacing(10)
-        bk_title = QLabel("\U0001f4e6  Backup")
-        bk_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};"); bf.addWidget(bk_title)
+        bf.addWidget(QLabel("\U0001f4e6  Local Backup").__class__(
+            "\U0001f4e6  Local Backup"))
+        bf.itemAt(0).widget().setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         self.bk_info = QLabel()
         self.bk_info.setStyleSheet(f"font-size:12px;color:{C['text2']};")
         self.bk_info.setWordWrap(True); bf.addWidget(self.bk_info)
@@ -798,6 +801,57 @@ class SettingsTab(QWidget):
         bb.clicked.connect(self._do_backup); bf.addWidget(bb)
         l.addWidget(bk_frame)
 
+        # ── Google Drive Backup ──
+        gdrive_frame = QFrame()
+        gdrive_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        gf = QVBoxLayout(gdrive_frame); gf.setContentsMargins(16,16,16,16); gf.setSpacing(10)
+        gf_title = QLabel("\U0001f4c2  Google Drive Backup")
+        gf_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
+        gf.addWidget(gf_title)
+
+        # Row 1: Auto-backup + Keep last + Save
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(8)
+        settings_row.addWidget(QLabel("Auto-backup:"))
+        self.gdrive_freq = QComboBox()
+        self.gdrive_freq.addItems(["Manual Only", "On App Close", "Daily (First Launch)", "Weekly"])
+        self.gdrive_freq.setFixedHeight(32)
+        settings_row.addWidget(self.gdrive_freq)
+        settings_row.addSpacing(8)
+        settings_row.addWidget(QLabel("Keep last:"))
+        self.gdrive_retention = QSpinBox()
+        self.gdrive_retention.setRange(1, 50)
+        self.gdrive_retention.setValue(14)
+        self.gdrive_retention.setFixedHeight(32)
+        self.gdrive_retention.setFixedWidth(60)
+        settings_row.addWidget(self.gdrive_retention)
+        settings_row.addWidget(QLabel("backups"))
+        settings_row.addSpacing(8)
+        save_freq_btn = QPushButton("Save")
+        save_freq_btn.setFixedHeight(32)
+        save_freq_btn.clicked.connect(self._save_gdrive_freq)
+        settings_row.addWidget(save_freq_btn)
+        settings_row.addStretch()
+        gf.addLayout(settings_row)
+
+        # Row 2: Upload Now + Status info
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        self.gdrive_btn = QPushButton("\U0001f4c2  Upload Now")
+        self.gdrive_btn.setMinimumHeight(34)
+        self.gdrive_btn.clicked.connect(self._do_gdrive_backup)
+        action_row.addWidget(self.gdrive_btn)
+        self.gdrive_status = QLabel("")
+        self.gdrive_status.setStyleSheet(f"font-size:11px;color:{C['text3']};")
+        action_row.addWidget(self.gdrive_status, 1)
+        gf.addLayout(action_row)
+
+        gf_desc = QLabel("Versioned backups with timestamps. Uploads finance.db to your Google Drive.")
+        gf_desc.setStyleSheet(f"font-size:10px;color:{C['text3']};font-style:italic;")
+        gf_desc.setWordWrap(True); gf.addWidget(gf_desc)
+        l.addWidget(gdrive_frame)
+
+        # ── Storage Info ──
         st_frame = QFrame()
         st_frame.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         sf = QVBoxLayout(st_frame); sf.setContentsMargins(16,16,16,16); sf.setSpacing(10)
@@ -839,6 +893,77 @@ class SettingsTab(QWidget):
         self.db.backup()
         QMessageBox.information(self, "Done", "Backup created.")
         self._refresh_backup_info()
+
+    def _save_gdrive_freq(self):
+        """Save Google Drive backup frequency preference."""
+        freq_map = {0: "manual", 1: "on_close", 2: "daily", 3: "weekly"}
+        freq = freq_map.get(self.gdrive_freq.currentIndex(), "manual")
+        self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)", ("gdrive_backup_freq", freq))
+        self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)", ("gdrive_backup_retention", str(self.gdrive_retention.value())))
+        self.db.commit()
+
+    def _do_gdrive_backup(self):
+        """Backup database to Google Drive."""
+        if not self.sec.is_google_linked():
+            QMessageBox.warning(self, "Not Linked",
+                "Please link your Google account first.\n\n"
+                "Go to Settings > Security > Link Google Account.\n"
+                "The Drive scope will be requested during linking.")
+            return
+
+        # Check for existing backups before uploading
+        from services.drive_backup import check_existing_backups
+        existing = check_existing_backups()
+
+        if existing["found"]:
+            reply = QMessageBox.question(self, "Existing Backups Found",
+                f"Found {existing['count']} existing backup(s) in your Google Drive.\n\n"
+                f"Latest: {existing['last_name']} ({existing['last_size']})\n\n"
+                f"Do you want to download the latest backup to check older data first?\n\n"
+                f"Click 'Upload Anyway' to create a new backup.",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Yes)
+
+            if reply == QMessageBox.Yes:
+                QMessageBox.information(self, "Download from Drive",
+                    f"Go to Google Drive > 'Finance Manager Backups' folder.\n\n"
+                    f"Download: {existing['last_name']}\n"
+                    f"Rename it to: finance.db\n"
+                    f"Place it in: finance_data/ folder next to the .exe\n\n"
+                    f"After downloading, restart the app to load the restored data.")
+                return
+            elif reply == QMessageBox.Cancel:
+                return
+
+        self.gdrive_btn.setEnabled(False)
+        self.gdrive_btn.setText("Uploading...")
+        self.gdrive_status.setText("Connecting to Google Drive...")
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        from services.drive_backup import backup_to_drive
+        success, msg = backup_to_drive()
+
+        self.gdrive_btn.setEnabled(True)
+        self.gdrive_btn.setText("\U0001f4c2  Upload Now")
+
+        if success:
+            self.gdrive_status.setText(f"\u2713 {msg}")
+            self.gdrive_status.setStyleSheet(f"font-size:11px;color:{C['green']};font-weight:600;")
+            QMessageBox.information(self, "Backup Complete",
+                f"Database uploaded to Google Drive.\n\n"
+                f"Folder: 'Finance Manager Backups'\n"
+                f"{msg}")
+        else:
+            self.gdrive_status.setText(f"\u2717 {msg}")
+            self.gdrive_status.setStyleSheet(f"font-size:11px;color:{C['red']};font-weight:600;")
+            if "not linked" in msg.lower() or "token expired" in msg.lower():
+                QMessageBox.warning(self, "Re-link Required",
+                    "Your Google account needs to be re-linked with Drive access.\n\n"
+                    "Go to Settings > Security > Unlink, then Link again.\n"
+                    "This grants the app permission to upload backups.")
+            else:
+                QMessageBox.warning(self, "Backup Failed", msg)
 
     def _refresh_backup_info(self):
         if not hasattr(self, 'bk_info'): return
@@ -1111,6 +1236,17 @@ class SettingsTab(QWidget):
     # ══════════════════════════════════════════════
     # USER GUIDE HELPERS
     # ══════════════════════════════════════════════
+    def go_to_walkthrough(self):
+        """Navigate to User Guide > Walk Through tab."""
+        # Switch to User Guide tab (index 5)
+        self.tabs.setCurrentIndex(5)
+        # Find the inner QTabWidget and switch to Walk Through (index 0)
+        user_guide_widget = self.tabs.widget(5)
+        if user_guide_widget:
+            inner_tabs = user_guide_widget.findChild(QTabWidget)
+            if inner_tabs:
+                inner_tabs.setCurrentIndex(0)
+
     @staticmethod
     def _guide_section_title(text, color):
         """Section title with colored left bar."""
@@ -1161,7 +1297,7 @@ class SettingsTab(QWidget):
 
     def _add_account(self):
         d = QDialog(self); d.setWindowTitle("Add Account"); f = QFormLayout(d)
-        n = QLineEdit(); n.setPlaceholderText("Account name"); f.addRow("Name:", n)
+        n = QLineEdit(); n.setPlaceholderText("Account name"); force_upper(n); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setPlaceholderText("4-char label"); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"]); f.addRow("Type:", t)
         ob = QDoubleSpinBox(); ob.setPrefix("\u20b9 "); ob.setRange(-99999999, 99999999); f.addRow("Opening Balance:", ob)
@@ -1191,7 +1327,7 @@ class SettingsTab(QWidget):
                 return
         d = QDialog(self); d.setWindowTitle("Edit Account"); d.setMinimumWidth(400)
         f = QFormLayout(d)
-        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); f.addRow("Name:", n)
+        n = QLineEdit(); n.setText(acct_data.get("display_name", "")); force_upper(n); f.addRow("Name:", n)
         lb = QLineEdit(); lb.setText(acct_data.get("short_label", "")); lb.setMaxLength(4); f.addRow("Label:", lb)
         t = QComboBox(); t.addItems(["CURRENT", "CASH", "WALLET"])
         idx = t.findText(acct_type)
@@ -1307,17 +1443,112 @@ class SettingsTab(QWidget):
         if existing: msg = f"Currently linked: {existing}\n\n" + msg
         reply = QMessageBox.question(self, "Link Google Account", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if reply != QMessageBox.Yes: return
-        status_dlg = QDialog(self); status_dlg.setWindowTitle("Linking..."); status_dlg.setMinimumWidth(320)
-        sl = QVBoxLayout(status_dlg); sl.setContentsMargins(24, 20, 24, 20)
-        sl_lbl = QLabel("Opening browser...\nPlease sign in with your Google account.")
-        sl_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;"); sl_lbl.setAlignment(Qt.AlignCenter); sl.addWidget(sl_lbl)
-        status_dlg.show()
-        from PyQt5.QtWidgets import QApplication; QApplication.processEvents()
-        email, refresh_token, error = start_oauth_flow(cid, csec); status_dlg.close()
-        if error: QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}"); return
-        self.sec.setup_google(cid, csec, email, refresh_token)
-        QMessageBox.information(self, "Linked", f"Google account '{email}' linked successfully.\n\nYou can now use 'Sign in with Google' on the login screen.")
-        self.refresh()
+
+        # Show auth notification in bottom-left corner (modal)
+        auth_dlg = QDialog(self)
+        auth_dlg.setFixedSize(320, 100)
+        auth_dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        auth_dlg.setModal(True)
+        auth_dlg.setStyleSheet("QDialog { background: #1E293B; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; }")
+        al = QVBoxLayout(auth_dlg)
+        al.setContentsMargins(16, 12, 16, 12)
+        al.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        icon_lbl = QLabel("\U0001f510")
+        icon_lbl.setStyleSheet("font-size: 18px; background: transparent; border: none;")
+        top_row.addWidget(icon_lbl)
+        title_lbl = QLabel("Waiting for Google sign-in...")
+        title_lbl.setStyleSheet("color: #F1F5F9; font-size: 13px; font-weight: 700; background: transparent; border: none;")
+        top_row.addWidget(title_lbl, 1)
+        al.addLayout(top_row)
+
+        sub_lbl = QLabel("Complete the sign-in in your browser, then return here.")
+        sub_lbl.setStyleSheet("color: rgba(255,255,255,0.5); font-size: 11px; background: transparent; border: none;")
+        al.addWidget(sub_lbl)
+
+        abort_btn = QPushButton("Abort")
+        abort_btn.setFixedHeight(26)
+        abort_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        abort_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; "
+            "padding: 2px 14px; font-size: 11px; font-weight: 600; }"
+            "QPushButton:hover { color: #EF4444; border-color: #EF4444; }")
+        al.addWidget(abort_btn, alignment=Qt.AlignRight)
+
+        # Position in bottom-left corner of screen
+        from PyQt5.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        auth_dlg.move(screen.x() + 20, screen.height() - 120)
+
+        class _OAuthWorker(QThread):
+            finished = _Signal(str, str, str)
+
+            def __init__(self, _cid, _csec):
+                super().__init__()
+                self._cid = _cid
+                self._csec = _csec
+
+            def run(self):
+                try:
+                    _email, _token, _err = start_oauth_flow(self._cid, self._csec)
+                    self.finished.emit(_email or "", _token or "", _err or "")
+                except Exception as e:
+                    self.finished.emit("", "", str(e))
+
+        def _on_done(email, refresh_token, error):
+            auth_dlg.accept()
+            if error:
+                QMessageBox.warning(self, "Failed", f"Google linking failed:\n{error}"); return
+            self.sec.setup_google(cid, csec, email, refresh_token)
+            QMessageBox.information(self, "Linked", f"Google account '{email}' linked successfully.\n\nYou can now use 'Sign in with Google' on the login screen.")
+            self.refresh()
+
+            # Check for existing backups in Drive
+            try:
+                from services.drive_backup import check_existing_backups
+                existing = check_existing_backups()
+                if existing["found"]:
+                    reply = QMessageBox.question(self, "\U0001f4c2  Existing Backups Found",
+                        f"Found {existing['count']} existing backup(s) in your Google Drive.\n\n"
+                        f"Latest: {existing['last_name']} ({existing['last_size']})\n\n"
+                        f"Do you want to download the latest backup to check older data?\n\n"
+                        f"Go to Google Drive > 'Finance Manager Backups' folder.\n"
+                        f"Download the file, rename to finance.db, place in finance_data/",
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                    if reply == QMessageBox.Yes:
+                        QMessageBox.information(self, "Download from Drive",
+                            f"Go to Google Drive > 'Finance Manager Backups' folder.\n\n"
+                            f"Download: {existing['last_name']}\n"
+                            f"Rename it to: finance.db\n"
+                            f"Place it in: finance_data/ folder next to the .exe\n\n"
+                            f"After downloading, restart the app to load the restored data.")
+            except Exception:
+                pass  # Non-critical
+
+        worker = _OAuthWorker(cid, csec)
+        worker.finished.connect(_on_done)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: rgba(255,255,255,0.5); "
+            "border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; "
+            "padding: 6px 16px; font-size: 12px; }"
+            "QPushButton:hover { color: rgba(255,255,255,0.8); }")
+        cancel_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        def _cancel():
+            worker.terminate()
+            auth_dlg.reject()
+        abort_btn.clicked.connect(_cancel)
+        al.addWidget(cancel_btn, alignment=Qt.AlignCenter)
+
+        worker.start()
+        auth_dlg.exec_()
+
+        if not worker.isFinished():
+            worker.terminate()
 
     def _unlink_google(self):
         email = self.sec.get_google_email()
@@ -1430,3 +1661,24 @@ class SettingsTab(QWidget):
 
         # Backup info
         self._refresh_backup_info()
+
+        # Google Drive backup settings
+        if hasattr(self, 'gdrive_freq'):
+            freq = self._get_pref('gdrive_backup_freq', 'manual')
+            freq_map = {"manual": 0, "on_close": 1, "daily": 2, "weekly": 3}
+            self.gdrive_freq.setCurrentIndex(freq_map.get(freq, 0))
+            self.gdrive_retention.setValue(self._get_pref('gdrive_backup_retention', 14))
+            self.gdrive_status.setText("Checking...")
+            # Run in background to avoid blocking UI
+            from PyQt5.QtCore import QThread
+            class _StatusWorker(QThread):
+                finished = _Signal(dict)
+                def run(self_):
+                    from services.drive_backup import get_drive_backup_status
+                    self_.finished.emit(get_drive_backup_status())
+            def _on_status(info):
+                if hasattr(self, 'gdrive_status'):
+                    self.gdrive_status.setText(info.get("status", "Not connected"))
+            self._status_worker = _StatusWorker()
+            self._status_worker.finished.connect(_on_status)
+            self._status_worker.start()

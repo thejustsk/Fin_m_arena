@@ -28,7 +28,7 @@ except ImportError:
 _AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
-_SCOPES = "openid email profile"
+_SCOPES = "openid email profile https://www.googleapis.com/auth/drive.file"
 
 
 def get_client_id():

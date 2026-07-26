@@ -59,6 +59,42 @@ def main():
     from ui.theme import QSS
     app.setStyleSheet(QSS)
 
+    # ── Check if auto-backup should run on launch (daily/weekly) ──
+    def _check_auto_backup():
+        try:
+            from services.drive_backup import backup_to_drive
+            from datetime import datetime
+            row = db.execute("SELECT value FROM preferences WHERE key='gdrive_backup_freq'").fetchone()
+            freq = row["value"] if row else "manual"
+            if freq in ("daily", "weekly"):
+                # Check last backup time
+                last_row = db.execute("SELECT value FROM preferences WHERE key='gdrive_last_backup'").fetchone()
+                last_str = last_row["value"] if last_row else ""
+                now = datetime.now()
+                should_backup = False
+                if not last_str:
+                    should_backup = True
+                else:
+                    try:
+                        last = datetime.fromisoformat(last_str)
+                        if freq == "daily" and (now - last).days >= 1:
+                            should_backup = True
+                        elif freq == "weekly" and (now - last).days >= 7:
+                            should_backup = True
+                    except Exception:
+                        should_backup = True
+                if should_backup:
+                    retention_row = db.execute("SELECT value FROM preferences WHERE key='gdrive_backup_retention'").fetchone()
+                    retention = int(retention_row["value"]) if retention_row else 14
+                    success, msg = backup_to_drive(retention=retention)
+                    if success:
+                        db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)", ("gdrive_last_backup", now.isoformat()))
+                        db.commit()
+        except Exception:
+            pass  # Non-critical — don't block app startup
+
+    _check_auto_backup()
+
     def show_main_window(show_walkthrough_prompt=False):
         from ui.loading_dialog import LoadingDialog
         from PyQt5.QtCore import QTimer
