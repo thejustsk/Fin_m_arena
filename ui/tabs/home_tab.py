@@ -297,6 +297,7 @@ class HomeTab(QWidget):
             ("💰", "Balances", "balances", C['green']),
             ("💳", "Credit Cards", "cards", C['red']),
             ("💳", "Debit Cards", "debit_cards", "#F59E0B"),
+            ("🤝", "Split", "split", "#7C3AED"),
             ("🔍", "Audit", "audit", C['amber']),
             ("📈", "Wealth", "wealth", "#10B981"),
             ("📋", "Notes", "notes", "#EC4899"),

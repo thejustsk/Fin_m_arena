@@ -426,8 +426,10 @@ class SplitTab(QWidget):
         if items:
             for kind, dt, data in items[:20]:
                 card = QFrame()
+                card.setCursor(QCursor(Qt.PointingHandCursor))
                 card.setStyleSheet(
                     f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:8px;}}"
+                    f"QFrame:hover{{border-color:{C['accent']};}}"
                     f"QLabel{{background:transparent;border:none;}}")
                 cl = QHBoxLayout(card)
                 cl.setContentsMargins(12, 8, 12, 8)
@@ -442,13 +444,14 @@ class SplitTab(QWidget):
                     t1 = QLabel(f"{desc} \u2014 paid by {data['paid_by_name']}")
                     t1.setStyleSheet(f"color:{C['text']};font-size:12px;font-weight:800;")
                     info_v.addWidget(t1)
-                    t2 = QLabel(data["expense_date"])
+                    t2 = QLabel(f"{data['expense_date']}  \u00b7  Click to edit")
                     t2.setStyleSheet(f"color:{C['text3']};font-size:11px;")
                     info_v.addWidget(t2)
                     cl.addLayout(info_v, 1)
                     amt = QLabel(fmt_money(data["amount"]))
                     amt.setStyleSheet(f"color:{C['red']};font-size:14px;font-weight:800;")
                     cl.addWidget(amt)
+                    card.mousePressEvent = lambda e, d=data: self._edit_expense(d)
                 else:
                     icon = QLabel("\U0001f4b8")
                     icon.setStyleSheet("font-size:16px;")
@@ -458,13 +461,14 @@ class SplitTab(QWidget):
                     t1 = QLabel(f"{data['from_name']}  \u2192  {data['to_name']}")
                     t1.setStyleSheet(f"color:{C['text']};font-size:12px;font-weight:800;")
                     info_v.addWidget(t1)
-                    t2 = QLabel(data["settle_date"])
+                    t2 = QLabel(f"{data['settle_date']}  \u00b7  Click to edit")
                     t2.setStyleSheet(f"color:{C['text3']};font-size:11px;")
                     info_v.addWidget(t2)
                     cl.addLayout(info_v, 1)
                     amt = QLabel(fmt_money(data["amount"]))
                     amt.setStyleSheet(f"color:{C['green']};font-size:14px;font-weight:800;")
                     cl.addWidget(amt)
+                    card.mousePressEvent = lambda e, d=data: self._edit_settlement(d)
                 self.overview_lay.addWidget(card)
         else:
             lbl = QLabel("No transactions yet.")
@@ -668,7 +672,8 @@ class SplitTab(QWidget):
 
     def _on_exp_amount_changed(self):
         mode = self.exp_split_type.currentIndex()
-        if mode == 2:  # Custom Amount — recalc unlocked
+        if mode in (0, 2):  # Equal or Custom Amount — recalc on amount change
+            self._locked.clear()
             self._recalc_shares()
 
     def _clear_shares(self):
@@ -724,8 +729,9 @@ class SplitTab(QWidget):
         line2.setSpacing(8)
         line2.addWidget(QLabel("Method:"))
         self.stl_method = QComboBox()
-        self.stl_method.addItems(
-            ["CASH", "PHONEPAY", "GOOGLE PAY", "BHIM UPI", "NETBANKING", "OTHER"])
+        self.stl_method.setMinimumHeight(36)
+        for m in self.repos["lookups"].list_methods():
+            self.stl_method.addItem(m["display_name"], m["method_id"])
         self.stl_method.setMinimumHeight(36)
         line2.addWidget(self.stl_method, 1)
         line2.addWidget(QLabel("Account:"))
@@ -860,6 +866,271 @@ class SplitTab(QWidget):
         self._refresh_overview()
         self._refresh_status_card()
         QMessageBox.information(self, "Done", f"Settlement of {fmt_money(amount)} recorded.")
+
+    # ═══════════════════════════════════════════════════════════
+    #  4. EDIT / DELETE — click card to edit, cascade to transactions
+    # ═══════════════════════════════════════════════════════════
+    def _edit_expense(self, exp):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("\u270f\ufe0f Edit Split Expense")
+        dlg.setMinimumWidth(480)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(10)
+
+        info = QLabel(f"Paid by: {exp['paid_by_name']}  \u00b7  Split: {exp['split_type']}")
+        info.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+        lay.addWidget(info)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        amt = QDoubleSpinBox()
+        amt.setRange(0, 99999999)
+        amt.setPrefix("\u20b9 ")
+        amt.setDecimals(2)
+        amt.setValue(exp["amount"])
+        amt.setMinimumHeight(36)
+        desc = QLineEdit(exp["description"] or "")
+        desc.setPlaceholderText("Description")
+        desc.setMinimumHeight(36)
+        dt = QDateEdit(QDate.fromString(exp["expense_date"], "yyyy-MM-dd"))
+        dt.setCalendarPopup(True)
+        dt.setMinimumHeight(36)
+        form.addRow("Amount", amt)
+        form.addRow("Description", desc)
+        form.addRow("Date", dt)
+        lay.addLayout(form)
+
+        # ── Shares section ──
+        shares_data = self.db.execute(
+            "SELECT s.share_id, s.contact_id, s.share_amount, c.name "
+            "FROM split_shares s JOIN split_contacts c ON c.contact_id=s.contact_id "
+            "WHERE s.expense_id=? ORDER BY c.is_self DESC, c.name ASC",
+            (exp["expense_id"],)).fetchall()
+        share_spins = {}
+
+        if shares_data:
+            sep = QFrame()
+            sep.setFixedHeight(1)
+            sep.setStyleSheet(f"background:{C['border2']};")
+            lay.addWidget(sep)
+            is_exact = exp["split_type"] == "EXACT"
+            shares_title = QLabel("Shares" + (" \u2014 adjust to match amount" if is_exact else " \u2014 auto-calculated"))
+            shares_title.setStyleSheet(
+                f"font-size:12px;font-weight:700;color:{C['amber'] if is_exact else C['text3']};")
+            lay.addWidget(shares_title)
+
+            for s in shares_data:
+                row = QHBoxLayout()
+                row.setSpacing(6)
+                lbl = QLabel(s["name"])
+                lbl.setStyleSheet(f"font-size:12px;color:{C['text']};")
+                lbl.setFixedWidth(110)
+                row.addWidget(lbl)
+                spin = QDoubleSpinBox()
+                spin.setRange(0, 99999999)
+                spin.setPrefix("\u20b9 ")
+                spin.setDecimals(2)
+                spin.setValue(s["share_amount"])
+                spin.setMinimumHeight(30)
+                spin.setEnabled(is_exact)
+                share_spins[s["share_id"]] = spin
+                row.addWidget(spin, 1)
+                lay.addLayout(row)
+
+        # Auto-recalc for EQUAL / PERCENTAGE on amount change
+        def _on_amt_changed(val):
+            stype = exp["split_type"]
+            if stype == "EQUAL" and shares_data:
+                n = len(shares_data)
+                if n == 0:
+                    return
+                share = round(val / n, 2)
+                for i, s in enumerate(shares_data):
+                    spin = share_spins.get(s["share_id"])
+                    if spin:
+                        spin.blockSignals(True)
+                        spin.setValue(val - share * (n - 1) if i == n - 1 else share)
+                        spin.blockSignals(False)
+            elif stype == "PERCENTAGE" and shares_data:
+                old_amt = exp["amount"]
+                if old_amt <= 0:
+                    return
+                ratio = val / old_amt
+                running = 0.0
+                for i, s in enumerate(shares_data):
+                    spin = share_spins.get(s["share_id"])
+                    if spin:
+                        spin.blockSignals(True)
+                        if i == len(shares_data) - 1:
+                            spin.setValue(round(val - running, 2))
+                        else:
+                            sv = round(s["share_amount"] * ratio, 2)
+                            running += sv
+                            spin.setValue(sv)
+                        spin.blockSignals(False)
+
+        amt.valueChanged.connect(_on_amt_changed)
+
+        # ── Buttons ──
+        btn_row = QHBoxLayout()
+        delete_btn = QPushButton("\U0001f5d1\ufe0f Delete")
+        delete_btn.setStyleSheet(
+            f"QPushButton{{background:{C['red_bg']};color:{C['red']};"
+            f"border:1.5px solid {C['red']};border-radius:8px;"
+            f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{C['red']};color:white;}}")
+        delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        delete_btn.clicked.connect(lambda: self._do_delete_expense(exp, dlg))
+        btn_row.addWidget(delete_btn)
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel)
+        save = QPushButton("\U0001f4be Save")
+        save.setObjectName("primary")
+        btn_row.addWidget(save)
+        lay.addLayout(btn_row)
+
+        def _do_save():
+            new_amt = round(amt.value(), 2)
+            new_desc = desc.text().strip() or None
+            new_date = dt.date().toString("yyyy-MM-dd")
+
+            # Validate EXACT shares sum
+            if exp["split_type"] == "EXACT" and share_spins:
+                total = sum(round(spin.value(), 2) for spin in share_spins.values())
+                if abs(total - new_amt) > 0.01:
+                    QMessageBox.warning(dlg, "Mismatch",
+                        f"Shares total ({total:.2f}) doesn't match amount ({new_amt:.2f}).\n"
+                        f"Please adjust shares to match.")
+                    return  # don't close dialog
+
+            # Update expense
+            self.db.execute(
+                "UPDATE split_expenses SET amount=?, description=?, expense_date=? WHERE expense_id=?",
+                (new_amt, new_desc, new_date, exp["expense_id"]))
+
+            # Update shares from spins
+            for sid, spin in share_spins.items():
+                self.db.execute("UPDATE split_shares SET share_amount=? WHERE share_id=?",
+                                (round(spin.value(), 2), sid))
+
+            # Update linked transaction
+            if exp["linked_txn_id"]:
+                self.db.execute(
+                    "UPDATE transactions SET amount=?, description=?, tx_date=? WHERE id=?",
+                    (new_amt, f"Split: {new_desc or 'Expense'}", new_date, exp["linked_txn_id"]))
+            self.db.commit()
+            dlg.accept()
+            self._refresh_overview()
+            self._refresh_status_card()
+            QMessageBox.information(self, "Updated", "Expense updated successfully.")
+
+        save.clicked.connect(_do_save)
+        dlg.exec_()
+
+    def _do_delete_expense(self, exp, dlg):
+        reply = QMessageBox.question(
+            self, "Delete Expense",
+            f"Delete expense of {fmt_money(exp['amount'])}?\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.execute("DELETE FROM split_shares WHERE expense_id=?", (exp["expense_id"],))
+            self.db.execute("DELETE FROM split_expenses WHERE expense_id=?", (exp["expense_id"],))
+            if exp["linked_txn_id"]:
+                self.db.execute("DELETE FROM transactions WHERE id=?", (exp["linked_txn_id"],))
+            self.db.commit()
+            dlg.accept()
+            self._refresh_overview()
+            self._refresh_status_card()
+
+    def _edit_settlement(self, stl):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("\u270f\ufe0f Edit Split Settlement")
+        dlg.setMinimumWidth(420)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(12)
+
+        info = QLabel(f"{stl['from_name']}  \u2192  {stl['to_name']}")
+        info.setStyleSheet(f"color:{C['text3']};font-size:12px;")
+        lay.addWidget(info)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        amt = QDoubleSpinBox()
+        amt.setRange(0, 99999999)
+        amt.setPrefix("\u20b9 ")
+        amt.setDecimals(2)
+        amt.setValue(stl["amount"])
+        amt.setMinimumHeight(36)
+        dt = QDateEdit(QDate.fromString(stl["settle_date"], "yyyy-MM-dd"))
+        dt.setCalendarPopup(True)
+        dt.setMinimumHeight(36)
+        method = QComboBox()
+        method.setMinimumHeight(36)
+        for m in self.repos["lookups"].list_methods():
+            method.addItem(m["display_name"], m["method_id"])
+        idx = method.findText(stl["method"])
+        if idx >= 0:
+            method.setCurrentIndex(idx)
+        form.addRow("Amount", amt)
+        form.addRow("Date", dt)
+        form.addRow("Method", method)
+        lay.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        delete_btn = QPushButton("\U0001f5d1\ufe0f Delete")
+        delete_btn.setStyleSheet(
+            f"QPushButton{{background:{C['red_bg']};color:{C['red']};"
+            f"border:1.5px solid {C['red']};border-radius:8px;"
+            f"padding:6px 14px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{C['red']};color:white;}}")
+        delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        delete_btn.clicked.connect(lambda: self._do_delete_settlement(stl, dlg))
+        btn_row.addWidget(delete_btn)
+        btn_row.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel)
+        save = QPushButton("\U0001f4be Save")
+        save.setObjectName("primary")
+        save.clicked.connect(dlg.accept)
+        btn_row.addWidget(save)
+        lay.addLayout(btn_row)
+
+        if dlg.exec_() == QDialog.Accepted:
+            new_amt = round(amt.value(), 2)
+            new_date = dt.date().toString("yyyy-MM-dd")
+            new_method = method.currentText()
+            self.db.execute(
+                "UPDATE split_settlements SET amount=?, settle_date=?, method=? WHERE settlement_id=?",
+                (new_amt, new_date, new_method, stl["settlement_id"]))
+            if stl["linked_txn_id"]:
+                self.db.execute(
+                    "UPDATE transactions SET amount=?, tx_date=?, pay_method=? WHERE id=?",
+                    (new_amt, new_date, new_method, stl["linked_txn_id"]))
+            self.db.commit()
+            self._refresh_overview()
+            self._refresh_status_card()
+            QMessageBox.information(self, "Updated", "Settlement updated successfully.")
+
+    def _do_delete_settlement(self, stl, dlg):
+        reply = QMessageBox.question(
+            self, "Delete Settlement",
+            f"Delete settlement of {fmt_money(stl['amount'])}?\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.db.execute("DELETE FROM split_settlements WHERE settlement_id=?", (stl["settlement_id"],))
+            if stl["linked_txn_id"]:
+                self.db.execute("DELETE FROM transactions WHERE id=?", (stl["linked_txn_id"],))
+            self.db.commit()
+            dlg.accept()
+            self._refresh_overview()
+            self._refresh_status_card()
 
     # ═══════════════════════════════════════════════════════════
     #  2 & 3. NEW GROUP DIALOG  (search + inline validation)

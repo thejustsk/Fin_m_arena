@@ -563,6 +563,7 @@ class SettingsTab(QWidget):
             "cards": "\U0001f4b3  Credit Cards",
             "notes": "\U0001f4cb  Notes",
             "gmail": "\U0001f4e7  Gmail",
+            "split": "\U0001f91d  Split",
             "settings": "\u2699\ufe0f  Settings",
         }
         for key, label in tab_names.items():

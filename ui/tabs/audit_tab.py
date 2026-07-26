@@ -120,6 +120,8 @@ class TransactionEditDialog(QDialog):
         self.tx = tx
         self._is_wealth = bool(wealth_link)
         self._wealth_closed = wealth_status in ("CLOSED", "WITHDRAWN", "PREMATURE_WITHDRAWN")
+        # Detect split transactions
+        self._is_split = (tx.get("transaction_kind") or "") in ("SPLIT", "SPLIT_SETTLEMENT")
         self.setWindowTitle("\u270f\ufe0f  Edit Transaction")
         self.setMinimumWidth(520)
         lay = QVBoxLayout(self)
@@ -209,6 +211,10 @@ class TransactionEditDialog(QDialog):
         if self._wealth_closed:
             self.f_date.setEnabled(False)
             self.f_amount.setEnabled(False)
+        # Lock ALL fields for split transactions — edit in Split tab
+        if self._is_split:
+            for w in [self.f_date, self.f_account, self.f_amount, self.f_person]:
+                w.setEnabled(False)
         form.addRow("Date", self.f_date)
         form.addRow("Account", self.f_account)
         form.addRow("Type", self.f_type)
@@ -222,8 +228,8 @@ class TransactionEditDialog(QDialog):
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
-        # Delete only for non-wealth transactions
-        if not self._is_wealth:
+        # Delete only for non-wealth, non-split transactions
+        if not self._is_wealth and not self._is_split:
             delete = QPushButton("\U0001f5d1\ufe0f Delete")
             delete.setStyleSheet(
                 f"QPushButton{{background:{C['red_bg']};color:{C['red']};"
@@ -241,6 +247,15 @@ class TransactionEditDialog(QDialog):
         btn_row.addWidget(cancel)
         btn_row.addWidget(save)
         lay.addLayout(btn_row)
+        # Warning message for split transactions
+        if self._is_split:
+            warn = QLabel("\U0001f91d Split transaction \u2014 Amount, Date, Account, Person/Org are locked.\n"
+                          "Category, Method, Description, Need/Want, PF can be edited here.")
+            warn.setStyleSheet(f"color:{C['accent']};font-size:11px;font-weight:600;"
+                               f"background:rgba(79,70,229,0.08);border:1px solid rgba(79,70,229,0.2);"
+                               f"border-radius:8px;padding:8px 12px;")
+            warn.setWordWrap(True)
+            lay.addWidget(warn)
         self._deleted = False
 
     def _delete_tx(self):
@@ -898,7 +913,7 @@ class _AuditSubTab(QWidget):
         if not link:
             _WEALTH_KINDS = {"LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT",
                              "FD_DEPOSIT", "FD_WITHDRAWAL", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT",
-                             "MF_PURCHASE", "MF_REDEMPTION"}
+                             "MF_PURCHASE", "MF_REDEMPTION", "SPLIT", "SPLIT_SETTLEMENT"}
             kind = tx.get("transaction_kind", "REGULAR")
             if kind in _WEALTH_KINDS:
                 link = {"group": kind, "label": kind.replace("_", " ").title()}
@@ -1126,6 +1141,13 @@ class _AuditSubTab(QWidget):
         """Push edited transaction amount into the linked wealth table."""
         link = self._link_map.get(tx_id)
         if not link:
+            # Fallback: check transaction_kind for split linkage
+            tx = self.tx.get(tx_id)
+            if tx:
+                kind = tx.get("transaction_kind", "REGULAR")
+                if kind in ("SPLIT", "SPLIT_SETTLEMENT"):
+                    link = {"group": kind}
+        if not link:
             return
         grp = link["group"]
         try:
@@ -1158,6 +1180,12 @@ class _AuditSubTab(QWidget):
                     self.db.execute(
                         "UPDATE mf_transactions SET amount=?, units=? WHERE linked_txn_id=?",
                         (new_amount, units, tx_id))
+            elif grp == "SPLIT":
+                self.db.execute("UPDATE split_expenses SET amount=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
+            elif grp == "SPLIT_SETTLEMENT":
+                self.db.execute("UPDATE split_settlements SET amount=? WHERE linked_txn_id=?",
+                                (new_amount, tx_id))
             self.db.commit()
         except Exception as e:
             print(f"[WARN] Cascade failed: {e}")
@@ -1165,6 +1193,13 @@ class _AuditSubTab(QWidget):
     def _cascade_date(self, tx_id, new_date):
         """Push edited transaction date into the linked wealth record."""
         link = self._link_map.get(tx_id)
+        if not link:
+            # Fallback: check transaction_kind for split linkage
+            tx = self.tx.get(tx_id)
+            if tx:
+                kind = tx.get("transaction_kind", "REGULAR")
+                if kind in ("SPLIT", "SPLIT_SETTLEMENT"):
+                    link = {"group": kind}
         if not link:
             return
         grp = link["group"]
@@ -1185,6 +1220,10 @@ class _AuditSubTab(QWidget):
                 self.db.execute("UPDATE fixed_deposits SET start_date=? WHERE linked_txn_id=?", (new_date, tx_id))
             elif grp.startswith("MF "):
                 self.db.execute("UPDATE mf_transactions SET txn_date=? WHERE linked_txn_id=?", (new_date, tx_id))
+            elif grp == "SPLIT":
+                self.db.execute("UPDATE split_expenses SET expense_date=? WHERE linked_txn_id=?", (new_date, tx_id))
+            elif grp == "SPLIT_SETTLEMENT":
+                self.db.execute("UPDATE split_settlements SET settle_date=? WHERE linked_txn_id=?", (new_date, tx_id))
             self.db.commit()
         except Exception as e:
             print(f"[WARN] Date cascade failed: {e}")
