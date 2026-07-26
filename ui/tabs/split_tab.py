@@ -21,6 +21,7 @@ from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _switch_tabs
+from ui.widgets.searchable_combo import SearchableCombo
 
 
 def _hex_rgba(hex_color, alpha):
@@ -101,13 +102,17 @@ class SplitTab(QWidget):
         grp_lbl = QLabel("Group:")
         grp_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;font-weight:600;")
         grp_row.addWidget(grp_lbl)
-        self.group_combo = QComboBox()
+        self.group_combo = SearchableCombo(placeholder="Search group\u2026")
         self.group_combo.setMinimumHeight(36)
         self.group_combo.currentIndexChanged.connect(self._on_group_changed)
         grp_row.addWidget(self.group_combo, 1)
-        new_grp_btn = QPushButton("+ New Group")
+        new_grp_btn = QPushButton("\uff0b New Group")
         new_grp_btn.setMinimumHeight(36)
         new_grp_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        new_grp_btn.setStyleSheet(
+            f"QPushButton{{background:{C['accent']};color:white;border:none;"
+            f"border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;}}"
+            f"QPushButton:hover{{background:#4338CA;}}")
         new_grp_btn.clicked.connect(self._new_group)
         grp_row.addWidget(new_grp_btn)
         outer.addLayout(grp_row)
@@ -264,16 +269,16 @@ class SplitTab(QWidget):
         if not self.sr:
             return
         self.group_combo.blockSignals(True)
-        self.group_combo.clear()
-        self.group_combo.addItem("-- Select Group --", None)
+        self.group_combo.clear_items()
+        self.group_combo.add_item("-- Select Group --", None)
         for g in self.sr.list_groups():
-            self.group_combo.addItem(g["name"], g["group_id"])
+            self.group_combo.add_item(g["name"], g["group_id"])
         self.group_combo.blockSignals(False)
         if self.group_combo.count() > 1:
             self.group_combo.setCurrentIndex(1)
 
     def _on_group_changed(self):
-        gid = self.group_combo.currentData()
+        gid = self.group_combo.get_data()
         if not gid:
             self._members = []
             self._clear_shares()
@@ -317,20 +322,27 @@ class SplitTab(QWidget):
         return page
 
     def _refresh_overview(self):
-        gid = self.group_combo.currentData()
+        gid = self.group_combo.get_data()
         if not gid or not self.sr:
             return
         _clear_layout(self.overview_lay)
 
-        # Stats
-        summary = self.sr.get_group_summary(gid)
+        # ── 5. KPI Stats — use balance-based calculation ──
+        expenses = self.sr.list_expenses(gid)
+        settlements = self.sr.list_settlements(gid)
+        balances = self.sr.get_group_balances(gid)
+
+        total_expenses = sum(e["amount"] for e in expenses)
+        total_pending = sum(b for b in balances.values() if b > 0.01)
+        total_settled = sum(s["amount"] for s in settlements)
+
         _clear_layout(self.stats_row)
         self.stats_row.addWidget(
-            _metric_card("Total Expenses", fmt_money(summary["total_expenses"]), C["accent"]))
+            _metric_card("Total Expenses", fmt_money(total_expenses), C["accent"]))
         self.stats_row.addWidget(
-            _metric_card("Pending", fmt_money(summary["total_pending"]), C["amber"]))
+            _metric_card("Pending", fmt_money(total_pending), C["amber"]))
         self.stats_row.addWidget(
-            _metric_card("Settled", fmt_money(summary["total_settled"]), C["green"]))
+            _metric_card("Settled", fmt_money(total_settled), C["green"]))
 
         # Balance matrix
         bal_title = QLabel("\U0001f4ca Balance Matrix")
@@ -404,8 +416,6 @@ class SplitTab(QWidget):
         txn_title.setStyleSheet(f"font-size:14px;font-weight:700;color:{C['text']};")
         self.overview_lay.addWidget(txn_title)
 
-        expenses = self.sr.list_expenses(gid)
-        settlements = self.sr.list_settlements(gid)
         items = []
         for e in expenses:
             items.append(("expense", e["expense_date"], e))
@@ -751,7 +761,8 @@ class SplitTab(QWidget):
     #  ACTIONS
     # ═══════════════════════════════════════════════════════════
     def _add_expense(self):
-        gid = self.group_combo.currentData()
+        gid = self.group_combo.get_data()
+        group_name = self.group_combo.currentText()
         if not gid:
             QMessageBox.warning(self, "No Group", "Select a group first.")
             return
@@ -792,7 +803,7 @@ class SplitTab(QWidget):
                 account_id=self.exp_account.currentData(),
                 pay_method=self.exp_method.currentData(),
                 tx_type="DEBIT", amount=amount,
-                person_org=self.exp_desc.text().strip() or "Split expense",
+                person_org=group_name,
                 description=f"Split: {self.exp_desc.text().strip() or 'Expense'}",
                 transaction_kind="SPLIT", category="finance",
                 neednwant=0, pf_category="commitment")
@@ -808,7 +819,8 @@ class SplitTab(QWidget):
         QMessageBox.information(self, "Done", f"Expense of {fmt_money(amount)} recorded.")
 
     def _add_settlement(self):
-        gid = self.group_combo.currentData()
+        gid = self.group_combo.get_data()
+        group_name = self.group_combo.currentText()
         if not gid:
             QMessageBox.warning(self, "No Group", "Select a group first.")
             return
@@ -822,6 +834,8 @@ class SplitTab(QWidget):
             QMessageBox.warning(self, "Same", "From and To must be different.")
             return
 
+        from_name = self.stl_from.currentText()
+        to_name = self.stl_to.currentText()
         settle_date = self.stl_date.date().toString("yyyy-MM-dd")
 
         # 7. Linked transaction ONLY if self involved, category=finance, pf=commitment
@@ -835,8 +849,8 @@ class SplitTab(QWidget):
                 account_id=self.stl_account.currentData(),
                 pay_method=self.stl_method.currentText(),
                 tx_type=tx_type, amount=amount,
-                person_org=f"{self.stl_from.currentText()} \u2192 {self.stl_to.currentText()}",
-                description="Split settlement",
+                person_org=group_name,
+                description=f"{from_name} \u2192 {to_name}",
                 transaction_kind="SPLIT_SETTLEMENT", category="finance",
                 neednwant=0, pf_category="commitment")
         self.sr.create_settlement(
@@ -920,13 +934,12 @@ class SplitTab(QWidget):
             for cb, name_l in contact_cbs:
                 if cb.isChecked():
                     cb.setVisible(True)  # always show checked
-                    any_match = True
                 else:
                     match = bool(s) and s in name_l
                     cb.setVisible(match)
                     if match:
                         any_match = True
-            # Show "add new" if search text has no match
+            # Show "add new" if search text doesn't match any existing contact
             show_add = bool(s) and not any_match
             add_new_row.setVisible(show_add)
             if show_add:
