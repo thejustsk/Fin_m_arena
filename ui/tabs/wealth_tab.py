@@ -1,10 +1,11 @@
 """Wealth tab — 5 top-level pages with expandable inline cards (Notes-tab pattern)."""
 import json as _json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QDateEdit, QDoubleSpinBox, QSpinBox, QFrame, QScrollArea,
-    QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy, QCheckBox
+    QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy, QCheckBox,
+    QGridLayout
 )
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
@@ -4496,7 +4497,348 @@ class SplitPage(QWidget):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  WEALTH TAB — 6 top-level pages (added Split)
+#  WEALTH DASHBOARD — overview of all 6 wealth sub-tabs
+# ══════════════════════════════════════════════════════════════════════════
+class DashboardPage(QWidget):
+    """Wealth Dashboard — KPI cards, net position, alerts, quick access."""
+
+    def __init__(self, repos, services, parent=None):
+        super().__init__(parent)
+        self.repos = repos
+        self.services = services
+        self.db = repos["accounts"].db
+        self.sr = repos.get("split")
+        self._self_id = self.sr.get_self_contact() if self.sr else None
+        self._wealth_tab_ref = None
+        self._nav_cb = None
+        self._kpi = {}
+        self._build()
+
+    def set_nav(self, cb):
+        self._nav_cb = cb
+
+    def _build(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        inner = QWidget()
+        inner.setStyleSheet("background:transparent;")
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(32, 24, 32, 24)
+        lay.setSpacing(16)
+
+        hdr = QLabel("\U0001f4ca  Wealth Dashboard")
+        hdr.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
+        lay.addWidget(hdr)
+
+        # Net Position Bar
+        lay.addWidget(self._build_net_bar())
+        # KPI Grid 2×3
+        lay.addWidget(self._build_kpi_grid())
+        # Alerts (hidden if empty)
+        self.alerts_frame = self._build_alerts_frame()
+        lay.addWidget(self.alerts_frame)
+        # Quick Access 2×3
+        lay.addWidget(self._build_quick_access())
+
+        lay.addStretch()
+        scroll.setWidget(inner)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+    # ── Net Position Bar ───────────────────────────────────────
+    def _build_net_bar(self):
+        f = QFrame()
+        f.setStyleSheet(
+            "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #1e1b4b,stop:1 #312e81);border-radius:14px;}"
+            "QLabel{background:transparent;border:none;}")
+        lay = QVBoxLayout(f)
+        lay.setContentsMargins(24, 14, 24, 14)
+        lay.setSpacing(8)
+        t = QLabel("NET WEALTH POSITION")
+        t.setStyleSheet("color:rgba(255,255,255,0.5);font-size:10px;font-weight:700;letter-spacing:1.5px;")
+        lay.addWidget(t)
+        cols = QHBoxLayout(); cols.setSpacing(24)
+        for label, key in [("Investments", "inv"), ("Receivable", "recv"),
+                            ("Payable", "pay"), ("Split Net", "split")]:
+            c = QVBoxLayout(); c.setSpacing(1)
+            ll = QLabel(label)
+            ll.setStyleSheet("color:rgba(255,255,255,0.45);font-size:10px;font-weight:600;")
+            c.addWidget(ll)
+            vv = QLabel("\u20b90")
+            vv.setStyleSheet("color:white;font-size:16px;font-weight:800;")
+            c.addWidget(vv)
+            cols.addLayout(c)
+            setattr(self, f"_np_{key}", vv)
+        cols.addStretch()
+        lay.addLayout(cols)
+        self._np_net = QLabel("\u20b90")
+        self._np_net.setStyleSheet("color:#a5f3fc;font-size:28px;font-weight:900;")
+        lay.addWidget(self._np_net)
+        return f
+
+    # ── KPI Grid ───────────────────────────────────────────────
+    def _build_kpi_grid(self):
+        wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
+        grid = QGridLayout(wrap); grid.setSpacing(12)
+        items = [
+            ("\U0001f91d", "Loans I Give",  C["amber"],  1),
+            ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
+            ("\U0001f3e6", "FD Deposits",   C["accent"], 3),
+            ("\U0001f9fe", "FD Others",     C["green"],  4),
+            ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
+            ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
+        ]
+        for i, (icon, title, color, idx) in enumerate(items):
+            card, vl, dl = self._kpi_card(icon, title, "\u20b90", "\u2014", color, idx)
+            grid.addWidget(card, i // 3, i % 3)
+            self._kpi[idx] = (vl, dl)
+        return wrap
+
+    def _go_to_split(self):
+        """Navigate to standalone Split tab via main window."""
+        w = self.window()
+        if hasattr(w, '_nav'):
+            w._nav("split")
+
+    def _kpi_card(self, icon, title, value, detail, color, idx):
+        card = QFrame()
+        card.setCursor(QCursor(Qt.PointingHandCursor))
+        bg = _hex_rgba(color, 0.06); hov = _hex_rgba(color, 0.10)
+        card.setStyleSheet(
+            f"QFrame{{background:{bg};border:1.5px solid {color};border-radius:12px;}}"
+            f"QFrame:hover{{background:{hov};}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        lay = QVBoxLayout(card); lay.setContentsMargins(16, 12, 16, 12); lay.setSpacing(6)
+        top = QHBoxLayout()
+        il = QLabel(icon); il.setStyleSheet("font-size:18px;"); top.addWidget(il)
+        tl = QLabel(title); tl.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text2']};")
+        top.addWidget(tl, 1); lay.addLayout(top)
+        vl = QLabel(value); vl.setStyleSheet(f"font-size:22px;font-weight:900;color:{color};")
+        lay.addWidget(vl)
+        dl = QLabel(detail); dl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;")
+        lay.addWidget(dl)
+        if idx == 6:  # Split → standalone tab
+            card.mousePressEvent = lambda e: self._go_to_split()
+        elif self._nav_cb:
+            card.mousePressEvent = lambda e, _i=idx: self._nav_cb(_i)
+        return card, vl, dl
+
+    # ── Alerts ─────────────────────────────────────────────────
+    def _build_alerts_frame(self):
+        f = QFrame()
+        f.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        self._alerts_lay = QVBoxLayout(f)
+        self._alerts_lay.setContentsMargins(16, 12, 16, 12)
+        self._alerts_lay.setSpacing(6)
+        f.hide()
+        return f
+
+    # ── Quick Access ───────────────────────────────────────────
+    def _build_quick_access(self):
+        wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
+        grid = QGridLayout(wrap); grid.setSpacing(10)
+        tiles = [
+            ("\U0001f91d", "Loans I Give",  C["amber"],  1),
+            ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
+            ("\U0001f3e6", "FD Deposits",   C["accent"], 3),
+            ("\U0001f9fe", "FD Others",     C["green"],  4),
+            ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
+            ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
+        ]
+        for i, (icon, name, color, idx) in enumerate(tiles):
+            grid.addWidget(self._tile(icon, name, color, idx), i // 3, i % 3)
+        return wrap
+
+    def _tile(self, icon, name, color, idx):
+        t = QFrame()
+        t.setCursor(QCursor(Qt.PointingHandCursor))
+        t.setMinimumHeight(50)
+        t.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
+            f"border-left:3px solid {color};border-radius:8px;}}"
+            f"QFrame:hover{{border-color:{color};background:{C['surface2']};}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        lay = QHBoxLayout(t); lay.setContentsMargins(14, 8, 14, 8); lay.setSpacing(8)
+        il = QLabel(icon); il.setStyleSheet("font-size:18px;"); lay.addWidget(il)
+        nl = QLabel(name); nl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+        lay.addWidget(nl, 1)
+        ar = QLabel("\u203a"); ar.setStyleSheet(f"font-size:18px;color:{C['text3']};"); lay.addWidget(ar)
+        if idx == 6:  # Split → standalone tab
+            t.mousePressEvent = lambda e: self._go_to_split()
+        elif self._nav_cb:
+            t.mousePressEvent = lambda e, _i=idx: self._nav_cb(_i)
+        return t
+
+    # ── Refresh ────────────────────────────────────────────────
+    def refresh(self):
+        db = self.db
+        today = date.today()
+        today_s = today.isoformat()
+
+        # 1. Loans I Give
+        lg = db.execute("""
+            SELECT l.loan_amount, l.status, COALESCE(SUM(r.amount_paid),0) AS rep
+            FROM loans l LEFT JOIN repayments r ON r.loan_id=l.loan_id
+            WHERE l.status!='CLOSED' GROUP BY l.loan_id""").fetchall()
+        lg_out = sum(max(r["loan_amount"]-r["rep"],0) for r in lg)
+        lg_od = sum(1 for r in lg if r["status"]=="OVERDUE")
+        lg_act = sum(1 for r in lg if r["status"] in ("ACTIVE","PARTIALLY_PAID","OVERDUE"))
+
+        # 2. Loans I Take
+        lt = db.execute("""
+            SELECT l.principal_amount, l.status, l.due_date, l.emi_amount,
+                   COALESCE(SUM(r.amount_paid),0) AS rep
+            FROM borrowed_loans l LEFT JOIN borrowed_loan_repayments r ON r.loan_id=l.loan_id
+            WHERE l.status!='CLOSED' GROUP BY l.loan_id""").fetchall()
+        lt_out = sum(max(r["principal_amount"]-r["rep"],0) for r in lt)
+        lt_od = sum(1 for r in lt if r["status"]=="OVERDUE")
+        lt_act = sum(1 for r in lt if r["status"] in ("ACTIVE","PARTIALLY_PAID","OVERDUE"))
+        next_emi = None
+        for r in lt:
+            dd = r["due_date"] or ""
+            if dd >= today_s and r["emi_amount"]>0:
+                if next_emi is None or dd < next_emi[0]:
+                    next_emi = (dd, r["emi_amount"])
+
+        # 3. FD Deposits
+        fd = db.execute("""
+            SELECT COUNT(*) AS c, COALESCE(SUM(principal_amount),0) AS p,
+                   COALESCE(SUM(CASE WHEN maturity_amount>0 THEN maturity_amount ELSE principal_amount END),0) AS m
+            FROM fixed_deposits WHERE status='ACTIVE'""").fetchone()
+        fd_mat = db.execute("SELECT COUNT(*) AS c FROM fixed_deposits WHERE status='MATURED'").fetchone()
+        fd_next = db.execute(
+            "SELECT maturity_amount, maturity_date FROM fixed_deposits WHERE status='ACTIVE' ORDER BY maturity_date LIMIT 1"
+        ).fetchone()
+
+        # 4. FD Others
+        fo = db.execute("""
+            SELECT d.principal_amount, d.status, COALESCE(SUM(r.amount_paid),0) AS rep
+            FROM deposits_from_others d LEFT JOIN deposit_repayments_to_others r ON r.deposit_id=d.deposit_id
+            WHERE d.status!='CLOSED' GROUP BY d.deposit_id""").fetchall()
+        fo_out = sum(max(r["principal_amount"]-r["rep"],0) for r in fo)
+        fo_od = sum(1 for r in fo if r["status"]=="OVERDUE")
+
+        # 5. MF (no network — use last txn NAV)
+        mf_inv = 0; mf_cur = 0
+        schemes = self.repos["mf"].list_schemes()
+        for s in schemes:
+            h = self.repos["mf"].holdings(s["scheme_id"])
+            txns = self.repos["mf"].list_txns(s["scheme_id"])
+            nav = txns[-1]["nav"] if txns else 0
+            ni = h["invested"] - h["redeemed"]
+            cv = h["units"] * nav
+            mf_inv += ni; mf_cur += cv
+        mf_ret = ((mf_cur - mf_inv) / mf_inv * 100) if mf_inv > 0 else 0
+
+        # 6. Split
+        sp_owed = 0; sp_owe = 0; sp_unset = 0
+        if self.sr:
+            for g in self.sr.list_groups():
+                bal = self.sr.get_group_balances(g["group_id"])
+                mb = bal.get(self._self_id, 0)
+                if mb > 0.01: sp_owed += mb; sp_unset += 1
+                elif mb < -0.01: sp_owe += abs(mb); sp_unset += 1
+
+        # ── Update KPI cards ──
+        v, d = self._kpi[1]; v.setText(fmt_money(lg_out)); d.setText(f"{lg_od} overdue / {lg_act} active")
+        v, d = self._kpi[2]
+        emi_txt = f"EMI {fmt_money(next_emi[1])} due {next_emi[0]}" if next_emi else f"{lt_od} overdue / {lt_act} active"
+        v.setText(fmt_money(lt_out)); d.setText(emi_txt)
+        v, d = self._kpi[3]; v.setText(fmt_money(fd["m"])); d.setText(f"{fd['c']} active / {fd_mat['c']} matured")
+        v, d = self._kpi[4]; v.setText(fmt_money(fo_out)); d.setText(f"{fo_od} overdue / {len(fo)} active")
+        v, d = self._kpi[5]; v.setText(fmt_money(mf_cur)); d.setText(f"{mf_ret:+.1f}% return")
+        v, d = self._kpi[6]; v.setText(f"{fmt_money(sp_owed)} / {fmt_money(sp_owe)}"); d.setText(f"{sp_unset} unsettled groups")
+
+        # ── Update Net Position ──
+        inv = fd["m"] + mf_cur
+        recv = lg_out + fo_out
+        pay = lt_out
+        sp_net = sp_owed - sp_owe
+        net = inv + recv - pay + sp_net
+        self._np_inv.setText(fmt_money(inv))
+        self._np_recv.setText(fmt_money(recv))
+        self._np_pay.setText(fmt_money(pay))
+        self._np_split.setText(fmt_money(sp_net))
+        self._np_net.setText(f"NET: {fmt_money(net)}")
+        net_col = "#a5f3fc" if net >= 0 else "#fca5a5"
+        self._np_net.setStyleSheet(f"color:{net_col};font-size:28px;font-weight:900;")
+
+        # ── Update Alerts ──
+        while self._alerts_lay.count():
+            itm = self._alerts_lay.takeAt(0)
+            if itm.widget(): itm.widget().deleteLater()
+
+        alerts = []
+        # Overdue loans I give
+        od_give = db.execute("""
+            SELECT b.name, l.loan_amount, l.due_date FROM loans l
+            JOIN borrowers b ON b.borrower_id=l.borrower_id WHERE l.status='OVERDUE'""").fetchall()
+        for r in od_give:
+            try: days = (today - date.fromisoformat(r["due_date"])).days
+            except: days = 0
+            alerts.append(("\u26a0\ufe0f", f"{r['name']} — overdue {days}d", fmt_money(r["loan_amount"]), C["red"]))
+        # Overdue loans I take
+        od_take = db.execute("""
+            SELECT le.name, l.principal_amount, l.due_date FROM borrowed_loans l
+            JOIN lenders le ON le.lender_id=l.lender_id WHERE l.status='OVERDUE'""").fetchall()
+        for r in od_take:
+            try: days = (today - date.fromisoformat(r["due_date"])).days
+            except: days = 0
+            alerts.append(("\u26a0\ufe0f", f"{r['name']} — overdue {days}d", fmt_money(r["principal_amount"]), C["red"]))
+        # EMI due soon (7 days)
+        soon7 = (today + timedelta(days=7)).isoformat()
+        emi_due = db.execute("""
+            SELECT le.name, b.emi_amount, b.due_date FROM borrowed_loans b
+            JOIN lenders le ON le.lender_id=b.lender_id
+            WHERE b.status IN ('ACTIVE','PARTIALLY_PAID') AND b.due_date BETWEEN ? AND ?
+            ORDER BY b.due_date""", (today_s, soon7)).fetchall()
+        for r in emi_due:
+            alerts.append(("\U0001f514", f"{r['name']} EMI due {r['due_date']}", fmt_money(r["emi_amount"]), C["amber"]))
+        # FD maturing soon (30 days)
+        soon30 = (today + timedelta(days=30)).isoformat()
+        fd_alerts = db.execute("""
+            SELECT a.display_name, f.maturity_amount, f.maturity_date FROM fixed_deposits f
+            JOIN accounts a ON a.account_id=f.bank_account_id
+            WHERE f.status='ACTIVE' AND f.maturity_date BETWEEN ? AND ?
+            ORDER BY f.maturity_date""", (today_s, soon30)).fetchall()
+        for r in fd_alerts:
+            alerts.append(("\U0001f3e6", f"{r['display_name']} FD maturing {r['maturity_date']}",
+                           fmt_money(r["maturity_amount"]), C["accent"]))
+        # Split pending (self involved)
+        if self.sr:
+            for g in self.sr.list_groups():
+                sugs = self.sr.suggest_settlements(g["group_id"])
+                for fid, fn, tid, tn, amt in sugs:
+                    if fid == self._self_id or tid == self._self_id:
+                        alerts.append(("\U0001f4b8", f"{fn} \u2192 {tn} ({g['name']})", fmt_money(amt), "#7C3AED"))
+
+        if alerts:
+            tl = QLabel("Alerts & Upcoming")
+            tl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+            self._alerts_lay.addWidget(tl)
+            for icon, text, amt, col in alerts[:8]:
+                row = QHBoxLayout(); row.setSpacing(8)
+                il = QLabel(icon); il.setStyleSheet("font-size:14px;"); row.addWidget(il)
+                tx = QLabel(text); tx.setStyleSheet(f"font-size:12px;color:{C['text']};font-weight:600;")
+                row.addWidget(tx, 1)
+                al = QLabel(amt); al.setStyleSheet(f"font-size:12px;font-weight:800;color:{col};"); row.addWidget(al)
+                self._alerts_lay.addLayout(row)
+            self.alerts_frame.show()
+        else:
+            self.alerts_frame.hide()
+
+    def load_list(self, force=False):
+        self.refresh()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  WEALTH TAB — 7 top-level pages (Dashboard + 5 + Split)
 # ══════════════════════════════════════════════════════════════════════════
 class WealthTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
@@ -4525,12 +4867,14 @@ class WealthTab(QWidget):
         outer.addWidget(heading)
         nav_row = QHBoxLayout()
         nav_row.setSpacing(8)
+        self.btn_dash = QPushButton("\U0001f4ca Dashboard")
         self.btn_lg = QPushButton("\U0001f91d Loans I Give")
         self.btn_lt = QPushButton("\U0001f3db\ufe0f Loans I Take")
         self.btn_fd = QPushButton("\U0001f3e6 FD I Deposit")
         self.btn_fo = QPushButton("\U0001f9fe FD Others")
         self.btn_mf = QPushButton("\U0001f4c8 Mutual Funds")
-        self._nav_btns = [self.btn_lg, self.btn_lt, self.btn_fd, self.btn_fo, self.btn_mf]
+        self._nav_btns = [self.btn_dash, self.btn_lg, self.btn_lt, self.btn_fd,
+                          self.btn_fo, self.btn_mf]
         for b in self._nav_btns:
             b.setMinimumHeight(34)
             b.setCursor(QCursor(Qt.PointingHandCursor))
@@ -4544,18 +4888,22 @@ class WealthTab(QWidget):
         self.fd_give_page = FDGivePage(self.repos, self.services)
         self.fd_others_page = FDOthersPage(self.repos, self.services)
         self.mf_page = MFPage(self.repos, self.services)
+        self.dashboard_page = DashboardPage(self.repos, self.services)
+        self.dashboard_page.set_nav(self._goto)
         self._pages = [
+            self.dashboard_page,
             self.loans_give_page, self.loans_take_page,
             self.fd_give_page, self.fd_others_page, self.mf_page,
         ]
         for p in self._pages:
             p._wealth_tab_ref = self
             self.stack.addWidget(p)
-        self.btn_lg.clicked.connect(lambda: self._goto(0))
-        self.btn_lt.clicked.connect(lambda: self._goto(1))
-        self.btn_fd.clicked.connect(lambda: self._goto(2))
-        self.btn_fo.clicked.connect(lambda: self._goto(3))
-        self.btn_mf.clicked.connect(lambda: self._goto(4))
+        self.btn_dash.clicked.connect(lambda: self._goto(0))
+        self.btn_lg.clicked.connect(lambda: self._goto(1))
+        self.btn_lt.clicked.connect(lambda: self._goto(2))
+        self.btn_fd.clicked.connect(lambda: self._goto(3))
+        self.btn_fo.clicked.connect(lambda: self._goto(4))
+        self.btn_mf.clicked.connect(lambda: self._goto(5))
         _switch_tabs(self._nav_btns, 0)
         self.stack.setCurrentIndex(0)
 
