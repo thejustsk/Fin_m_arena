@@ -279,8 +279,10 @@ def export_monthly_pdf(filepath, month_name, year,
             story.append(d)
 
         # Need vs Want
-        need, want, _nw_none = split_need_want(transactions)
-        total_nw = need + want
+        # Untagged spend gets its own column. Leaving it out made TOTAL smaller
+        # than real expenditure and pushed Need/Want percentages far too high.
+        need, want, nw_none = split_need_want(transactions)
+        total_nw = need + want + nw_none
         if total_nw > 0:
             story.append(Spacer(1, 14))
             story.append(Paragraph('<b>Need vs Want</b>',
@@ -288,12 +290,14 @@ def export_monthly_pdf(filepath, month_name, year,
             story.append(Spacer(1, 8))
             need_pct = need / total_nw * 100
             want_pct = want / total_nw * 100
+            none_pct = nw_none / total_nw * 100
             nw_data = [[
-                Paragraph(f'<font size="9" color="#6B7280">NEED</font><br/><b><font size="16" color="#4F46E5">{need:,.0f}</font><font size="10" color="#6B7280"> ({need_pct:.0f}%)</font></b>', S['Normal']),
-                Paragraph(f'<font size="9" color="#6B7280">WANT</font><br/><b><font size="16" color="#F59E0B">{want:,.0f}</font><font size="10" color="#6B7280"> ({want_pct:.0f}%)</font></b>', S['Normal']),
-                Paragraph(f'<font size="9" color="#6B7280">TOTAL</font><br/><b><font size="16" color="#111827">{total_nw:,.0f}</font></b>', S['Normal']),
+                Paragraph(f'<font size="9" color="#6B7280">NEED</font><br/><b><font size="15" color="#4F46E5">{need:,.0f}</font><font size="10" color="#6B7280"> ({need_pct:.0f}%)</font></b>', S['Normal']),
+                Paragraph(f'<font size="9" color="#6B7280">WANT</font><br/><b><font size="15" color="#F59E0B">{want:,.0f}</font><font size="10" color="#6B7280"> ({want_pct:.0f}%)</font></b>', S['Normal']),
+                Paragraph(f'<font size="9" color="#6B7280">NOT SET</font><br/><b><font size="15" color="#9CA3AF">{nw_none:,.0f}</font><font size="10" color="#6B7280"> ({none_pct:.0f}%)</font></b>', S['Normal']),
+                Paragraph(f'<font size="9" color="#6B7280">TOTAL SPEND</font><br/><b><font size="15" color="#111827">{total_nw:,.0f}</font></b>', S['Normal']),
             ]]
-            nw_tbl = Table(nw_data, colWidths=[usable/3]*3, rowHeights=[60])
+            nw_tbl = Table(nw_data, colWidths=[usable/4]*4, rowHeights=[60])
             nw_tbl.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, -1), colors.white),
                 ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
@@ -303,6 +307,12 @@ def export_monthly_pdf(filepath, month_name, year,
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             story.append(nw_tbl)
+            if nw_none > 0:
+                story.append(Spacer(1, 5))
+                story.append(Paragraph(
+                    f'<font size="8" color="#9CA3AF">{none_pct:.0f}% of spending is not yet '
+                    f'tagged as Need or Want. Tag it from Transaction Entry, or in bulk from Audit.</font>',
+                    S['Normal']))
 
         # ════════════════════════════════════════
         # SECTION 3: TRANSACTIONS (page break)
