@@ -30,6 +30,47 @@ def _hex_rgba(hex_color, alpha):
     return f"rgba({r},{g},{b},{alpha})"
 
 
+def _export_split_pdf(parent, title, status, info_pairs, analysis_pairs, sections=None):
+    """Save a Split overview PDF — same secured template the Wealth tab uses."""
+    from PyQt5.QtWidgets import QFileDialog
+    safe = "".join(c for c in title if c.isalnum() or c in " -_")[:60]
+    filepath, _ = QFileDialog.getSaveFileName(
+        parent, "Save PDF", f"{safe}.pdf", "PDF Files (*.pdf)")
+    if not filepath:
+        return
+    try:
+        from services.report_service import export_detail_pdf
+        doc_id = export_detail_pdf(filepath, title, status,
+                                   info_pairs, analysis_pairs, sections)
+    except Exception as e:
+        QMessageBox.warning(parent, "Error", f"Failed to generate PDF.\n{e}")
+        return
+    if not doc_id:
+        QMessageBox.warning(
+            parent, "Error",
+            "Failed to generate PDF. Make sure reportlab is installed:\n"
+            "pip install reportlab")
+        return
+    box = QMessageBox(parent)
+    box.setWindowTitle("PDF Saved")
+    box.setText(f"Document ID: {doc_id}\nSaved to: {filepath}")
+    box.setInformativeText("Would you like to open the PDF?")
+    open_btn = box.addButton("Open PDF", QMessageBox.AcceptRole)
+    box.addButton("Close", QMessageBox.RejectRole)
+    box.exec_()
+    if box.clickedButton() is open_btn:
+        import os, sys
+        try:
+            if sys.platform == "win32":
+                os.startfile(filepath)
+            elif sys.platform == "darwin":
+                os.system(f"open '{filepath}'")
+            else:
+                os.system(f"xdg-open '{filepath}'")
+        except Exception:
+            pass
+
+
 def _metric_card(label, value, color=None):
     color = color or C["text"]
     card = QFrame()
@@ -132,6 +173,21 @@ class SplitTab(QWidget):
             b.setMinimumHeight(34)
             b.setCursor(QCursor(Qt.PointingHandCursor))
             nav.addWidget(b)
+
+        # Print the whole Overview for the selected group
+        self.btn_print = QPushButton("\U0001f5a8  Print")
+        self.btn_print.setMinimumHeight(34)
+        self.btn_print.setFocusPolicy(Qt.NoFocus)
+        self.btn_print.setCursor(QCursor(Qt.PointingHandCursor))
+        self.btn_print.setToolTip("Export this group's overview as a PDF")
+        self.btn_print.setStyleSheet(
+            f"QPushButton{{background:{C['surface']};color:{C['accent']};"
+            f"border:1.5px solid {C['accent']};border-radius:8px;"
+            f"padding:8px 16px;font-size:13px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{C['accent']};color:white;}}")
+        self.btn_print.clicked.connect(self._print_overview)
+        nav.addWidget(self.btn_print)
+
         nav.addStretch()
         outer.addLayout(nav)
 
@@ -146,6 +202,132 @@ class SplitTab(QWidget):
         self.btn_settle.clicked.connect(lambda: self._goto(2))
         _switch_tabs(self._sub_btns, 0)
         self.sub_stack.setCurrentIndex(0)
+
+    # ═══════════════════════════════════════════════════════════
+    #  PRINT OVERVIEW → PDF
+    # ═══════════════════════════════════════════════════════════
+    def _print_overview(self):
+        """Export everything shown on the Overview page for the current group.
+
+        Mirrors the on-screen order: the 3 KPI boxes, then Balance Matrix,
+        Settlement Suggestions and Transactions — using the same colours the
+        UI uses, and the app's standard secured PDF (Doc ID, hash, watermark,
+        QR verification page).
+        """
+        if not self.sr:
+            return
+        gid = self.group_combo.get_data()
+        if not gid:
+            QMessageBox.information(self, "No Group",
+                                    "Select a group before printing.")
+            return
+
+        # Identity check — same gate used for wealth/audit edits.
+        sec = self.services.get("security") if isinstance(self.services, dict) else None
+        if sec is not None:
+            try:
+                from ui.wealth_verify import WealthEditVerifyDialog
+                if not WealthEditVerifyDialog.verify_user(sec, self):
+                    return
+            except Exception:
+                pass
+
+        group_name = self.group_combo.currentText()
+        expenses = self.sr.list_expenses(gid)
+        settlements = self.sr.list_settlements(gid)
+        balances = self.sr.get_group_balances(gid)
+        contacts = {c["contact_id"]: self.sr.display_name_for(c)
+                    for c in self.sr.list_contacts()}
+
+        # ── The 3 KPI boxes, identical maths to _refresh_overview ──
+        total_expenses = sum(e["amount"] for e in expenses)
+        total_pending = sum(b for b in balances.values() if b > 0.01)
+        total_settled = sum(s["amount"] for s in settlements)
+        analysis = [
+            ("Total Expenses", fmt_money(total_expenses)),
+            ("Pending", fmt_money(total_pending)),
+            ("Settled", fmt_money(total_settled)),
+        ]
+
+        members = self.sr.list_group_members(gid)
+        info = [
+            ("Group", group_name),
+            ("Members", str(len(members))),
+            ("Transactions", str(len(expenses) + len(settlements))),
+            ("Expenses", str(len(expenses))),
+            ("Settlements", str(len(settlements))),
+            ("Generated", date.today().isoformat()),
+        ]
+
+        sections = []
+
+        # ── Balance Matrix ──
+        bal_rows = []
+        self_label = self.sr.self_display_name()
+        for cid, bal in sorted(balances.items(), key=lambda x: -x[1]):
+            name = contacts.get(cid, "?")
+            # "You is owed" reads wrong — use second person for the self row.
+            is_self = (name == self_label)
+            if bal > 0.01:
+                desc = "are owed" if is_self else "is owed"
+                amt = bal
+            elif bal < -0.01:
+                desc = "owe" if is_self else "owes"
+                amt = abs(bal)
+            else:
+                desc = "settled up"
+                amt = 0
+            bal_rows.append({"date": name, "amount": amt, "description": desc})
+        if bal_rows:
+            sections.append({"title": "\U0001f4ca  Balance Matrix", "color": "#4F46E5",
+                             "type": "repayment", "data": bal_rows})
+
+        # ── Settlement Suggestions ──
+        sug_rows = []
+        for _fid, fn, _tid, tn, amount in self.sr.suggest_settlements(gid):
+            sug_rows.append({"date": f"{fn}  \u2192  {tn}", "amount": amount,
+                             "description": "Suggested transfer"})
+        if sug_rows:
+            sections.append({"title": "\U0001f4a1  Settlement Suggestions", "color": "#D97706",
+                             "type": "repayment", "data": sug_rows})
+        else:
+            sections.append({"title": "\U0001f4a1  Settlement Suggestions", "color": "#059669",
+                             "type": "repayment",
+                             "data": [{"date": "All settled", "amount": 0,
+                                       "description": "No transfers needed"}]})
+
+        # ── Transactions (expenses + settlements, newest first) ──
+        items = [("expense", e["expense_date"], e) for e in expenses]
+        items += [("settlement", s["settle_date"], s) for s in settlements]
+        items.sort(key=lambda x: x[1], reverse=True)
+        txn_rows = []
+        for kind, dt, data in items:
+            if kind == "expense":
+                desc = data["description"] or "Expense"
+                txn_rows.append({
+                    "date": f"{dt}  \u00b7  {desc}",
+                    "amount": data["amount"],
+                    "description": f"Expense \u00b7 paid by {data['paid_by_name']}"
+                                   f"  \u00b7  split {data['split_type']}",
+                })
+            else:
+                # sqlite3.Row has no .get() — index access with a guard.
+                try:
+                    method = data["method"] or "transfer"
+                except (KeyError, IndexError):
+                    method = "transfer"
+                txn_rows.append({
+                    "date": f"{dt}  \u00b7  {data['from_name']} \u2192 {data['to_name']}",
+                    "amount": data["amount"],
+                    "description": f"Settlement \u00b7 {method}",
+                })
+        if txn_rows:
+            sections.append({"title": "\U0001f4cb  Transactions", "color": "#7C3AED",
+                             "type": "repayment", "data": txn_rows})
+
+        status = "SETTLED" if not sug_rows else "PENDING"
+        _export_split_pdf(self, f"Split Group \u2014 {group_name}", status,
+                          info, analysis, sections)
 
     # ═══════════════════════════════════════════════════════════
     #  1. VIOLET STATUS CARD

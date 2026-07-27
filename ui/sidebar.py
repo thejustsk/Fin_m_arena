@@ -51,6 +51,11 @@ NAV_GROUPS = [
 
 EXPANDED_W = 230
 COLLAPSED_W = 76
+
+# Reminder cards live inside the expanded sidebar. Width is pinned so a long
+# card name can never stretch the layout past the sidebar edge.
+_REM_CARD_W = EXPANDED_W - 30      # sidebar margins + scrollbar gutter
+_REM_TEXT_W = _REM_CARD_W - 40     # room for the overdue flag + padding
 ANIM_STEPS = 10
 ANIM_MS = 180
 
@@ -197,12 +202,26 @@ class Sidebar(QWidget):
         self._rem_scroll.setWidgetResizable(True)
         self._rem_scroll.setFrameShape(QFrame.NoFrame)
         self._rem_scroll.setMaximumHeight(200)
-        self._rem_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        # Never let content dictate width — the sidebar is a fixed 230px and a
+        # long card name would otherwise force a horizontal scrollbar and push
+        # the amount out of view.
+        self._rem_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._rem_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._rem_scroll.setSizeAdjustPolicy(QScrollArea.AdjustIgnored)
+        self._rem_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;border:none;}"
+            "QScrollBar:vertical{background:transparent;width:6px;margin:0;}"
+            "QScrollBar::handle:vertical{background:rgba(0,0,0,0.18);"
+            "border-radius:3px;min-height:24px;}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+            "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}")
         rem_inner = QWidget()
         rem_inner.setStyleSheet("background:transparent;")
         self._rem_lay = QVBoxLayout(rem_inner)
-        self._rem_lay.setContentsMargins(0, 0, 0, 0)
-        self._rem_lay.setSpacing(4)
+        # Right padding reserves room for the thin scrollbar so cards don't
+        # sit underneath it.
+        self._rem_lay.setContentsMargins(10, 0, 8, 0)
+        self._rem_lay.setSpacing(5)
         self._rem_scroll.setWidget(rem_inner)
         self.lay.addWidget(self._rem_scroll)
         self._rem_scroll.hide()
@@ -398,28 +417,57 @@ class Sidebar(QWidget):
             self._rem_header.hide(); self._rem_scroll.hide()
             self._refresh_dots()
 
-        # Same card style as Cards tab reminders
+        # Two-row card: name on top (elided, never wraps), cycle + amount below.
+        # A single row could not fit "name · cycle · amount" in 230px — the
+        # amount got squeezed to nothing or the card grew past the sidebar.
         for _, name, cycle_nm, amount, color, is_overdue in reminders[:10]:
             row = QFrame()
             row.setStyleSheet(
                 f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
-                f"border-radius:8px;padding:6px 10px;}}"
+                f"border-left:3px solid {color};border-radius:8px;}}"
                 f"QLabel{{background:transparent;border:none;}}")
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(8, 4, 8, 4)
-            rl.setSpacing(6)
-            dot = QLabel("■")
-            dot.setFixedWidth(14); dot.setFixedHeight(14)
-            dot.setStyleSheet(f"background:{color};border-radius:3px;")
-            rl.addWidget(dot)
-            name_lbl = QLabel(f"{name}  ·  {cycle_nm}")
-            name_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;")
-            name_lbl.setWordWrap(True)
-            rl.addWidget(name_lbl, 1)
+            # Fixed width keeps every card identical and inside the sidebar,
+            # regardless of how long the card name is.
+            row.setFixedWidth(_REM_CARD_W)
+            outer = QVBoxLayout(row)
+            outer.setContentsMargins(9, 6, 9, 6)
+            outer.setSpacing(3)
+
+            top = QHBoxLayout()
+            top.setContentsMargins(0, 0, 0, 0)
+            top.setSpacing(5)
+            name_lbl = QLabel()
+            name_lbl.setStyleSheet(f"color:{C['text']};font-size:11px;font-weight:700;")
+            # Elide rather than wrap — keeps every card the same height.
+            fm = name_lbl.fontMetrics()
+            name_lbl.setText(fm.elidedText(name, Qt.ElideRight, _REM_TEXT_W))
+            name_lbl.setToolTip(f"{name} \u2014 {cycle_nm}")
+            top.addWidget(name_lbl, 1)
+            if is_overdue:
+                flag = QLabel("!")
+                flag.setFixedSize(14, 14)
+                flag.setAlignment(Qt.AlignCenter)
+                flag.setStyleSheet(
+                    f"background:{color};color:white;border-radius:7px;"
+                    f"font-size:9px;font-weight:800;")
+                top.addWidget(flag, 0)
+            outer.addLayout(top)
+
+            bottom = QHBoxLayout()
+            bottom.setContentsMargins(0, 0, 0, 0)
+            bottom.setSpacing(5)
+            cyc = QLabel()
+            cyc.setStyleSheet(f"color:{C['text3']};font-size:10px;")
+            cyc.setText(cyc.fontMetrics().elidedText(cycle_nm, Qt.ElideRight, 88))
+            bottom.addWidget(cyc, 1)
             amt = QLabel(fmt_money(amount))
-            amt.setStyleSheet(f"color:{color};font-size:11px;font-weight:700;")
-            rl.addWidget(amt)
+            amt.setStyleSheet(f"color:{color};font-size:11px;font-weight:800;")
+            amt.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            bottom.addWidget(amt, 0)
+            outer.addLayout(bottom)
+
             self._rem_lay.addWidget(row)
+        self._rem_lay.addStretch()
 
     def update_nw(self):
         """No-op — net worth now shown on Home tab."""

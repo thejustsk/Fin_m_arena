@@ -74,14 +74,15 @@ class BalancesTab(QWidget):
         root.setSpacing(16)
 
         h = QLabel("💰  Balances")
-        h.setStyleSheet(f"font-size:24px;font-weight:800;color:{C['text']};")
+        h.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
         root.addWidget(h)
 
         # ── Net Worth Hero Card ──
+        # Same gradient as the Wealth dashboard's Net Position header.
         self.nw_card = QFrame()
         self.nw_card.setStyleSheet(
-            f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f"stop:0 #4338CA,stop:1 #6366F1);border-radius:14px;}}"
+            f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            f"stop:0 #1e1b4b,stop:1 #312e81);border-radius:14px;}}"
             f"QLabel{{background:transparent;border:none;}}")
         nw_lay = QHBoxLayout(self.nw_card)
         nw_lay.setContentsMargins(24, 18, 24, 18)
