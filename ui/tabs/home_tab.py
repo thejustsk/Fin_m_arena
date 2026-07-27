@@ -8,6 +8,7 @@ from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header, ChartView
+from services.nw_constants import split_need_want
 import json
 
 
@@ -94,7 +95,8 @@ new Chart(document.getElementById('c3'), {
         labels: ['Spending'],
         datasets: [
             { label: 'Need', data: [__NEED__], backgroundColor: '#4F46E5', borderRadius: 6 },
-            { label: 'Want', data: [__WANT__], backgroundColor: '#F59E0B', borderRadius: 6 }
+            { label: 'Want', data: [__WANT__], backgroundColor: '#F59E0B', borderRadius: 6 },
+            { label: 'Not Set', data: [__NONE__], backgroundColor: '#9CA3AF', borderRadius: 6 }
         ]
     },
     options: {
@@ -104,7 +106,7 @@ new Chart(document.getElementById('c3'), {
             tooltip: {
                 callbacks: {
                     label: function(ctx) {
-                        var total = __NEED__ + __WANT__;
+                        var total = __NEED__ + __WANT__ + __NONE__;
                         var pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
                         var val = '₹' + ctx.raw.toLocaleString('en-IN');
                         return ctx.dataset.label + ': ' + val + ' (' + pct + '%)';
@@ -411,9 +413,8 @@ class HomeTab(QWidget):
             all_dates = sorted(trend_debit.keys())
             today_idx = -1
 
-        need_total = sum(t["amount"] for t in txns if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
-        want_total = sum(t["amount"] for t in txns if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
-        none_total = sum(t["amount"] for t in txns if t.get("neednwant") not in (0, 1) and t["tx_type"] == "DEBIT")
+        # Entry writes 0=Not Set, 1=Need, 2=Want — see services/nw_constants.
+        need_total, want_total, none_total = split_need_want(txns)
 
         acct_cr = {}
         acct_db = {}
@@ -437,8 +438,11 @@ class HomeTab(QWidget):
         html = html.replace("__TREND_L__", json.dumps(trend_labels))
         html = html.replace("__TREND_D__", json.dumps([round(trend_debit.get(d, 0), 2) for d in all_dates]))
         html = html.replace("__TODAY_IDX__", str(today_idx))
+        # Untagged spend is its own segment — folding it into Want was the
+        # old bug that made ~all spending look like discretionary "Want".
         html = html.replace("__NEED__", str(round(need_total, 2)))
-        html = html.replace("__WANT__", str(round(want_total + none_total, 2)))
+        html = html.replace("__WANT__", str(round(want_total, 2)))
+        html = html.replace("__NONE__", str(round(none_total, 2)))
         html = html.replace("__ACCT_L__", json.dumps(all_accts))
         html = html.replace("__ACCT_CR__", json.dumps([round(acct_cr.get(a, 0), 2) for a in all_accts]))
         html = html.replace("__ACCT_DB__", json.dumps([round(acct_db.get(a, 0), 2) for a in all_accts]))

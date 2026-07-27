@@ -2,6 +2,7 @@
 import uuid, hashlib, os, io, json
 from datetime import datetime
 from collections import OrderedDict
+from services.nw_constants import split_need_want
 
 def generate_doc_id():
     return f"FM-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -278,8 +279,7 @@ def export_monthly_pdf(filepath, month_name, year,
             story.append(d)
 
         # Need vs Want
-        need = sum(t["amount"] for t in transactions if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
-        want = sum(t["amount"] for t in transactions if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
+        need, want, _nw_none = split_need_want(transactions)
         total_nw = need + want
         if total_nw > 0:
             story.append(Spacer(1, 14))

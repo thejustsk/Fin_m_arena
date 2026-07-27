@@ -12,6 +12,7 @@ from collections import OrderedDict
 from ui.theme import C
 from ui.sidebar import fmt_money
 import json, uuid as _uuid, os, subprocess, sys
+from services.nw_constants import split_need_want, NW_FROM_LABEL
 
 COMPLETE_PAGE_SIZE = 150  # default, overridden by preferences table
 SCROLL_TRIGGER_PX = 400   # default, overridden by preferences table
@@ -82,8 +83,8 @@ FILTER_FIELDS = [
     {"key": "method", "label": "Payment Method", "type": "combo", "source": "methods"},
     {"key": "tx_type", "label": "Type", "type": "combo", "values": ["CREDIT", "DEBIT"]},
     {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER", "LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT", "FD_DEPOSIT", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT", "MF_PURCHASE", "MF_REDEMPTION", "FD_WITHDRAWAL", "SPLIT", "SPLIT_SETTLEMENT"]},
-    {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "None"]},
-    {"key": "pf_category", "label": "PF Category", "type": "combo", "source": "pf_categories"},
+    {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "Not Set"]},
+    {"key": "pf_category", "label": "Money Purpose", "type": "combo", "source": "pf_categories"},
     {"key": "person_org", "label": "Person/Org", "type": "text"},
     {"key": "description", "label": "Description", "type": "text"},
     {"key": "min_amount", "label": "Min Amount", "type": "number"},
@@ -435,7 +436,8 @@ new Chart(document.getElementById('c4'), {
         labels: ['Total Spend'],
         datasets: [
             { label: 'Need (₹__NEED__)', data: [__NEED__], backgroundColor: '#4F46E5', borderRadius: 6 },
-            { label: 'Want (₹__WANT__)', data: [__WANT__], backgroundColor: '#F59E0B', borderRadius: 6 }
+            { label: 'Want (₹__WANT__)', data: [__WANT__], backgroundColor: '#F59E0B', borderRadius: 6 },
+            { label: 'Not Set (₹__NONE__)', data: [__NONE__], backgroundColor: '#9CA3AF', borderRadius: 6 }
         ]
     },
     options: {
@@ -445,7 +447,7 @@ new Chart(document.getElementById('c4'), {
             tooltip: {
                 callbacks: {
                     label: function(ctx) {
-                        var total = __NEED__ + __WANT__;
+                        var total = __NEED__ + __WANT__ + __NONE__;
                         var pct = total > 0 ? ((ctx.raw / total) * 100).toFixed(1) : 0;
                         return ctx.dataset.label + ' (' + pct + '%)';
                     }
@@ -474,7 +476,7 @@ class ChartView(QWidget):
             lbl.setAlignment(Qt.AlignCenter)
             lay.addWidget(lbl)
 
-    def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db, need, want):
+    def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db, need, want, nw_none=0):
         if not self.view: return
         html = CHART_TEMPLATE
         html = html.replace("__CAT_L__", json.dumps(cat_l))
@@ -486,6 +488,7 @@ class ChartView(QWidget):
         html = html.replace("__TREND_DB__", json.dumps(trend_db))
         html = html.replace("__NEED__", str(round(need, 2)))
         html = html.replace("__WANT__", str(round(want, 2)))
+        html = html.replace("__NONE__", str(round(nw_none, 2)))
         import tempfile
         tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8")
         tmp.write(html); tmp.close()
@@ -1021,8 +1024,7 @@ class DatabaseTab(QWidget):
         all_dates = sorted(set(list(daily_cr.keys()) + list(daily_db.keys())))
 
         # 4. Need vs Want
-        need_total = sum(t["amount"] for t in txns if t.get("neednwant") == 1 and t["tx_type"] == "DEBIT")
-        want_total = sum(t["amount"] for t in txns if t.get("neednwant") == 0 and t["tx_type"] == "DEBIT")
+        need_total, want_total, none_total = split_need_want(txns)
 
         self.mv.render(
             list(cats.keys()), [round(v, 2) for v in cats.values()],
@@ -1030,7 +1032,7 @@ class DatabaseTab(QWidget):
             [d[5:] for d in all_dates],
             [round(daily_cr.get(d, 0), 2) for d in all_dates],
             [round(daily_db.get(d, 0), 2) for d in all_dates],
-            need_total, want_total)
+            need_total, want_total, none_total)
 
     def _print_monthly(self):
         if not hasattr(self, '_last_monthly'):
@@ -1377,8 +1379,7 @@ class DatabaseTab(QWidget):
             elif key == "kind":
                 txns = [t for t in txns if t.get("transaction_kind", "REGULAR") in vals]
             elif key == "neednwant":
-                nw_map = {"Need": 1, "Want": 0, "None": 2}
-                nw_ints = [nw_map.get(v, -1) for v in vals]
+                nw_ints = [NW_FROM_LABEL.get(v, -1) for v in vals]
                 txns = [t for t in txns if t.get("neednwant") in nw_ints]
             elif key == "pf_category":
                 txns = [t for t in txns if t.get("pf_category") in vals]

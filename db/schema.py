@@ -290,13 +290,18 @@ def run_migrations(db):
     # 2. Seed app_security row
     c.execute("INSERT OR IGNORE INTO app_security(id) VALUES(1)")
 
-    # 3. Seed PF categories (INSERT OR IGNORE — skips existing)
+    # 3. Seed Money Purpose categories (INSERT OR IGNORE — skips existing)
+    #    pf_id values are permanent keys referenced by transactions; only the
+    #    display_name is user-facing, so renaming a label is always safe.
     for pf_id, name in [
         ("commitment", "Commitment"), ("consumption", "Consumption"),
         ("growth", "Growth"), ("safety", "Safety"),
-        ("internal_transfer", "Internal Transfer"), ("nc", "NC"),
+        ("internal_transfer", "Internal Transfer"), ("nc", "Uncategorised"),
     ]:
         c.execute("INSERT OR IGNORE INTO pf_categories VALUES(?,?,1)", (pf_id, name))
+    # One-time relabel for existing databases seeded with the cryptic "NC".
+    c.execute("UPDATE pf_categories SET display_name='Uncategorised' "
+              "WHERE pf_id='nc' AND display_name='NC'")
 
     # 4. Seed categories (INSERT OR IGNORE)
     for cat_id, name, col, pf, tx in [

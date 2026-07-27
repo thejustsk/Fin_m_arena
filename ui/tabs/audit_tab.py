@@ -22,6 +22,8 @@ from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_header, _switch_tabs, FILTER_FIELDS, FlowLayout
+from services.nw_constants import (split_need_want, NW_FROM_LABEL,
+                                   NW_NONE, NW_NEED, NW_WANT)
 try:
     from ui.tabs.wealth_tab import _metric_card, _confirm
 except ImportError:
@@ -191,9 +193,10 @@ class TransactionEditDialog(QDialog):
             self.f_person.setEnabled(False)
 
         self.f_neednwant = QComboBox()
-        for val, label in [(None, "\u2014 Not Set"), (1, "Need"), (0, "Want")]:
+        for val, label in [(NW_NONE, "\u2014 Not Set"), (NW_NEED, "Need"), (NW_WANT, "Want")]:
             self.f_neednwant.addItem(label, val)
-        idx = self.f_neednwant.findData(tx.get("neednwant") if tx.get("neednwant") in (0, 1) else None)
+        _cur = tx.get("neednwant")
+        idx = self.f_neednwant.findData(_cur if _cur in (NW_NONE, NW_NEED, NW_WANT) else NW_NONE)
         if idx >= 0:
             self.f_neednwant.setCurrentIndex(idx)
 
@@ -224,7 +227,7 @@ class TransactionEditDialog(QDialog):
         form.addRow("Person / Org", self.f_person)
         form.addRow("Description", self.f_desc)
         form.addRow("Need / Want", self.f_neednwant)
-        form.addRow("PF Category", self.f_pf)
+        form.addRow("Money Purpose", self.f_pf)
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -465,7 +468,7 @@ class _AuditSubTab(QWidget):
         for c in self.lu.list_categories():
             self.bulk_category.addItem(c["display_name"], c["category_id"])
         self.bulk_neednwant = QComboBox()
-        for val, label in [("__nochange__", "\u2014 No Change \u2014"), (1, "Need"), (0, "Want"),
+        for val, label in [("__nochange__", "\u2014 No Change \u2014"), (NW_NEED, "Need"), (NW_WANT, "Want"),
                            ("__clear__", "Clear (Not Set)")]:
             self.bulk_neednwant.addItem(label, val)
         self.bulk_pf = QComboBox()
@@ -481,7 +484,7 @@ class _AuditSubTab(QWidget):
         bulk_lay.addWidget(self.bulk_category)
         bulk_lay.addWidget(QLabel("Need/Want:"))
         bulk_lay.addWidget(self.bulk_neednwant)
-        bulk_lay.addWidget(QLabel("PF Category:"))
+        bulk_lay.addWidget(QLabel("Money Purpose:"))
         bulk_lay.addWidget(self.bulk_pf)
         bulk_lay.addStretch()
         bulk_lay.addWidget(self.bulk_apply_btn)
@@ -686,8 +689,7 @@ class _AuditSubTab(QWidget):
             elif key == "kind":
                 rows = [t for t in rows if t.get("transaction_kind", "REGULAR") in vals]
             elif key == "neednwant":
-                nw_map = {"Need": 1, "Want": 0, "None": 2}
-                nw_ints = [nw_map.get(v, -1) for v in vals]
+                nw_ints = [NW_FROM_LABEL.get(v, -1) for v in vals]
                 rows = [t for t in rows if t.get("neednwant") in nw_ints]
             elif key == "pf_category":
                 rows = [t for t in rows if t.get("pf_category") in vals]
@@ -1504,14 +1506,13 @@ class _AuditSubTab(QWidget):
             if r["tx_type"] == "DEBIT":
                 cn = r.get("cat_name") or "Other"
                 cats[cn] = cats.get(cn, 0) + r["amount"]
-        need = sum(r["amount"] for r in rows if r.get("neednwant") == 1 and r["tx_type"] == "DEBIT")
-        want = sum(r["amount"] for r in rows if r.get("neednwant") == 0 and r["tx_type"] == "DEBIT")
+        need, want, nw_none = split_need_want(rows)
         self.chart_view.render(
             list(cats.keys()), [round(v, 2) for v in cats.values()],
             all_accts, acct_totals, trend_labels,
             [round(trend_cr.get(d, 0), 2) for d in all_dates],
             [round(trend_db.get(d, 0), 2) for d in all_dates],
-            round(need, 2), round(want, 2))
+            round(need, 2), round(want, 2), round(nw_none, 2))
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -346,7 +346,7 @@ class SettingsTab(QWidget):
     def _categories_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
         ab = QPushButton("+ Add Category"); ab.clicked.connect(self._add_category); l.addWidget(ab)
-        self.cat_table = mk_table(["Icon", "Name", "PF Category", "Tax", "Color", "Action"])
+        self.cat_table = mk_table(["Icon", "Name", "Money Purpose", "Tax", "Color", "Action"])
         l.addWidget(self.cat_table)
         return w
 
@@ -395,7 +395,11 @@ class SettingsTab(QWidget):
         f.addRow("Icon:", icon_row)
 
         name = QLineEdit(); name.setPlaceholderText("Category name"); f.addRow("Name:", name)
-        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"]); f.addRow("PF Category:", pf)
+        pf = QComboBox()
+        # Show friendly names, store the permanent pf_id.
+        for _pf in self.lu.list_pf_categories():
+            pf.addItem(_pf["display_name"], _pf["pf_id"])
+        f.addRow("Money Purpose:", pf)
 
         # Color disc selector
         color_row = QHBoxLayout()
@@ -423,7 +427,7 @@ class SettingsTab(QWidget):
             try:
                 cid = name.text().strip().lower().replace(" ", "_")
                 self.lu.add_category(cid, name.text().strip(), self._new_cat_color,
-                                      pf.currentText(), 1 if tax.isChecked() else 0)
+                                      pf.currentData(), 1 if tax.isChecked() else 0)
                 self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
                                 (f"cat_icon_{cid}", self._new_cat_icon))
                 self.db.commit()
@@ -458,8 +462,13 @@ class SettingsTab(QWidget):
         f.addRow("Icon:", icon_row)
 
         name = QLineEdit(); name.setText(cat_data.get("display_name", "")); f.addRow("Name:", name)
-        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"])
-        pf.setCurrentText(cat_data.get("default_pf_category", "nc")); f.addRow("PF Category:", pf)
+        pf = QComboBox()
+        for _pf in self.lu.list_pf_categories():
+            pf.addItem(_pf["display_name"], _pf["pf_id"])
+        _cur_pf = pf.findData(cat_data.get("default_pf_category", "nc"))
+        if _cur_pf >= 0:
+            pf.setCurrentIndex(_cur_pf)
+        f.addRow("Money Purpose:", pf)
 
         # Color disc selector
         current_color = cat_data.get("color_hex", "#4F46E5")
@@ -489,7 +498,7 @@ class SettingsTab(QWidget):
         if d.exec_() == QDialog.Accepted:
             self.db.execute(
                 "UPDATE categories SET display_name=?, color_hex=?, default_pf_category=?, tax_deductible=? WHERE category_id=?",
-                (name.text().strip(), self._edit_cat_color, pf.currentText(),
+                (name.text().strip(), self._edit_cat_color, pf.currentData(),
                  1 if tax.isChecked() else 0, cid))
             self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
                             (f"cat_icon_{cid}", self._edit_cat_icon))
@@ -1186,15 +1195,15 @@ class SettingsTab(QWidget):
                 ("Dashboard", "Landing page for the Wealth tab. Fixed Net Position bar (Investments, Receivable, Payable, Split Net, NET) plus 6 clickable KPI cards. Below sits a scrollable Alerts & Upcoming list."),
                 ("Net Position", "Investments = active + matured FDs plus mutual funds at current value. Receivable = outstanding on loans you gave. Payable = loans you took plus deposits you hold for others. NET = Investments + Receivable − Payable + Split Net."),
                 ("Alerts & Upcoming", "Rich cards sorted most-urgent-first: overdue loans (both directions), overdue deposit returns, EMIs due within 7 days, deposit returns and FD maturities within 30 days, and split settlements involving you."),
-                ("Loans I Give", "Track money lent to others. Entry: borrower, amount, interest rate/method, dates. List: color-coded cards by status, progress bar, inline edit, repayment history, Print PDF."),
-                ("Loans I Take", "Track money borrowed. EMI and Non-EMI types. EMI preview on entry. Amount types: Updated EMI, Original EMI, Full Pay, Custom. Alerts for overdue and upcoming EMIs."),
-                ("FD I Deposit", "Track fixed deposits. Simple/Compound interest with compounding frequency. Maturity preview on entry. Mark Matured, Mark Withdrawn (with premature fee calculation)."),
-                ("FD Others Deposit", "Money other people deposited with you — treated as a liability, since you owe it back. Interest-free toggle, repayment log, Mark as Closed when fully returned."),
+                ("Money Lent", "Track money lent to others. Entry: borrower, amount, interest rate/method, dates. List: color-coded cards by status, progress bar, inline edit, repayment history, Print PDF."),
+                ("Money Borrowed", "Track money borrowed. EMI and Non-EMI types. EMI preview on entry. Amount types: Updated EMI, Original EMI, Full Pay, Custom. Alerts for overdue and upcoming EMIs."),
+                ("My Fixed Deposits", "Track fixed deposits. Simple/Compound interest with compounding frequency. Maturity preview on entry. Mark Matured, Mark Withdrawn (with premature fee calculation)."),
+                ("Deposits Received", "Money other people deposited with you — treated as a liability, since you owe it back. Interest-free toggle, repayment log, Mark as Closed when fully returned."),
                 ("Mutual Funds", "Track MF investments. Purchase/SIP and Redemption. Auto-fetch NAV from api.mfapi.in. Background NAV fetch on app start. Fully-redeemed schemes (0 units) show a grey card with 0.00% return."),
             ]),
             ("\U0001f50d  Audit", "#D97706", [
                 ("Filters & Records", "11 filter fields with multi-value chips. Regular and Wealth transaction sub-tabs. Each card has Select (for bulk) and Edit buttons. Lazy scroll with configurable page size."),
-                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, PF Category. Both require 2FA/password verification. Progress popup during updates."),
+                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, Money Purpose. Both require 2FA/password verification. Progress popup during updates."),
                 ("Insights", "Analytics with quick period buttons. 4 KPI cards + 4 Chart.js charts. Auto-aggregates by month if range > 90 days."),
             ]),
             ("\U0001f4cb  Notes", "#EC4899", [
@@ -1264,7 +1273,7 @@ class SettingsTab(QWidget):
                 ("Cascade on Edit", "Editing a transaction's amount in Audit cascades to the linked wealth record (loan_amount, principal_amount, etc.). Editing the date cascades similarly. Status is auto-recalculated afterwards."),
                 ("Cascade on Delete", "Deleting a transaction in Audit unlinks the wealth record (sets linked_txn_id to NULL). Transfer transactions are deleted in pairs."),
                 ("Status Auto-Calc", "Status is computed automatically: ACTIVE (no payments), PARTIALLY_PAID (some payments), OVERDUE (past due date with a balance), REPAID (fully paid), CLOSED (manually marked). FDs additionally use MATURED, WITHDRAWN and PREMATURE_WITHDRAWN. Recalculated whenever a page or the dashboard refreshes."),
-                ("Interest Maths", "Loans I Give use principal minus repayments. Loans I Take and interest-bearing deposits run a full analysis supporting Simple or Compound interest, EMI or Non-EMI, using your actual payment dates. The Wealth dashboard reuses exactly the same functions, so its totals always match the sub-pages."),
+                ("Interest Maths", "Money Lent use principal minus repayments. Money Borrowed and interest-bearing deposits run a full analysis supporting Simple or Compound interest, EMI or Non-EMI, using your actual payment dates. The Wealth dashboard reuses exactly the same functions, so its totals always match the sub-pages."),
                 ("Split Balances", "Each group balance = what a member paid minus their share, adjusted by settlements. Positive means they are owed; negative means they owe. Settlement suggestions use a greedy algorithm to minimise the number of transfers."),
             ]),
             ("\U0001f4b3  Card Billing (FIFO)", "#D97706", [
