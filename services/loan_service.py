@@ -189,10 +189,16 @@ class LoanService:
             interest = round(principal * rate_pct / 100 * elapsed / 12, 2)
             current_value = max(principal + interest - total_paid, 0)
         else:
-            # Compound: simulate month-by-month with actual payments
+            # Compound: simulate month-by-month with actual payments.
+            #
+            # The loop only covers *completed* months. Payments made during the
+            # current (partial) month therefore fall outside every window, so
+            # they must be applied afterwards — otherwise a repayment logged
+            # today is ignored and the card shows the full balance still due.
             r = LoanService._monthly_rate(rate_pct, "ANNUAL")
             bal = float(principal)
             total_interest = 0.0
+            applied = 0.0
             for m in range(elapsed):
                 month_start = _date(start_date.year + (start_date.month + m - 1) // 12,
                                     (start_date.month + m - 1) % 12 + 1, 1)
@@ -203,11 +209,17 @@ class LoanService:
                 int_m = bal * r
                 total_interest += int_m
                 if payments:
-                    mp = sum(p["amount_paid"] for p in payments if mi <= p["payment_date"] < me)
+                    mp = sum(p["amount_paid"] for p in payments
+                             if mi <= str(p["payment_date"]) < me)
+                    applied += mp
                     bal = max(bal + int_m - mp, 0)
                 else:
                     bal = bal + int_m
-            current_value = max(bal, 0)
+            # Deduct anything not already applied inside the simulated months:
+            # payments dated in the current month, before the start date, or
+            # when no per-payment dates were supplied at all.
+            remaining_paid = max(total_paid - applied, 0)
+            current_value = max(bal - remaining_paid, 0)
             interest = round(total_interest, 2)
 
         return {

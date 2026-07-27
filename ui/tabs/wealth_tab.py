@@ -3787,10 +3787,15 @@ class MFPage(_FunctionPage):
             nav = self._last_nav(s["scheme_id"])
             net_inv = h["invested"] - h["redeemed"]
             cur_val = h["units"] * nav
-            ret = MFService.simple_return(net_inv, cur_val)
+            # A scheme with no units left is fully exited (or never bought).
+            # simple_return() would report a meaningless -100% against the
+            # leftover net-invested figure, so report a flat 0% and mark the
+            # card as inactive instead.
+            exited = round(h["units"] or 0, 4) <= 0
+            ret = 0.0 if exited else MFService.simple_return(net_inv, cur_val)
             self._list_data.append({
                 **s, "holdings": h, "nav": nav, "net_invested": net_inv,
-                "current_value": cur_val, "return_pct": ret,
+                "current_value": cur_val, "return_pct": ret, "exited": exited,
             })
         self._render_list()
 
@@ -3833,14 +3838,24 @@ class MFPage(_FunctionPage):
         all_cards = []
         for it in items:
             ret = it["return_pct"]
-            color = C["green"] if ret >= 0 else C["red"]
+            exited = it.get("exited")
+            # Zero-unit schemes render grey (archived look) with a flat 0%.
+            if exited:
+                color = C["text3"]
+                badge = "0.00%"
+                extra = (f"Invested: {fmt_money(it['holdings']['invested'])}  {MDOT}  "
+                         f"Redeemed: {fmt_money(it['holdings']['redeemed'])}")
+            else:
+                color = C["green"] if ret >= 0 else C["red"]
+                badge = f"{ret:+.2f}%"
+                extra = f"Invested: {fmt_money(it['net_invested'])}"
             card = WealthCard(
                 item_id=it["scheme_id"],
                 title=f"{it['amc_name']} \u2014 {it['scheme_name']}",
                 subtitle=f"{it['scheme_type'] or ''} {MDOT} {it['holdings']['units']:,.4f} units {MDOT} NAV {it['nav']:,.4f}",
                 amount_text=fmt_money(it["current_value"]),
-                badge_text=f"{ret:+.2f}%", badge_color=color,
-                extra_line=f"Invested: {fmt_money(it['net_invested'])}",
+                badge_text=badge, badge_color=color,
+                extra_line=extra,
             )
             card.clicked.connect(self._toggle_card)
 
@@ -3854,7 +3869,7 @@ class MFPage(_FunctionPage):
                 f"NAV: {it['nav']:,.4f}  {MDOT}  "
                 f"Invested: {fmt_money(it['net_invested'])}  {MDOT}  "
                 f"Current: {fmt_money(it['current_value'])}  {MDOT}  "
-                f"Return: {ret:+.2f}%"
+                + ("Return: 0.00% (fully redeemed)" if it.get("exited") else f"Return: {ret:+.2f}%")
             )
             detail_lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;padding:4px 0;")
             detail_lbl.setWordWrap(True)
