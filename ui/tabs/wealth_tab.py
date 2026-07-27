@@ -23,6 +23,10 @@ from ui.wealth_verify import WealthEditVerifyDialog
 EM_DASH = "\u2014"
 MDOT = "\u00b7"
 
+# Max alert cards built per refresh. Keeps the dashboard responsive on
+# databases with a very large number of overdue items.
+ALERT_RENDER_LIMIT = 150
+
 
 def TODAY():
     return date.today().isoformat()
@@ -91,6 +95,96 @@ def _hex_rgba(hex_color, alpha):
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
+
+
+# ── Shared money maths (dashboard <-> sub-pages must never disagree) ───────
+def _months_between(start_date, end_date, default=12):
+    """Whole months between two ISO dates — mirrors the sub-page helpers.
+
+    Falls back to *default* when the end date is missing or unparseable, so a
+    NULL due/return date can never crash a KPI calculation.
+    """
+    if not end_date:
+        return default
+    try:
+        sd = date.fromisoformat(str(start_date))
+        ed = date.fromisoformat(str(end_date))
+    except (TypeError, ValueError):
+        return default
+    return max(1, round((ed - sd).days / 30.44))
+
+
+def _is_overdue(due_date, today_s):
+    """True when *due_date* is a real date already in the past."""
+    return bool(due_date) and str(due_date) < today_s
+
+
+def _days_since(due_date, today):
+    """Days elapsed since *due_date* — 0 when the date is missing/invalid."""
+    try:
+        return (today - date.fromisoformat(str(due_date))).days
+    except (TypeError, ValueError):
+        return 0
+
+
+def _batch_sum_db(db, table, id_col, sum_col, ids):
+    """{id: SUM(sum_col)} for the given ids — one query instead of N."""
+    if not ids:
+        return {}
+    phs = ",".join(["?"] * len(ids))
+    rows = db.execute(
+        f"SELECT {id_col}, COALESCE(SUM({sum_col}),0) AS t FROM {table} "
+        f"WHERE {id_col} IN ({phs}) GROUP BY {id_col}", list(ids)).fetchall()
+    return {r[id_col]: r["t"] for r in rows}
+
+
+def _batch_rows_db(db, table, id_col, ids):
+    """{id: [row, ...]} for the given ids — one query instead of N."""
+    if not ids:
+        return {}
+    phs = ",".join(["?"] * len(ids))
+    rows = db.execute(
+        f"SELECT * FROM {table} WHERE {id_col} IN ({phs}) ORDER BY {id_col}",
+        list(ids)).fetchall()
+    grouped = {}
+    for r in rows:
+        d = dict(r)
+        grouped.setdefault(d[id_col], []).append(d)
+    return grouped
+
+
+def borrowed_outstanding(loan, total_paid, payments=None):
+    """Outstanding on a loan *I took* — identical maths to LoansTakePage."""
+    rate = loan.get("interest_rate") or 0
+    if (loan.get("emi_type") or "EMI") == "NON_EMI":
+        a = LoanService.non_emi_analysis(
+            loan["principal_amount"], rate, total_paid, loan["start_date"],
+            payments=payments, method=loan.get("interest_method") or "SIMPLE")
+    else:
+        months = _months_between(loan["start_date"], loan.get("due_date"))
+        a = LoanService.loan_analysis(
+            loan["principal_amount"], rate, months,
+            loan.get("interest_type") or "ANNUAL", total_paid, loan["start_date"],
+            method=loan.get("interest_method") or "COMPOUND")
+    return a["current_value"]
+
+
+def deposit_outstanding(dep, total_paid, payments=None):
+    """Outstanding on a deposit *received from someone else*.
+
+    Identical maths to FDOthersPage: interest-free deposits are a plain
+    principal-minus-repaid figure, interest-bearing ones go through the
+    LoanService analysis.
+    """
+    rate = dep.get("interest_rate") or 0
+    if not rate:
+        return max((dep.get("principal_amount") or 0) - total_paid, 0)
+    months = _months_between(dep["deposit_date"], dep.get("expected_return_date"))
+    a = LoanService.loan_analysis(
+        dep["principal_amount"], rate, months, "ANNUAL", total_paid,
+        dep["deposit_date"], payments=payments,
+        method=dep.get("interest_method") or "SIMPLE")
+    return a["current_value"]
 
 
 def status_color(status):
@@ -2840,6 +2934,7 @@ class FDOthersPage(_FunctionPage):
         # Batch recalc
         ids = [d["deposit_id"] for d in deps]
         repaid_map = self._batch_sum("deposit_repayments_to_others", "deposit_id", "amount_paid", ids)
+        repay_map = self._batch_query("deposit_repayments_to_others", "deposit_id", ids)
         today_str = date.today().isoformat()
         for d in deps:
             if d["status"] == "CLOSED":
@@ -2850,7 +2945,10 @@ class FDOthersPage(_FunctionPage):
             if not rate:
                 fully_paid = total >= d["principal_amount"]
             else:
-                fully_paid = total >= d["principal_amount"]  # simplified for batch
+                # Interest-bearing: repaying the principal alone doesn't clear
+                # the debt — the accrued interest is still outstanding.
+                fully_paid = deposit_outstanding(
+                    d, total, repay_map.get(d["deposit_id"], [])) <= 0
             if fully_paid and total > 0:
                 new_status = "REPAID"
             elif return_date and return_date < today_str:
@@ -3146,6 +3244,9 @@ class MFPage(_FunctionPage):
     ICON = "\U0001f4c8"
     TITLE = "Mutual Funds"
 
+    # Emitted once live NAVs land so aggregate views (dashboard) can re-read them
+    _nav_updated = _Signal()
+
     def __init__(self, repos, services, parent=None):
         self._nav_cache = {}
         self._nav_fetched = False
@@ -3179,6 +3280,8 @@ class MFPage(_FunctionPage):
         # Rebuild if page was already loaded with stale NAVs
         if self._loaded:
             self._build_list_data()
+        if results:
+            self._nav_updated.emit()
 
     def _make_loading_dlg(self):
         dlg = QDialog(self)
@@ -3684,10 +3787,15 @@ class MFPage(_FunctionPage):
             nav = self._last_nav(s["scheme_id"])
             net_inv = h["invested"] - h["redeemed"]
             cur_val = h["units"] * nav
-            ret = MFService.simple_return(net_inv, cur_val)
+            # A scheme with no units left is fully exited (or never bought).
+            # simple_return() would report a meaningless -100% against the
+            # leftover net-invested figure, so report a flat 0% and mark the
+            # card as inactive instead.
+            exited = round(h["units"] or 0, 4) <= 0
+            ret = 0.0 if exited else MFService.simple_return(net_inv, cur_val)
             self._list_data.append({
                 **s, "holdings": h, "nav": nav, "net_invested": net_inv,
-                "current_value": cur_val, "return_pct": ret,
+                "current_value": cur_val, "return_pct": ret, "exited": exited,
             })
         self._render_list()
 
@@ -3730,14 +3838,24 @@ class MFPage(_FunctionPage):
         all_cards = []
         for it in items:
             ret = it["return_pct"]
-            color = C["green"] if ret >= 0 else C["red"]
+            exited = it.get("exited")
+            # Zero-unit schemes render grey (archived look) with a flat 0%.
+            if exited:
+                color = C["text3"]
+                badge = "0.00%"
+                extra = (f"Invested: {fmt_money(it['holdings']['invested'])}  {MDOT}  "
+                         f"Redeemed: {fmt_money(it['holdings']['redeemed'])}")
+            else:
+                color = C["green"] if ret >= 0 else C["red"]
+                badge = f"{ret:+.2f}%"
+                extra = f"Invested: {fmt_money(it['net_invested'])}"
             card = WealthCard(
                 item_id=it["scheme_id"],
                 title=f"{it['amc_name']} \u2014 {it['scheme_name']}",
                 subtitle=f"{it['scheme_type'] or ''} {MDOT} {it['holdings']['units']:,.4f} units {MDOT} NAV {it['nav']:,.4f}",
                 amount_text=fmt_money(it["current_value"]),
-                badge_text=f"{ret:+.2f}%", badge_color=color,
-                extra_line=f"Invested: {fmt_money(it['net_invested'])}",
+                badge_text=badge, badge_color=color,
+                extra_line=extra,
             )
             card.clicked.connect(self._toggle_card)
 
@@ -3751,7 +3869,7 @@ class MFPage(_FunctionPage):
                 f"NAV: {it['nav']:,.4f}  {MDOT}  "
                 f"Invested: {fmt_money(it['net_invested'])}  {MDOT}  "
                 f"Current: {fmt_money(it['current_value'])}  {MDOT}  "
-                f"Return: {ret:+.2f}%"
+                + ("Return: 0.00% (fully redeemed)" if it.get("exited") else f"Return: {ret:+.2f}%")
             )
             detail_lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;padding:4px 0;")
             detail_lbl.setWordWrap(True)
@@ -4512,41 +4630,56 @@ class DashboardPage(QWidget):
         self._wealth_tab_ref = None
         self._nav_cb = None
         self._kpi = {}
+        self._clickables = []   # (widget, page_index) — rebound by set_nav()
         self._build()
 
     def set_nav(self, cb):
+        """Wire up navigation. Called by WealthTab *after* _build(), so the
+        click handlers have to be (re)attached here — binding them during
+        _build() captured a None callback and left every card/tile dead.
+        """
         self._nav_cb = cb
+        for widget, idx in self._clickables:
+            self._bind_click(widget, idx)
+
+    def _bind_click(self, widget, idx):
+        """Attach the click handler for a KPI card / quick-access tile."""
+        if idx == 6:  # Split lives in its own top-level tab
+            widget.mousePressEvent = lambda e: self._go_to_split()
+        else:
+            widget.mousePressEvent = lambda e, _i=idx: self._navigate(_i)
+
+    def _navigate(self, idx):
+        if self._nav_cb:
+            self._nav_cb(idx)
 
     def _build(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        inner = QWidget()
-        inner.setStyleSheet("background:transparent;")
-        lay = QVBoxLayout(inner)
-        lay.setContentsMargins(32, 24, 32, 24)
-        lay.setSpacing(16)
+        """Fixed header (title + net bar + KPI grid), scrollable alerts below.
+
+        The header keeps its natural height and the alerts region takes every
+        remaining pixel, so a long alert list scrolls on its own instead of
+        pushing the KPI cards off-screen.
+        """
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 24, 32, 24)
+        outer.setSpacing(16)
 
         hdr = QLabel("\U0001f4ca  Wealth Dashboard")
         hdr.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
-        lay.addWidget(hdr)
+        outer.addWidget(hdr)
 
-        # Net Position Bar
-        lay.addWidget(self._build_net_bar())
-        # KPI Grid 2×3
-        lay.addWidget(self._build_kpi_grid())
-        # Alerts (hidden if empty)
+        # ── Fixed region ──
+        net_bar = self._build_net_bar()
+        net_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        outer.addWidget(net_bar)
+
+        kpi_grid = self._build_kpi_grid()
+        kpi_grid.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        outer.addWidget(kpi_grid)
+
+        # ── Scrollable region: Alerts & Upcoming ──
         self.alerts_frame = self._build_alerts_frame()
-        lay.addWidget(self.alerts_frame)
-        # Quick Access 2×3
-        lay.addWidget(self._build_quick_access())
-
-        lay.addStretch()
-        scroll.setWidget(inner)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll)
+        outer.addWidget(self.alerts_frame, 1)
 
     # ── Net Position Bar ───────────────────────────────────────
     def _build_net_bar(self):
@@ -4562,11 +4695,16 @@ class DashboardPage(QWidget):
         t.setStyleSheet("color:rgba(255,255,255,0.5);font-size:10px;font-weight:700;letter-spacing:1.5px;")
         lay.addWidget(t)
         cols = QHBoxLayout(); cols.setSpacing(24)
-        for label, key in [("Investments", "inv"), ("Receivable", "recv"),
-                            ("Payable", "pay"), ("Split Net", "split")]:
+        for label, key, tip in [
+            ("Investments", "inv", "Fixed deposits (active + matured) and mutual funds"),
+            ("Receivable", "recv", "Outstanding on loans you gave out"),
+            ("Payable", "pay", "Loans you took plus deposits you're holding for others"),
+            ("Split Net", "split", "Owed to you minus what you owe across split groups"),
+        ]:
             c = QVBoxLayout(); c.setSpacing(1)
             ll = QLabel(label)
             ll.setStyleSheet("color:rgba(255,255,255,0.45);font-size:10px;font-weight:600;")
+            ll.setToolTip(tip)
             c.addWidget(ll)
             vv = QLabel("\u20b90")
             vv.setStyleSheet("color:white;font-size:16px;font-weight:800;")
@@ -4584,11 +4722,13 @@ class DashboardPage(QWidget):
     def _build_kpi_grid(self):
         wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
         grid = QGridLayout(wrap); grid.setSpacing(12)
+        # FD Others is money held for other people -> a liability, so it gets
+        # the same warning colour family as "Loans I Take" rather than green.
         items = [
             ("\U0001f91d", "Loans I Give",  C["amber"],  1),
             ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
-            ("\U0001f3e6", "FD Deposits",   C["accent"], 3),
-            ("\U0001f9fe", "FD Others",     C["green"],  4),
+            ("\U0001f3e6", "FD I Deposit",  C["accent"], 3),
+            ("\U0001f9fe", "FD Others",     C["red"],    4),
             ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
             ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
         ]
@@ -4599,10 +4739,22 @@ class DashboardPage(QWidget):
         return wrap
 
     def _go_to_split(self):
-        """Navigate to standalone Split tab via main window."""
+        """Navigate to the standalone Split tab via the main window.
+
+        window() only resolves once the dashboard is inside a shown MainWindow,
+        so walk up the parent chain as a fallback instead of silently doing
+        nothing.
+        """
         w = self.window()
-        if hasattr(w, '_nav'):
+        if hasattr(w, "_nav"):
             w._nav("split")
+            return
+        node = self.parent()
+        while node is not None:
+            if hasattr(node, "_nav"):
+                node._nav("split")
+                return
+            node = node.parent()
 
     def _kpi_card(self, icon, title, value, detail, color, idx):
         card = QFrame()
@@ -4621,144 +4773,294 @@ class DashboardPage(QWidget):
         lay.addWidget(vl)
         dl = QLabel(detail); dl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;")
         lay.addWidget(dl)
-        if idx == 6:  # Split → standalone tab
-            card.mousePressEvent = lambda e: self._go_to_split()
-        elif self._nav_cb:
-            card.mousePressEvent = lambda e, _i=idx: self._nav_cb(_i)
+        self._clickables.append((card, idx))
+        self._bind_click(card, idx)
         return card, vl, dl
 
     # ── Alerts ─────────────────────────────────────────────────
     def _build_alerts_frame(self):
+        """Alerts panel: fixed title row + independently scrolling list.
+
+        Returns the outer frame. Alert cards are appended to
+        ``self._alerts_lay`` by refresh().
+        """
         f = QFrame()
         f.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}"
-            f"QLabel{{background:transparent;border:none;}}")
-        self._alerts_lay = QVBoxLayout(f)
-        self._alerts_lay.setContentsMargins(16, 12, 16, 12)
-        self._alerts_lay.setSpacing(6)
-        f.hide()
+            f"QFrame#alertsPanel{{background:{C['surface']};"
+            f"border:1px solid {C['border2']};border-radius:12px;}}")
+        f.setObjectName("alertsPanel")
+        shell = QVBoxLayout(f)
+        shell.setContentsMargins(16, 12, 16, 12)
+        shell.setSpacing(8)
+
+        # Fixed title (stays put while the list scrolls)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self._alerts_title = QLabel("\u23f0  Alerts & Upcoming")
+        self._alerts_title.setStyleSheet(
+            f"font-size:14px;font-weight:700;color:{C['text']};"
+            f"background:transparent;border:none;")
+        head.addWidget(self._alerts_title)
+        head.addStretch()
+        self._alerts_count = QLabel("")
+        self._alerts_count.setStyleSheet(
+            f"font-size:11px;font-weight:700;color:{C['text3']};"
+            f"background:transparent;border:none;")
+        head.addWidget(self._alerts_count)
+        shell.addLayout(head)
+
+        # Scrollable list
+        self._alerts_scroll = QScrollArea()
+        self._alerts_scroll.setWidgetResizable(True)
+        self._alerts_scroll.setFrameShape(QFrame.NoFrame)
+        self._alerts_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._alerts_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;border:none;}")
+        inner = QWidget()
+        inner.setStyleSheet("background:transparent;")
+        self._alerts_lay = QVBoxLayout(inner)
+        self._alerts_lay.setContentsMargins(0, 0, 6, 0)
+        self._alerts_lay.setSpacing(8)
+        self._alerts_lay.setAlignment(Qt.AlignTop)
+        self._alerts_scroll.setWidget(inner)
+        shell.addWidget(self._alerts_scroll, 1)
         return f
 
-    # ── Quick Access ───────────────────────────────────────────
-    def _build_quick_access(self):
-        wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
-        grid = QGridLayout(wrap); grid.setSpacing(10)
-        tiles = [
-            ("\U0001f91d", "Loans I Give",  C["amber"],  1),
-            ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
-            ("\U0001f3e6", "FD Deposits",   C["accent"], 3),
-            ("\U0001f9fe", "FD Others",     C["green"],  4),
-            ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
-            ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
-        ]
-        for i, (icon, name, color, idx) in enumerate(tiles):
-            grid.addWidget(self._tile(icon, name, color, idx), i // 3, i % 3)
-        return wrap
+    def _alert_card(self, alert):
+        """One rich alert card — Cards-tab reminder styling, fmt_money amounts.
 
-    def _tile(self, icon, name, color, idx):
-        t = QFrame()
-        t.setCursor(QCursor(Qt.PointingHandCursor))
-        t.setMinimumHeight(50)
-        t.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
-            f"border-left:3px solid {color};border-radius:8px;}}"
-            f"QFrame:hover{{border-color:{color};background:{C['surface2']};}}"
+        *alert* is a dict with: icon, color, title, subtitle, amount,
+        amount_caption, badge.
+        """
+        card = QFrame()
+        color = alert["color"]
+        card.setStyleSheet(
+            f"QFrame#alertCard{{background:{C['surface']};"
+            f"border:1px solid {C['border2']};border-left:3px solid {color};"
+            f"border-radius:8px;}}"
+            f"QFrame#alertCard:hover{{background:{C['surface2']};}}"
             f"QLabel{{background:transparent;border:none;}}")
-        lay = QHBoxLayout(t); lay.setContentsMargins(14, 8, 14, 8); lay.setSpacing(8)
-        il = QLabel(icon); il.setStyleSheet("font-size:18px;"); lay.addWidget(il)
-        nl = QLabel(name); nl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
-        lay.addWidget(nl, 1)
-        ar = QLabel("\u203a"); ar.setStyleSheet(f"font-size:18px;color:{C['text3']};"); lay.addWidget(ar)
-        if idx == 6:  # Split → standalone tab
-            t.mousePressEvent = lambda e: self._go_to_split()
-        elif self._nav_cb:
-            t.mousePressEvent = lambda e, _i=idx: self._nav_cb(_i)
-        return t
+        card.setObjectName("alertCard")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(12, 10, 12, 10)
+        row.setSpacing(10)
+
+        icon = QLabel(alert["icon"])
+        icon.setStyleSheet("font-size:18px;")
+        icon.setFixedWidth(24)
+        icon.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        row.addWidget(icon)
+
+        mid = QVBoxLayout()
+        mid.setSpacing(2)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title = QLabel(alert["title"])
+        title.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+        title.setWordWrap(True)
+        title_row.addWidget(title)
+        if alert.get("badge"):
+            badge = QLabel(alert["badge"])
+            badge.setStyleSheet(
+                f"font-size:9px;font-weight:800;color:{color};"
+                f"background:{_hex_rgba(color, 0.12)};border-radius:4px;"
+                f"padding:2px 6px;letter-spacing:0.5px;")
+            title_row.addWidget(badge)
+        title_row.addStretch()
+        mid.addLayout(title_row)
+        if alert.get("subtitle"):
+            sub = QLabel(alert["subtitle"])
+            sub.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;")
+            sub.setWordWrap(True)
+            mid.addWidget(sub)
+        row.addLayout(mid, 1)
+
+        right = QVBoxLayout()
+        right.setSpacing(1)
+        right.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        amt = QLabel(alert["amount"])
+        amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{color};")
+        amt.setAlignment(Qt.AlignRight)
+        right.addWidget(amt)
+        if alert.get("amount_caption"):
+            cap = QLabel(alert["amount_caption"])
+            cap.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;")
+            cap.setAlignment(Qt.AlignRight)
+            right.addWidget(cap)
+        row.addLayout(right)
+        return card
+
+    # ── Data helpers ───────────────────────────────────────────
+    def _sync_statuses(self):
+        """Roll stale ACTIVE/PARTIALLY_PAID rows forward to OVERDUE.
+
+        The sub-pages do this in their own load_list(). Without it the
+        dashboard reported "0 overdue" until the user happened to open a
+        sub-tab, and then the same data suddenly produced different numbers.
+        """
+        for repo_key in ("loans", "borrowed"):
+            repo = self.repos.get(repo_key)
+            if repo and hasattr(repo, "sync_overdue"):
+                try:
+                    repo.sync_overdue()
+                except Exception:
+                    pass
+        # deposits_from_others has no repo-level batch sync
+        try:
+            self.db.execute(
+                "UPDATE deposits_from_others SET status='OVERDUE' "
+                "WHERE status IN ('ACTIVE','PARTIALLY_PAID') "
+                "AND expected_return_date IS NOT NULL AND expected_return_date < ?",
+                (date.today().isoformat(),))
+            self.db.commit()
+        except Exception:
+            pass
+        fd = self.repos.get("fd")
+        if fd and hasattr(fd, "sync_matured"):
+            try:
+                fd.sync_matured()
+            except Exception:
+                pass
 
     # ── Refresh ────────────────────────────────────────────────
     def refresh(self):
         db = self.db
         today = date.today()
         today_s = today.isoformat()
+        ACTIVE_SET = ("ACTIVE", "PARTIALLY_PAID", "OVERDUE")
 
-        # 1. Loans I Give
+        # Bring stale statuses up to date first so every figure below agrees
+        # with what the sub-tabs show.
+        self._sync_statuses()
+
+        # 1. Loans I Give — outstanding = principal - repaid (matches LoansGivePage)
         lg = db.execute("""
-            SELECT l.loan_amount, l.status, COALESCE(SUM(r.amount_paid),0) AS rep
-            FROM loans l LEFT JOIN repayments r ON r.loan_id=l.loan_id
-            WHERE l.status!='CLOSED' GROUP BY l.loan_id""").fetchall()
-        lg_out = sum(max(r["loan_amount"]-r["rep"],0) for r in lg)
-        lg_od = sum(1 for r in lg if r["status"]=="OVERDUE")
-        lg_act = sum(1 for r in lg if r["status"] in ("ACTIVE","PARTIALLY_PAID","OVERDUE"))
-
-        # 2. Loans I Take
-        lt = db.execute("""
-            SELECT l.principal_amount, l.status, l.due_date, l.emi_amount,
+            SELECT l.loan_id, l.loan_amount, l.status, l.due_date,
                    COALESCE(SUM(r.amount_paid),0) AS rep
-            FROM borrowed_loans l LEFT JOIN borrowed_loan_repayments r ON r.loan_id=l.loan_id
-            WHERE l.status!='CLOSED' GROUP BY l.loan_id""").fetchall()
-        lt_out = sum(max(r["principal_amount"]-r["rep"],0) for r in lt)
-        lt_od = sum(1 for r in lt if r["status"]=="OVERDUE")
-        lt_act = sum(1 for r in lt if r["status"] in ("ACTIVE","PARTIALLY_PAID","OVERDUE"))
+            FROM loans l LEFT JOIN repayments r ON r.loan_id=l.loan_id
+            WHERE l.status NOT IN ('CLOSED','REPAID','CLEARED')
+            GROUP BY l.loan_id""").fetchall()
+        lg_out = sum(max((r["loan_amount"] or 0) - r["rep"], 0) for r in lg)
+        lg_od = sum(1 for r in lg if r["status"] == "OVERDUE")
+        lg_act = sum(1 for r in lg if r["status"] in ACTIVE_SET)
+
+        # 2. Loans I Take — full interest-aware analysis (matches LoansTakePage)
+        lt = db.execute("""
+            SELECT * FROM borrowed_loans
+            WHERE status NOT IN ('CLOSED','REPAID')""").fetchall()
+        lt = [dict(r) for r in lt]
+        lt_ids = [r["loan_id"] for r in lt]
+        lt_paid = _batch_sum_db(db, "borrowed_loan_repayments", "loan_id", "amount_paid", lt_ids)
+        lt_reps = _batch_rows_db(db, "borrowed_loan_repayments", "loan_id", lt_ids)
+        lt_out = 0.0
+        for r in lt:
+            lt_out += borrowed_outstanding(
+                r, lt_paid.get(r["loan_id"], 0), lt_reps.get(r["loan_id"], []))
+        lt_od = sum(1 for r in lt if r["status"] == "OVERDUE")
+        lt_act = sum(1 for r in lt if r["status"] in ACTIVE_SET)
+        # Next upcoming EMI (guard against NULL emi_amount / NULL due_date)
         next_emi = None
         for r in lt:
-            dd = r["due_date"] or ""
-            if dd >= today_s and r["emi_amount"]>0:
+            dd = r.get("due_date") or ""
+            emi = r.get("emi_amount") or 0
+            if dd >= today_s and emi > 0:
                 if next_emi is None or dd < next_emi[0]:
-                    next_emi = (dd, r["emi_amount"])
+                    next_emi = (dd, emi)
 
-        # 3. FD Deposits
+        # 3. FD Deposits — ACTIVE value + separately tracked matured value
         fd = db.execute("""
             SELECT COUNT(*) AS c, COALESCE(SUM(principal_amount),0) AS p,
-                   COALESCE(SUM(CASE WHEN maturity_amount>0 THEN maturity_amount ELSE principal_amount END),0) AS m
+                   COALESCE(SUM(CASE WHEN maturity_amount>0 THEN maturity_amount
+                                     ELSE principal_amount END),0) AS m
             FROM fixed_deposits WHERE status='ACTIVE'""").fetchone()
-        fd_mat = db.execute("SELECT COUNT(*) AS c FROM fixed_deposits WHERE status='MATURED'").fetchone()
-        fd_next = db.execute(
-            "SELECT maturity_amount, maturity_date FROM fixed_deposits WHERE status='ACTIVE' ORDER BY maturity_date LIMIT 1"
-        ).fetchone()
+        fd_mat = db.execute("""
+            SELECT COUNT(*) AS c,
+                   COALESCE(SUM(CASE WHEN maturity_amount>0 THEN maturity_amount
+                                     ELSE principal_amount END),0) AS m
+            FROM fixed_deposits WHERE status='MATURED'""").fetchone()
+        # Matured-but-not-withdrawn money is still yours — count it as an asset.
+        fd_total = (fd["m"] or 0) + (fd_mat["m"] or 0)
 
-        # 4. FD Others
+        # 4. FD Others — money received from others; a LIABILITY, not an asset
         fo = db.execute("""
-            SELECT d.principal_amount, d.status, COALESCE(SUM(r.amount_paid),0) AS rep
-            FROM deposits_from_others d LEFT JOIN deposit_repayments_to_others r ON r.deposit_id=d.deposit_id
-            WHERE d.status!='CLOSED' GROUP BY d.deposit_id""").fetchall()
-        fo_out = sum(max(r["principal_amount"]-r["rep"],0) for r in fo)
-        fo_od = sum(1 for r in fo if r["status"]=="OVERDUE")
+            SELECT * FROM deposits_from_others
+            WHERE status NOT IN ('CLOSED','REPAID')""").fetchall()
+        fo = [dict(r) for r in fo]
+        fo_ids = [d["deposit_id"] for d in fo]
+        fo_paid = _batch_sum_db(db, "deposit_repayments_to_others", "deposit_id", "amount_paid", fo_ids)
+        fo_reps = _batch_rows_db(db, "deposit_repayments_to_others", "deposit_id", fo_ids)
+        fo_out = 0.0
+        for d in fo:
+            fo_out += deposit_outstanding(
+                d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
+        fo_od = sum(1 for d in fo if d["status"] == "OVERDUE")
+        fo_act = sum(1 for d in fo if d["status"] in ACTIVE_SET)
 
-        # 5. MF (no network — use last txn NAV)
-        mf_inv = 0; mf_cur = 0
-        schemes = self.repos["mf"].list_schemes()
-        for s in schemes:
-            h = self.repos["mf"].holdings(s["scheme_id"])
-            txns = self.repos["mf"].list_txns(s["scheme_id"])
-            nav = txns[-1]["nav"] if txns else 0
-            ni = h["invested"] - h["redeemed"]
-            cv = h["units"] * nav
-            mf_inv += ni; mf_cur += cv
+        # 5. MF — reuse the MF page's live NAV cache when it has one, so the
+        #    dashboard doesn't show stale last-transaction NAVs.
+        mf_inv = 0.0
+        mf_cur = 0.0
+        nav_cache = {}
+        mf_page = None
+        if self._wealth_tab_ref is not None:
+            mf_page = getattr(self._wealth_tab_ref, "mf_page", None)
+            nav_cache = getattr(mf_page, "_nav_cache", {}) or {}
+        for s in self.repos["mf"].list_schemes():
+            sid = s["scheme_id"]
+            h = self.repos["mf"].holdings(sid)
+            nav = nav_cache.get(sid)
+            if nav is None:
+                txns = self.repos["mf"].list_txns(sid)
+                nav = txns[-1]["nav"] if txns else 0
+            mf_inv += (h["invested"] or 0) - (h["redeemed"] or 0)
+            mf_cur += (h["units"] or 0) * (nav or 0)
         mf_ret = ((mf_cur - mf_inv) / mf_inv * 100) if mf_inv > 0 else 0
 
         # 6. Split
-        sp_owed = 0; sp_owe = 0; sp_unset = 0
+        sp_owed = 0.0
+        sp_owe = 0.0
+        sp_unset = 0
         if self.sr:
+            # _self_id can be None if the contact row didn't exist at build time
+            if self._self_id is None:
+                try:
+                    self._self_id = self.sr.get_self_contact()
+                except Exception:
+                    self._self_id = None
             for g in self.sr.list_groups():
                 bal = self.sr.get_group_balances(g["group_id"])
                 mb = bal.get(self._self_id, 0)
-                if mb > 0.01: sp_owed += mb; sp_unset += 1
-                elif mb < -0.01: sp_owe += abs(mb); sp_unset += 1
+                if mb > 0.01:
+                    sp_owed += mb
+                    sp_unset += 1
+                elif mb < -0.01:
+                    sp_owe += abs(mb)
+                    sp_unset += 1
 
         # ── Update KPI cards ──
-        v, d = self._kpi[1]; v.setText(fmt_money(lg_out)); d.setText(f"{lg_od} overdue / {lg_act} active")
+        v, d = self._kpi[1]
+        v.setText(fmt_money(lg_out)); d.setText(f"{lg_od} overdue / {lg_act} active")
         v, d = self._kpi[2]
-        emi_txt = f"EMI {fmt_money(next_emi[1])} due {next_emi[0]}" if next_emi else f"{lt_od} overdue / {lt_act} active"
+        emi_txt = (f"EMI {fmt_money(next_emi[1])} due {next_emi[0]}"
+                   if next_emi else f"{lt_od} overdue / {lt_act} active")
         v.setText(fmt_money(lt_out)); d.setText(emi_txt)
-        v, d = self._kpi[3]; v.setText(fmt_money(fd["m"])); d.setText(f"{fd['c']} active / {fd_mat['c']} matured")
-        v, d = self._kpi[4]; v.setText(fmt_money(fo_out)); d.setText(f"{fo_od} overdue / {len(fo)} active")
-        v, d = self._kpi[5]; v.setText(fmt_money(mf_cur)); d.setText(f"{mf_ret:+.1f}% return")
-        v, d = self._kpi[6]; v.setText(f"{fmt_money(sp_owed)} / {fmt_money(sp_owe)}"); d.setText(f"{sp_unset} unsettled groups")
+        v, d = self._kpi[3]
+        v.setText(fmt_money(fd_total))
+        d.setText(f"{fd['c']} active / {fd_mat['c']} matured")
+        v, d = self._kpi[4]
+        v.setText(fmt_money(fo_out)); d.setText(f"{fo_od} overdue / {fo_act} active")
+        v, d = self._kpi[5]
+        v.setText(fmt_money(mf_cur)); d.setText(f"{mf_ret:+.1f}% return")
+        v, d = self._kpi[6]
+        v.setText(f"{fmt_money(sp_owed)} / {fmt_money(sp_owe)}")
+        d.setText(f"{sp_unset} unsettled group{'' if sp_unset == 1 else 's'}")
 
         # ── Update Net Position ──
-        inv = fd["m"] + mf_cur
-        recv = lg_out + fo_out
-        pay = lt_out
+        # Assets: FDs + mutual funds.  Receivable: loans I gave out.
+        # Payable: loans I took + deposits I'm holding for other people.
+        inv = fd_total + mf_cur
+        recv = lg_out
+        pay = lt_out + fo_out
         sp_net = sp_owed - sp_owe
         net = inv + recv - pay + sp_net
         self._np_inv.setText(fmt_money(inv))
@@ -4770,69 +5072,195 @@ class DashboardPage(QWidget):
         self._np_net.setStyleSheet(f"color:{net_col};font-size:28px;font-weight:900;")
 
         # ── Update Alerts ──
-        while self._alerts_lay.count():
-            itm = self._alerts_lay.takeAt(0)
-            if itm.widget(): itm.widget().deleteLater()
+        # Cards are real QWidgets cleared recursively — nested layouts used to
+        # leak their labels because takeAt().widget() is None for a layout.
+        _clear_layout(self._alerts_lay)
 
-        alerts = []
-        # Overdue loans I give
+        def _due_phrase(days):
+            if days == 0:
+                return "today"
+            if days == 1:
+                return "tomorrow"
+            return f"in {days} days"
+
+        alerts = []   # (sort_key, dict)
+
+        # 1. Overdue loans I gave out
         od_give = db.execute("""
-            SELECT b.name, l.loan_amount, l.due_date FROM loans l
-            JOIN borrowers b ON b.borrower_id=l.borrower_id WHERE l.status='OVERDUE'""").fetchall()
+            SELECT b.name, l.loan_amount, l.due_date,
+                   COALESCE(SUM(r.amount_paid),0) AS rep
+            FROM loans l
+            JOIN borrowers b ON b.borrower_id=l.borrower_id
+            LEFT JOIN repayments r ON r.loan_id=l.loan_id
+            WHERE l.status='OVERDUE' GROUP BY l.loan_id
+            ORDER BY l.due_date""").fetchall()
         for r in od_give:
-            try: days = (today - date.fromisoformat(r["due_date"])).days
-            except: days = 0
-            alerts.append(("\u26a0\ufe0f", f"{r['name']} — overdue {days}d", fmt_money(r["loan_amount"]), C["red"]))
-        # Overdue loans I take
+            days = _days_since(r["due_date"], today)
+            outstanding = max((r["loan_amount"] or 0) - r["rep"], 0)
+            paid = r["rep"] or 0
+            sub = f"Due {r['due_date'] or EM_DASH}  {MDOT}  Lent {fmt_money(r['loan_amount'] or 0)}"
+            if paid > 0:
+                sub += f"  {MDOT}  Repaid {fmt_money(paid)}"
+            alerts.append((-1000 - days, {
+                "icon": "\u26a0\ufe0f", "color": C["red"], "badge": "OVERDUE",
+                "title": f"{r['name']} owes you",
+                "subtitle": f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  {sub}",
+                "amount": fmt_money(outstanding), "amount_caption": "outstanding",
+            }))
+
+        # 2. Overdue loans I took
+        lt_by_id = {r["loan_id"]: r for r in lt}
         od_take = db.execute("""
-            SELECT le.name, l.principal_amount, l.due_date FROM borrowed_loans l
-            JOIN lenders le ON le.lender_id=l.lender_id WHERE l.status='OVERDUE'""").fetchall()
+            SELECT l.loan_id, le.name, l.due_date FROM borrowed_loans l
+            JOIN lenders le ON le.lender_id=l.lender_id
+            WHERE l.status='OVERDUE' ORDER BY l.due_date""").fetchall()
         for r in od_take:
-            try: days = (today - date.fromisoformat(r["due_date"])).days
-            except: days = 0
-            alerts.append(("\u26a0\ufe0f", f"{r['name']} — overdue {days}d", fmt_money(r["principal_amount"]), C["red"]))
-        # EMI due soon (7 days)
+            days = _days_since(r["due_date"], today)
+            loan = lt_by_id.get(r["loan_id"])
+            outstanding = borrowed_outstanding(
+                loan, lt_paid.get(r["loan_id"], 0), lt_reps.get(r["loan_id"], [])
+            ) if loan else 0
+            paid = lt_paid.get(r["loan_id"], 0)
+            sub = f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  Due {r['due_date'] or EM_DASH}"
+            if paid > 0:
+                sub += f"  {MDOT}  Repaid {fmt_money(paid)}"
+            alerts.append((-1000 - days, {
+                "icon": "\U0001f3db\ufe0f", "color": C["red"], "badge": "OVERDUE",
+                "title": f"You owe {r['name']}",
+                "subtitle": sub,
+                "amount": fmt_money(outstanding), "amount_caption": "outstanding",
+            }))
+
+        # 3. Deposits I hold that are overdue for return
+        for d in fo:
+            if d["status"] != "OVERDUE":
+                continue
+            rd = d.get("expected_return_date")
+            days = _days_since(rd, today)
+            out = deposit_outstanding(
+                d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
+            rate = d.get("interest_rate") or 0
+            sub = f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  Return by {rd or EM_DASH}"
+            sub += f"  {MDOT}  {'Interest-free' if not rate else f'{rate}% interest'}"
+            alerts.append((-1000 - days, {
+                "icon": "\U0001f9fe", "color": C["red"], "badge": "OVERDUE",
+                "title": f"Return deposit to {d.get('depositor_name') or 'depositor'}",
+                "subtitle": sub,
+                "amount": fmt_money(out), "amount_caption": "to return",
+            }))
+
+        # 4. EMI due within 7 days
         soon7 = (today + timedelta(days=7)).isoformat()
         emi_due = db.execute("""
-            SELECT le.name, b.emi_amount, b.due_date FROM borrowed_loans b
+            SELECT le.name, b.emi_amount, b.due_date, b.principal_amount
+            FROM borrowed_loans b
             JOIN lenders le ON le.lender_id=b.lender_id
-            WHERE b.status IN ('ACTIVE','PARTIALLY_PAID') AND b.due_date BETWEEN ? AND ?
+            WHERE b.status IN ('ACTIVE','PARTIALLY_PAID')
+              AND b.emi_amount IS NOT NULL AND b.emi_amount > 0
+              AND b.due_date BETWEEN ? AND ?
             ORDER BY b.due_date""", (today_s, soon7)).fetchall()
         for r in emi_due:
-            alerts.append(("\U0001f514", f"{r['name']} EMI due {r['due_date']}", fmt_money(r["emi_amount"]), C["amber"]))
-        # FD maturing soon (30 days)
+            days = _days_since(r["due_date"], today) * -1
+            alerts.append((days, {
+                "icon": "\U0001f514", "color": C["amber"],
+                "badge": "DUE SOON" if days <= 3 else "",
+                "title": f"EMI to {r['name']}",
+                "subtitle": (f"Due {_due_phrase(days)} on {r['due_date']}  {MDOT}  "
+                             f"Principal {fmt_money(r['principal_amount'] or 0)}"),
+                "amount": fmt_money(r["emi_amount"]), "amount_caption": "EMI due",
+            }))
+
+        # 5. Deposits due back within 30 days
         soon30 = (today + timedelta(days=30)).isoformat()
+        for d in fo:
+            rd = d.get("expected_return_date")
+            if d["status"] == "OVERDUE" or not rd or not (today_s <= str(rd) <= soon30):
+                continue
+            days = _days_since(rd, today) * -1
+            out = deposit_outstanding(
+                d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
+            rate = d.get("interest_rate") or 0
+            alerts.append((days, {
+                "icon": "\U0001f9fe", "color": C["amber"],
+                "badge": "DUE SOON" if days <= 7 else "",
+                "title": f"Deposit return to {d.get('depositor_name') or 'depositor'}",
+                "subtitle": (f"Due {_due_phrase(days)} on {rd}  {MDOT}  "
+                             f"{'Interest-free' if not rate else f'{rate}% interest'}"),
+                "amount": fmt_money(out), "amount_caption": "to return",
+            }))
+
+        # 6. FDs maturing within 30 days
         fd_alerts = db.execute("""
-            SELECT a.display_name, f.maturity_amount, f.maturity_date FROM fixed_deposits f
-            JOIN accounts a ON a.account_id=f.bank_account_id
+            SELECT COALESCE(a.display_name,'Fixed Deposit') AS display_name,
+                   f.maturity_amount, f.principal_amount, f.maturity_date,
+                   f.interest_rate
+            FROM fixed_deposits f
+            LEFT JOIN accounts a ON a.account_id=f.bank_account_id
             WHERE f.status='ACTIVE' AND f.maturity_date BETWEEN ? AND ?
             ORDER BY f.maturity_date""", (today_s, soon30)).fetchall()
         for r in fd_alerts:
-            alerts.append(("\U0001f3e6", f"{r['display_name']} FD maturing {r['maturity_date']}",
-                           fmt_money(r["maturity_amount"]), C["accent"]))
-        # Split pending (self involved)
-        if self.sr:
+            days = _days_since(r["maturity_date"], today) * -1
+            amt = r["maturity_amount"] or r["principal_amount"] or 0
+            gain = amt - (r["principal_amount"] or 0)
+            sub = (f"Matures {_due_phrase(days)} on {r['maturity_date']}  {MDOT}  "
+                   f"Principal {fmt_money(r['principal_amount'] or 0)}")
+            if gain > 0:
+                sub += f"  {MDOT}  Interest {fmt_money(gain)}"
+            alerts.append((days, {
+                "icon": "\U0001f3e6", "color": C["accent"],
+                "badge": "MATURING" if days <= 7 else "",
+                "title": f"{r['display_name']} FD matures",
+                "subtitle": sub,
+                "amount": fmt_money(amt), "amount_caption": "at maturity",
+            }))
+
+        # 7. Split settlements involving me
+        if self.sr and self._self_id:
             for g in self.sr.list_groups():
-                sugs = self.sr.suggest_settlements(g["group_id"])
-                for fid, fn, tid, tn, amt in sugs:
-                    if fid == self._self_id or tid == self._self_id:
-                        alerts.append(("\U0001f4b8", f"{fn} \u2192 {tn} ({g['name']})", fmt_money(amt), "#7C3AED"))
+                for fid, fn, tid, tn, amt in self.sr.suggest_settlements(g["group_id"]):
+                    if fid != self._self_id and tid != self._self_id:
+                        continue
+                    i_pay = (fid == self._self_id)
+                    alerts.append((500, {
+                        "icon": "\U0001f4b8", "color": "#7C3AED",
+                        "badge": "YOU PAY" if i_pay else "YOU RECEIVE",
+                        "title": (f"Pay {tn}" if i_pay else f"Collect from {fn}"),
+                        "subtitle": f"Group: {g['name']}  {MDOT}  Suggested settlement",
+                        "amount": fmt_money(amt),
+                        "amount_caption": "to pay" if i_pay else "to receive",
+                    }))
+
+        # Most urgent first (overdue, then soonest due)
+        alerts.sort(key=lambda a: a[0])
 
         if alerts:
-            tl = QLabel("Alerts & Upcoming")
-            tl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
-            self._alerts_lay.addWidget(tl)
-            for icon, text, amt, col in alerts[:8]:
-                row = QHBoxLayout(); row.setSpacing(8)
-                il = QLabel(icon); il.setStyleSheet("font-size:14px;"); row.addWidget(il)
-                tx = QLabel(text); tx.setStyleSheet(f"font-size:12px;color:{C['text']};font-weight:600;")
-                row.addWidget(tx, 1)
-                al = QLabel(amt); al.setStyleSheet(f"font-size:12px;font-weight:800;color:{col};"); row.addWidget(al)
-                self._alerts_lay.addLayout(row)
-            self.alerts_frame.show()
+            total = len(alerts)
+            self._alerts_count.setText(f"{total} item{'' if total == 1 else 's'}")
+            # Hard cap on rendered widgets. Building thousands of cards would
+            # stall the UI thread; the list is sorted most-urgent-first, so the
+            # cap only ever hides the least pressing items.
+            shown = alerts[:ALERT_RENDER_LIMIT]
+            for _, data in shown:
+                self._alerts_lay.addWidget(self._alert_card(data))
+            if total > len(shown):
+                more = QLabel(
+                    f"+ {total - len(shown)} more \u2014 showing the "
+                    f"{len(shown)} most urgent")
+                more.setStyleSheet(
+                    f"font-size:11px;color:{C['text3']};font-weight:600;"
+                    f"background:transparent;border:none;padding:8px 4px;")
+                more.setAlignment(Qt.AlignCenter)
+                self._alerts_lay.addWidget(more)
+            self._alerts_scroll.verticalScrollBar().setValue(0)
         else:
-            self.alerts_frame.hide()
-
+            self._alerts_count.setText("")
+            empty = QLabel("\u2705  Nothing needs your attention right now.")
+            empty.setStyleSheet(
+                f"font-size:12px;color:{C['text3']};font-weight:600;"
+                f"background:transparent;border:none;padding:18px 4px;")
+            empty.setAlignment(Qt.AlignCenter)
+            self._alerts_lay.addWidget(empty)
+        self.alerts_frame.show()
     def load_list(self, force=False):
         self.refresh()
 
@@ -4898,6 +5326,12 @@ class WealthTab(QWidget):
         for p in self._pages:
             p._wealth_tab_ref = self
             self.stack.addWidget(p)
+        # When the background NAV fetch lands, the dashboard's MF figures are
+        # stale — refresh it so it agrees with the Mutual Funds page.
+        try:
+            self.mf_page._nav_updated.connect(self._on_mf_navs_updated)
+        except Exception:
+            pass
         self.btn_dash.clicked.connect(lambda: self._goto(0))
         self.btn_lg.clicked.connect(lambda: self._goto(1))
         self.btn_lt.clicked.connect(lambda: self._goto(2))
@@ -4907,13 +5341,25 @@ class WealthTab(QWidget):
         _switch_tabs(self._nav_btns, 0)
         self.stack.setCurrentIndex(0)
 
+    def _on_mf_navs_updated(self):
+        """Live NAVs arrived — keep the dashboard in sync with the MF page."""
+        if self.stack.currentIndex() == 0:
+            self.dashboard_page.refresh()
+
     def _goto(self, i):
+        if not 0 <= i < len(self._pages):
+            return
         _switch_tabs(self._nav_btns, i)
         self.stack.setCurrentIndex(i)
         # Mark MF page as user-visited (enables loading dialog)
         if hasattr(self._pages[i], '_user_visited'):
             self._pages[i]._user_visited = True
         self._pages[i].load_list()
+        # The dashboard aggregates every other page, so it must always
+        # recompute — its load_list() short-circuits on nothing, but going
+        # through refresh() keeps the intent explicit.
+        if i == 0:
+            self.dashboard_page.refresh()
 
     def refresh(self):
         for p in self._pages:

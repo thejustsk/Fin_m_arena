@@ -195,28 +195,306 @@ def _build_home_savings():
     return w
 
 def _build_home_tiles():
+    """Mirrors HomeTab's Quick Access row — all 11 tiles, same order/colours."""
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
+    # Kept in sync with ui/tabs/home_tab.py -> Quick Access `tiles`
     tiles = [
-        [("📝", "Transactions", C['accent']), ("🗄️", "Database", "#8B5CF6"), ("💰", "Balances", C['green'])],
-        [("💳", "Credit Cards", C['red']), ("💳", "Debit Cards", "#F59E0B"), ("🔍", "Audit", C['amber'])],
-        [("📈", "Wealth", "#10B981"), ("📋", "Notes", "#EC4899"), ("⚙️", "Settings", C['text3'])],
-        [("📧", "Gmail", "#06B6D4")],
+        ("📝", "Transactions", C['accent']),
+        ("🗄️", "Database", "#8B5CF6"),
+        ("💰", "Balances", C['green']),
+        ("💳", "Credit Cards", C['red']),
+        ("💳", "Debit Cards", "#F59E0B"),
+        ("🤝", "Split", "#7C3AED"),
+        ("🔍", "Audit", C['amber']),
+        ("📈", "Wealth", "#10B981"),
+        ("📋", "Notes", "#EC4899"),
+        ("⚙️", "Settings", C['text3']),
+        ("📧", "Gmail", "#06B6D4"),
     ]
-    for row_tiles in tiles:
-        row = QHBoxLayout(); row.setSpacing(6)
-        for ico, name, color in row_tiles:
-            tile = QFrame()
-            tile.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border']};border-left:3px solid {color};border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
-            tl = QHBoxLayout(tile); tl.setContentsMargins(10, 6, 10, 6)
-            il = QLabel(ico); il.setStyleSheet("font-size:16px;background:transparent;border:none;"); il.setFixedWidth(22)
-            tl.addWidget(il); tl.addWidget(_make_label(name, 11, C['text']))
-            row.addWidget(tile)
+    # The real app lays these out in one horizontal row; wrap at 4 per row here
+    # so the prototype stays readable inside the narrow preview panel.
+    row = None
+    for i, (ico, name, color) in enumerate(tiles):
+        if i % 4 == 0:
+            row = QHBoxLayout(); row.setSpacing(6)
+            lay.addLayout(row)
+        tile = QFrame()
+        tile.setMinimumHeight(44)
+        tile.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
+            f"border-left:3px solid {color};border-radius:8px;}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        tl = QHBoxLayout(tile); tl.setContentsMargins(12, 4, 12, 4); tl.setSpacing(6)
+        il = QLabel(ico); il.setStyleSheet("font-size:16px;background:transparent;border:none;"); il.setFixedWidth(22)
+        tl.addWidget(il); tl.addWidget(_make_label(name, 11, C['text']), 1)
+        row.addWidget(tile)
+    if row is not None:
         row.addStretch()
-        lay.addLayout(row)
+    return w
+
+
+def _build_home_greeting():
+    """The greeting header + date, exactly as HomeTab renders it."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+    top = QHBoxLayout()
+    top.addWidget(_make_label("Good Morning, Arjun \u2600\ufe0f", 24, C['text'], True))
+    top.addStretch()
+    top.addWidget(_make_label("Monday, 27 July 2026", 13, C['text3'], True))
+    lay.addLayout(top)
+    lay.addWidget(_make_label("Welcome to your financial summary...", 13, C['text3']))
+    lay.addWidget(_make_sep())
+    note = _make_card_frame()
+    nl = QVBoxLayout(note); nl.setContentsMargins(14, 10, 14, 10); nl.setSpacing(3)
+    nl.addWidget(_make_label("Where the name comes from", 11, C['text'], True))
+    nl.addWidget(_make_label(
+        "Captured in the setup wizard, editable at Settings \u2192 Accounts \u2192 Your Name.\n"
+        "Morning before 12pm, Afternoon before 5pm, Evening after. If no name is set "
+        "it simply reads \u201cGood Morning\u201d.", 11, C['text3']))
+    lay.addWidget(note)
+    return w
+
+
+# ── SPLIT EXPENSES ──────────────────────────────────────
+def _build_split_status():
+    """Indigo status card + group selector, as the Split tab shows them."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+
+    grp = QHBoxLayout(); grp.setSpacing(8)
+    grp.addWidget(_make_label("Group:", 12, C['text'], True))
+    grp.addWidget(_make_combo(["Goa Trip", "Flatmates", "Office Lunch"]), 1)
+    grp.addWidget(_make_btn("+ New Group"))
+    lay.addLayout(grp)
+
+    card = QFrame()
+    card.setStyleSheet(
+        "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 #1e1b4b,stop:1 #312e81);border-radius:14px;}"
+        "QLabel{background:transparent;border:none;}")
+    cl = QVBoxLayout(card); cl.setContentsMargins(20, 14, 20, 14); cl.setSpacing(10)
+    t = QLabel("\U0001f91d  SPLIT STATUS \u2014 Arjun (You)")
+    t.setStyleSheet("color:white;font-size:12px;font-weight:700;letter-spacing:1px;")
+    cl.addWidget(t)
+    row = QHBoxLayout(); row.setSpacing(22)
+    for val, lbl, col in [("Rs.1,250", "Owed to you", "#A7F3D0"),
+                          ("Rs.480", "You owe", "#FCA5A5"),
+                          ("2", "\u2705 Settled", "#A7F3D0"),
+                          ("1", "\u26a0\ufe0f Unsettled", "#FCA5A5")]:
+        c = QVBoxLayout(); c.setSpacing(2)
+        v = QLabel(val); v.setStyleSheet(f"color:{col};font-size:20px;font-weight:900;")
+        c.addWidget(v)
+        h = QLabel(lbl); h.setStyleSheet("color:rgba(255,255,255,0.7);font-size:10px;font-weight:600;")
+        c.addWidget(h)
+        row.addLayout(c)
+    row.addStretch()
+    cl.addLayout(row)
+    lay.addWidget(card)
+
+    nav = QHBoxLayout(); nav.setSpacing(6)
+    for txt, active in [("\U0001f4ca Overview", True), ("\U0001f4b0 Record Expense", False),
+                        ("\U0001f4b8 Record Settlement", False), ("\U0001f5a8  Print", False)]:
+        nav.addWidget(_make_btn(txt, active))
+    nav.addStretch()
+    lay.addLayout(nav)
+    return w
+
+
+def _build_split_overview():
+    """The 3 KPI boxes, balance matrix, suggestions and transaction list."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+
+    kpis = QHBoxLayout(); kpis.setSpacing(8)
+    for lbl, val, col in [("Total Expenses", "Rs.4,800", C['accent']),
+                          ("Pending", "Rs.1,730", C['amber']),
+                          ("Settled", "Rs.3,070", C['green'])]:
+        card = _make_card_frame()
+        cl = QVBoxLayout(card); cl.setContentsMargins(14, 10, 14, 10); cl.setSpacing(3)
+        cl.addWidget(_make_label(val, 17, col, True))
+        cl.addWidget(_make_label(lbl, 10, C['text3'], True))
+        kpis.addWidget(card)
+    lay.addLayout(kpis)
+
+    lay.addWidget(_make_label("\U0001f4ca Balance Matrix", 13, C['text'], True))
+    for name, text, col in [("Arjun (You)", "are owed Rs.1,250", C['green']),
+                            ("Priya", "owes Rs.780", C['red']),
+                            ("Rahul", "\u2014 settled", C['text3'])]:
+        r = QFrame()
+        tint = _hex_rgba(col, 0.08) if col != C['text3'] else C['surface']
+        r.setStyleSheet(f"QFrame{{background:{tint};border:1px solid {col};"
+                        f"border-radius:8px;}}QLabel{{background:transparent;border:none;}}")
+        rl = QHBoxLayout(r); rl.setContentsMargins(12, 7, 12, 7)
+        rl.addWidget(_make_label(f"{name} {text}", 12, col, True))
+        lay.addWidget(r)
+
+    lay.addWidget(_make_label("\U0001f4a1 Settlement Suggestions", 13, C['text'], True))
+    for frm, to, amt in [("Priya", "Arjun (You)", "Rs.780"), ("Rahul", "Arjun (You)", "Rs.470")]:
+        r = QFrame()
+        r.setStyleSheet(f"QFrame{{background:{_hex_rgba(C['accent'], 0.06)};"
+                        f"border:1px solid {_hex_rgba(C['accent'], 0.2)};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}")
+        rl = QHBoxLayout(r); rl.setContentsMargins(12, 7, 12, 7)
+        rl.addWidget(_make_label(f"{frm}  \u2192  {to}", 12, C['text'], True), 1)
+        rl.addWidget(_make_label(amt, 13, C['accent'], True))
+        lay.addWidget(r)
+
+    lay.addWidget(_make_label("\U0001f4cb Transactions", 13, C['text'], True))
+    for ico, t1, t2, amt, col in [
+            ("\U0001f4b0", "Hotel \u2014 paid by Arjun (You)", "2026-07-20  \u00b7  Click to edit", "Rs.3,000", C['red']),
+            ("\U0001f4b8", "Priya  \u2192  Arjun (You)", "2026-07-22  \u00b7  Click to edit", "Rs.1,000", C['green'])]:
+        r = _make_card_frame()
+        rl = QHBoxLayout(r); rl.setContentsMargins(12, 7, 12, 7); rl.setSpacing(10)
+        il = QLabel(ico); il.setStyleSheet("font-size:15px;background:transparent;border:none;")
+        rl.addWidget(il)
+        cv = QVBoxLayout(); cv.setSpacing(1)
+        cv.addWidget(_make_label(t1, 12, C['text'], True))
+        cv.addWidget(_make_label(t2, 10, C['text3']))
+        rl.addLayout(cv, 1)
+        rl.addWidget(_make_label(amt, 13, col, True))
+        lay.addWidget(r)
+    return w
+
+
+def _build_split_expense():
+    """Record Expense form with the three split modes."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+    r1 = QHBoxLayout(); r1.setSpacing(8)
+    r1.addWidget(_make_spin("Rs. ", 3000))
+    r1.addWidget(_make_combo(["Paid by: Arjun (You)", "Paid by: Priya", "Paid by: Rahul"]))
+    lay.addLayout(r1)
+    r2 = QHBoxLayout(); r2.setSpacing(8)
+    r2.addWidget(_make_combo(["Equal Split", "Percentage", "Custom"]))
+    r2.addWidget(_make_combo(["SBI Savings", "HDFC Bank", "Cash at Home"]))
+    lay.addLayout(r2)
+    lay.addWidget(_make_label("Shares", 12, C['text'], True))
+    for nm, amt in [("Arjun (You)", "1,000.00"), ("Priya", "1,000.00"), ("Rahul", "1,000.00")]:
+        r = QHBoxLayout(); r.setSpacing(6)
+        r.addWidget(_make_label(nm, 12, C['text']))
+        r.addWidget(_make_spin("Rs. ", float(amt.replace(",", ""))))
+        lay.addLayout(r)
+    lay.addWidget(_make_btn("\U0001f4b0  Record Expense", True))
+    lay.addWidget(_make_label(
+        "Equal divides evenly, Percentage takes % per person, Custom lets you type "
+        "each share. A matching ledger transaction is created automatically.",
+        10, C['text3']))
+    return w
+
+
+def _build_split_print():
+    """What the Print button produces."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+    lay.addWidget(_make_btn("\U0001f5a8  Print", True))
+    card = _make_card_frame()
+    cl = QVBoxLayout(card); cl.setContentsMargins(16, 12, 16, 12); cl.setSpacing(5)
+    cl.addWidget(_make_label("Split Group \u2014 Goa Trip", 14, C['text'], True))
+    cl.addWidget(_make_label("PDF contents, in the same order as the Overview:", 11, C['text3']))
+    for line in ["\u2022  Group info \u2014 members, transaction counts, date",
+                 "\u2022  The 3 KPI boxes \u2014 Total Expenses, Pending, Settled",
+                 "\u2022  \U0001f4ca  Balance Matrix \u2014 who is owed, who owes",
+                 "\u2022  \U0001f4a1  Settlement Suggestions \u2014 minimal transfers",
+                 "\u2022  \U0001f4cb  Transactions \u2014 every expense and settlement",
+                 "\u2022  Verification page \u2014 Doc ID, hash, watermark, QR code"]:
+        cl.addWidget(_make_label(line, 11, C['text2']))
+    lay.addWidget(card)
+    lay.addWidget(_make_label(
+        "Printing asks for your password or TOTP first \u2014 the same check used for "
+        "wealth and audit edits.", 10, C['text3']))
+    return w
+
+
+# ── WEALTH DASHBOARD ────────────────────────────────────
+def _build_wealth_dashboard():
+    """Net Position bar + KPI grid + scrollable alert cards."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+
+    bar = QFrame()
+    bar.setStyleSheet(
+        "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 #1e1b4b,stop:1 #312e81);border-radius:14px;}"
+        "QLabel{background:transparent;border:none;}")
+    bl = QVBoxLayout(bar); bl.setContentsMargins(20, 12, 20, 12); bl.setSpacing(6)
+    t = QLabel("NET WEALTH POSITION")
+    t.setStyleSheet("color:rgba(255,255,255,0.5);font-size:10px;font-weight:700;letter-spacing:1.5px;")
+    bl.addWidget(t)
+    cols = QHBoxLayout(); cols.setSpacing(20)
+    for lbl, val in [("Investments", "Rs.22,021"), ("Receivable", "Rs.92,422"),
+                     ("Payable", "Rs.5,01,023"), ("Split Net", "Rs.366")]:
+        c = QVBoxLayout(); c.setSpacing(1)
+        h = QLabel(lbl); h.setStyleSheet("color:rgba(255,255,255,0.45);font-size:10px;font-weight:600;")
+        c.addWidget(h)
+        v = QLabel(val); v.setStyleSheet("color:white;font-size:15px;font-weight:800;")
+        c.addWidget(v)
+        cols.addLayout(c)
+    cols.addStretch()
+    bl.addLayout(cols)
+    net = QLabel("NET: -Rs.3,86,214")
+    net.setStyleSheet("color:#fca5a5;font-size:24px;font-weight:900;")
+    bl.addWidget(net)
+    lay.addWidget(bar)
+
+    grid = QVBoxLayout(); grid.setSpacing(6)
+    kpis = [("\U0001f91d", "Loans I Give", "Rs.92,422", "4 overdue / 8 active", C['amber']),
+            ("\U0001f3db\ufe0f", "Loans I Take", "Rs.967", "EMI Rs.83 due 2027-07-23", C['red']),
+            ("\U0001f3e6", "FD I Deposit", "Rs.152", "1 active / 0 matured", C['accent']),
+            ("\U0001f9fe", "FD Others", "Rs.5,00,056", "0 overdue / 2 active", C['red']),
+            ("\U0001f4c8", "Mutual Funds", "Rs.21,869", "+4.8% return", "#10B981"),
+            ("\U0001f91d", "Split Expenses", "Rs.381 / Rs.16", "3 unsettled groups", "#7C3AED")]
+    row = None
+    for i, (ico, title, val, det, col) in enumerate(kpis):
+        if i % 3 == 0:
+            row = QHBoxLayout(); row.setSpacing(6); grid.addLayout(row)
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame{{background:{_hex_rgba(col, 0.06)};border:1.5px solid {col};"
+            f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        cl = QVBoxLayout(card); cl.setContentsMargins(12, 8, 12, 8); cl.setSpacing(3)
+        top = QHBoxLayout(); top.setSpacing(5)
+        il = QLabel(ico); il.setStyleSheet("font-size:15px;background:transparent;border:none;")
+        top.addWidget(il); top.addWidget(_make_label(title, 11, C['text2'], True), 1)
+        cl.addLayout(top)
+        cl.addWidget(_make_label(val, 17, col, True))
+        cl.addWidget(_make_label(det, 10, C['text3'], True))
+        row.addWidget(card)
+    lay.addLayout(grid)
+
+    alerts = QFrame()
+    alerts.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+                         f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+    al = QVBoxLayout(alerts); al.setContentsMargins(14, 10, 14, 10); al.setSpacing(6)
+    hd = QHBoxLayout()
+    hd.addWidget(_make_label("\u23f0  Alerts & Upcoming", 13, C['text'], True))
+    hd.addStretch()
+    hd.addWidget(_make_label("4 items", 10, C['text3'], True))
+    al.addLayout(hd)
+    for ico, title, sub, amt, cap, col, badge in [
+            ("\u26a0\ufe0f", "Ravi owes you", "Overdue by 37 days  \u00b7  Lent Rs.1,059", "Rs.1,059", "outstanding", C['red'], "OVERDUE"),
+            ("\U0001f514", "EMI to HDFC", "Due in 3 days on 2026-07-30", "Rs.4,500", "EMI due", C['amber'], "DUE SOON"),
+            ("\U0001f3e6", "SBI FD matures", "Matures in 12 days  \u00b7  Interest Rs.613", "Rs.10,613", "at maturity", C['accent'], "")]:
+        r = QFrame()
+        r.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+                        f"border-left:3px solid {col};border-radius:8px;}}"
+                        f"QLabel{{background:transparent;border:none;}}")
+        rl = QHBoxLayout(r); rl.setContentsMargins(11, 8, 11, 8); rl.setSpacing(8)
+        il = QLabel(ico); il.setStyleSheet("font-size:15px;background:transparent;border:none;")
+        rl.addWidget(il)
+        mid = QVBoxLayout(); mid.setSpacing(1)
+        tr = QHBoxLayout(); tr.setSpacing(5)
+        tr.addWidget(_make_label(title, 12, C['text'], True))
+        if badge:
+            tr.addWidget(_make_badge(badge, col))
+        tr.addStretch()
+        mid.addLayout(tr)
+        mid.addWidget(_make_label(sub, 10, C['text3'], True))
+        rl.addLayout(mid, 1)
+        rv = QVBoxLayout(); rv.setSpacing(0)
+        rv.addWidget(_make_label(amt, 13, col, True))
+        rv.addWidget(_make_label(cap, 9, C['text3']))
+        rl.addLayout(rv)
+        al.addWidget(r)
+    lay.addWidget(alerts)
     return w
 
 
 # ── 2. TRANSACTION ENTRY ────────────────────────────────
+
 def _build_tx_entry():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
     r1 = QHBoxLayout(); r1.setSpacing(8)
@@ -583,6 +861,31 @@ def _build_wealth_fd():
     lay.addWidget(card)
     return w
 
+def _build_wealth_fd_others():
+    """Deposits received from others — a liability you repay."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
+    card = _make_card_frame()
+    card.setStyleSheet(f"QFrame{{background:{_hex_rgba(C['amber'], 0.06)};border:1.5px solid {C['amber']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+    cl = QVBoxLayout(card); cl.setContentsMargins(14, 10, 14, 10); cl.setSpacing(4)
+    top = QHBoxLayout(); top.addWidget(_make_label("Uncle Ramesh", 14, C['text'], True)); top.addStretch()
+    top.addWidget(_make_badge("PARTIALLY_PAID", C['amber'])); cl.addLayout(top)
+    mid = QHBoxLayout()
+    mid.addWidget(_make_label("Interest-free  |  Received 2026-02-01  |  Return by 2026-12-01", 11, C['text3']))
+    mid.addStretch()
+    mid.addWidget(_make_label("Rs.50,000  Principal", 18, C['text'], True)); cl.addLayout(mid)
+    bar_bg = QFrame(); bar_bg.setFixedHeight(6); bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:3px;")
+    bl = QHBoxLayout(bar_bg); bl.setContentsMargins(0,0,0,0)
+    bf = QFrame(); bf.setStyleSheet(f"background:{C['amber']};border-radius:3px;")
+    bl.addWidget(bf, 40); bl.addStretch(60); cl.addWidget(bar_bg)
+    cl.addWidget(_make_label("Rs.30,000 Outstanding  |  Rs.20,000 returned  |  40% repaid", 11, C['text3']))
+    lay.addWidget(card)
+    lay.addWidget(_make_label(
+        "This is money someone placed with you, so it counts as a LIABILITY \u2014 it "
+        "feeds the Payable column on the Wealth dashboard, not Investments.",
+        10, C['text3']))
+    return w
+
+
 def _build_wealth_mf():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
     card = _make_card_frame()
@@ -723,6 +1026,32 @@ def _build_gmail_stub():
 
 
 # ── 11. SETTINGS ─────────────────────────────────────────
+def _build_settings_profile():
+    """The profile card that sits above + Add Account."""
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+    card = QFrame()
+    card.setStyleSheet(
+        f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+        f"border-left:3px solid {C['accent']};border-radius:10px;}}"
+        f"QLabel{{background:transparent;border:none;}}")
+    rl = QHBoxLayout(card); rl.setContentsMargins(16, 12, 16, 12); rl.setSpacing(12)
+    ic = QLabel("\U0001f464"); ic.setStyleSheet("font-size:20px;background:transparent;border:none;")
+    rl.addWidget(ic)
+    cv = QVBoxLayout(); cv.setSpacing(1)
+    cap = QLabel("YOUR NAME")
+    cap.setStyleSheet(f"color:{C['text3']};font-size:10px;font-weight:700;letter-spacing:1px;background:transparent;border:none;")
+    cv.addWidget(cap)
+    cv.addWidget(_make_label("Arjun", 15, C['text'], True))
+    rl.addLayout(cv, 1)
+    rl.addWidget(_make_btn("\u270f\ufe0f  Edit"))
+    lay.addWidget(card)
+    lay.addWidget(_make_btn("+ Add Account", True))
+    lay.addWidget(_make_label(
+        "Editing opens the same verification dialog used for wealth and audit edits.",
+        10, C['text3']))
+    return w
+
+
 def _build_settings_accounts():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
     lay.addWidget(_make_btn("+ Add Account", True))
@@ -843,6 +1172,19 @@ WALKTHROUGH_DB = [
         "tab_key": "home",
         "sub_tabs": [
             {
+                "title": "Greeting & Date",
+                "proto_func": _build_home_greeting,
+                "explanation": (
+                    "The header greets you by name based on the time of day.\n\n"
+                    "\u2022 Good Morning before 12pm, Afternoon before 5pm, Evening after\n"
+                    "\u2022 Icon changes with the greeting (sun / cloud / moon)\n"
+                    "\u2022 Your name is captured in the setup wizard\n"
+                    "\u2022 Change it at Settings \u2192 Accounts \u2192 Your Name (password confirmed)\n"
+                    "\u2022 With no name set it simply reads \u201cGood Morning\u201d\n"
+                    "\u2022 Today's date sits on the right"
+                ),
+            },
+            {
                 "title": "KPI Period Cards",
                 "proto_func": _build_home_kpi,
                 "explanation": (
@@ -889,6 +1231,8 @@ WALKTHROUGH_DB = [
                 "proto_func": _build_home_tiles,
                 "explanation": (
                     "One-click navigation to every tab in the app.\n\n"
+                    "\u2022 11 tiles in a single row: Transactions, Database, Balances, "
+                    "Credit Cards, Debit Cards, Split, Audit, Wealth, Notes, Settings, Gmail\n"
                     "• 10 tiles: Transactions, Database, Balances, Credit Cards, Debit Cards, Audit, Wealth, Notes, Settings, Gmail\n"
                     "• Each tile has emoji icon + label + colored left border\n"
                     "• Click any tile to navigate to that tab\n"
@@ -1043,6 +1387,88 @@ WALKTHROUGH_DB = [
         ],
     },
     {
+        "title": "Split Expenses",
+        "icon": "\U0001f91d",
+        "tab_key": "split",
+        "sub_tabs": [
+            {
+                "title": "Groups & Status",
+                "proto_func": _build_split_status,
+                "explanation": (
+                    "Split shared costs with friends, flatmates or colleagues.\n\n"
+                    "\u2022 Pick a group from the dropdown, or create one with + New Group\n"
+                    "\u2022 New Group: name it, search your contact directory, tick members, "
+                    "or add a brand-new contact inline\n"
+                    "\u2022 You are always a member and appear as \u201cYour Name (You)\u201d\n"
+                    "\u2022 The indigo status card totals every group: Owed to you, You owe, "
+                    "and the Settled / Unsettled group counts\n"
+                    "\u2022 Sub-navigation: Overview, Record Expense, Record Settlement, Print"
+                ),
+            },
+            {
+                "title": "Overview",
+                "proto_func": _build_split_overview,
+                "explanation": (
+                    "Everything about the selected group on one page.\n\n"
+                    "3 KPI boxes:\n"
+                    "\u2022 Total Expenses \u2014 everything logged in the group\n"
+                    "\u2022 Pending \u2014 the sum of all positive balances still to be settled\n"
+                    "\u2022 Settled \u2014 the total already transferred\n\n"
+                    "Balance Matrix: one row per member. Green = they are owed, "
+                    "red = they owe, grey = square. Balance = what they paid minus "
+                    "their share, adjusted by settlements.\n\n"
+                    "Settlement Suggestions: the minimum set of transfers that clears "
+                    "every debt. Shows \u201cAll settled\u201d when nothing is owed.\n\n"
+                    "Transactions: expenses and settlements together, newest first. "
+                    "Click any row to edit it."
+                ),
+            },
+            {
+                "title": "Record Expense",
+                "proto_func": _build_split_expense,
+                "explanation": (
+                    "Log a shared cost and split it.\n\n"
+                    "\u2022 Amount, who paid, date, description, account and payment method\n"
+                    "\u2022 Equal Split \u2014 divides evenly across every member\n"
+                    "\u2022 Percentage \u2014 give each member a share of 100%\n"
+                    "\u2022 Custom \u2014 type each person's exact amount\n"
+                    "\u2022 Shares recalculate live as you change the amount or mode\n"
+                    "\u2022 A matching ledger transaction is created automatically "
+                    "(category Finance, PF category Commitment)"
+                ),
+            },
+            {
+                "title": "Record Settlement",
+                "proto_func": _build_split_expense,
+                "explanation": (
+                    "Log an actual payment between two members.\n\n"
+                    "\u2022 From, To, amount, date and method\n"
+                    "\u2022 Auto-fills from the Settlement Suggestions \u2014 pick a suggested "
+                    "transfer and the fields populate\n"
+                    "\u2022 Balances and suggestions update immediately\n"
+                    "\u2022 Also writes a linked ledger transaction, so your account "
+                    "balances stay correct"
+                ),
+            },
+            {
+                "title": "Print Overview",
+                "proto_func": _build_split_print,
+                "explanation": (
+                    "The Print button sits next to Record Settlement and exports the "
+                    "whole Overview for the selected group.\n\n"
+                    "\u2022 Asks for your password or TOTP first \u2014 the same verification "
+                    "used for wealth and audit edits\n"
+                    "\u2022 Choose where to save, then optionally open the PDF\n"
+                    "\u2022 Contents mirror the screen: group info, the 3 KPI boxes, "
+                    "Balance Matrix, Settlement Suggestions and every transaction\n"
+                    "\u2022 Colour-coded sections match the on-screen cards\n"
+                    "\u2022 Ends with a verification page: Doc ID, content hash, "
+                    "diagonal watermark and a QR code"
+                ),
+            },
+        ],
+    },
+    {
         "title": "Credit Cards",
         "icon": "💳",
         "tab_key": "cards",
@@ -1135,6 +1561,25 @@ WALKTHROUGH_DB = [
         "tab_key": "wealth",
         "sub_tabs": [
             {
+                "title": "Dashboard",
+                "proto_func": _build_wealth_dashboard,
+                "explanation": (
+                    "The landing page of the Wealth tab \u2014 everything at a glance.\n\n"
+                    "Fixed top section:\n"
+                    "\u2022 Net Position bar: Investments, Receivable, Payable, Split Net, NET\n"
+                    "\u2022 NET = Investments + Receivable \u2212 Payable + Split Net\n"
+                    "\u2022 Investments = active + matured FDs, plus mutual funds at current value\n"
+                    "\u2022 Payable includes deposits others placed with you \u2014 you owe that money back\n"
+                    "\u2022 Turns red when negative\n\n"
+                    "6 KPI cards (click any to open that sub-page; Split opens its own tab).\n\n"
+                    "Alerts & Upcoming scrolls independently below:\n"
+                    "\u2022 Sorted most urgent first, with OVERDUE / DUE SOON badges\n"
+                    "\u2022 Overdue loans both ways, EMIs within 7 days, deposit returns and "
+                    "FD maturities within 30 days, split settlements involving you\n"
+                    "\u2022 Amounts show what is still outstanding, not the original figure"
+                ),
+            },
+            {
                 "title": "Loans I Give",
                 "proto_func": _build_wealth_loans_give,
                 "explanation": (
@@ -1181,7 +1626,7 @@ WALKTHROUGH_DB = [
             },
             {
                 "title": "FD Others Deposit",
-                "proto_func": _build_wealth_fd,
+                "proto_func": _build_wealth_fd_others,
                 "explanation": (
                     "Track deposits received from others:\n\n"
                     "Entry: Depositor (searchable + add new), Amount, Interest-Free toggle, Rate, Received Into, Date, Expected Return Date\n\n"
@@ -1335,6 +1780,19 @@ WALKTHROUGH_DB = [
         "icon": "⚙️",
         "tab_key": "settings",
         "sub_tabs": [
+            {
+                "title": "Your Name",
+                "proto_func": _build_settings_profile,
+                "explanation": (
+                    "Your display name lives at the top of Settings \u2192 Accounts.\n\n"
+                    "\u2022 Captured during the setup wizard alongside your password\n"
+                    "\u2022 Edit asks for your password or TOTP before saving\n"
+                    "\u2022 Drives the Home greeting: \u201cGood Morning, Arjun\u201d\n"
+                    "\u2022 Drives the \u201c(You)\u201d label everywhere in Split\n"
+                    "\u2022 Home and Split refresh immediately after a change\n"
+                    "\u2022 Leave it blank and the app falls back to a plain greeting and \u201cYou\u201d"
+                ),
+            },
             {
                 "title": "Accounts",
                 "proto_func": _build_settings_accounts,
