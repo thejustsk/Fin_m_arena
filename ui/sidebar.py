@@ -1,6 +1,6 @@
 """Sidebar — white theme with indigo accent, icon toggle, due reminders."""
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                              QPushButton, QFrame, QScrollArea)
+                              QPushButton, QFrame, QScrollArea, QSizePolicy)
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer
 from PyQt5.QtGui import QCursor
 from datetime import date, timedelta
@@ -53,9 +53,14 @@ EXPANDED_W = 230
 COLLAPSED_W = 76
 
 # Reminder cards live inside the expanded sidebar. Width is pinned so a long
-# card name can never stretch the layout past the sidebar edge.
-_REM_CARD_W = EXPANDED_W - 30      # sidebar margins + scrollbar gutter
-_REM_TEXT_W = _REM_CARD_W - 40     # room for the overdue flag + padding
+# card name can never stretch the layout past the sidebar edge, and kept well
+# inside the sidebar so the cards read as an indented sub-list.
+_REM_CARD_W = EXPANDED_W - 56      # sidebar padding + layout margins + scrollbar gutter
+_REM_TEXT_W = _REM_CARD_W - 24     # room for the overdue flag + padding
+_REM_MAX_CARDS = 10                # cards rendered; heading shows the true total
+_REM_CARD_H = 46                   # natural two-row height; never compress below this
+_REM_PANEL_MIN_H = 108             # ~2 cards visible even on short windows
+_REM_PANEL_MAX_H = 210             # beyond this the list scrolls
 ANIM_STEPS = 10
 ANIM_MS = 180
 
@@ -201,7 +206,11 @@ class Sidebar(QWidget):
         self._rem_scroll = QScrollArea()
         self._rem_scroll.setWidgetResizable(True)
         self._rem_scroll.setFrameShape(QFrame.NoFrame)
-        self._rem_scroll.setMaximumHeight(200)
+        # Reserve real vertical space. Without a minimum the surrounding layout
+        # squeezes this panel down to a few pixels on shorter windows and the
+        # cards get crushed instead of scrolling.
+        self._rem_scroll.setMinimumHeight(_REM_PANEL_MIN_H)
+        self._rem_scroll.setMaximumHeight(_REM_PANEL_MAX_H)
         # Never let content dictate width — the sidebar is a fixed 230px and a
         # long card name would otherwise force a horizontal scrollbar and push
         # the amount out of view.
@@ -217,11 +226,16 @@ class Sidebar(QWidget):
             "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}")
         rem_inner = QWidget()
         rem_inner.setStyleSheet("background:transparent;")
+        # Grow to the natural height of the cards; the QScrollArea then scrolls
+        # it. Without this the widget is squeezed to the viewport and the cards
+        # overlap each other.
+        rem_inner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
         self._rem_lay = QVBoxLayout(rem_inner)
         # Right padding reserves room for the thin scrollbar so cards don't
         # sit underneath it.
         self._rem_lay.setContentsMargins(10, 0, 8, 0)
         self._rem_lay.setSpacing(5)
+        self._rem_lay.setSizeConstraint(QVBoxLayout.SetMinAndMaxSize)
         self._rem_scroll.setWidget(rem_inner)
         self.lay.addWidget(self._rem_scroll)
         self._rem_scroll.hide()
@@ -358,6 +372,9 @@ class Sidebar(QWidget):
                 w.deleteLater()
 
         if not self._cr:
+            # Reset the caption too, or a stale "(8)" lingers after the data goes.
+            self._rem_header.setText("PAYMENT DUES")
+            self._rem_header.setToolTip("")
             self._rem_header.hide(); self._rem_scroll.hide()
             self._has_dues = False; self._due_count = 0; self._refresh_dots()
             return
@@ -405,9 +422,22 @@ class Sidebar(QWidget):
         self._due_count = len(reminders)
 
         if not reminders:
+            self._rem_header.setText("PAYMENT DUES")
+            self._rem_header.setToolTip("")
             self._rem_header.hide(); self._rem_scroll.hide()
             self._has_dues = False; self._due_count = 0; self._refresh_dots()
             return
+
+        # Show the count beside the heading, e.g. "PAYMENT DUES (3)".
+        shown = min(len(reminders), _REM_MAX_CARDS)
+        if len(reminders) > shown:
+            self._rem_header.setText(f"PAYMENT DUES ({shown} of {len(reminders)})")
+        else:
+            self._rem_header.setText(f"PAYMENT DUES ({len(reminders)})")
+        n_overdue = sum(1 for r in reminders if r[5])
+        self._rem_header.setToolTip(
+            f"{len(reminders)} pending due{'' if len(reminders) == 1 else 's'}"
+            + (f"  \u00b7  {n_overdue} overdue" if n_overdue else ""))
 
         # Expanded: show cards. Collapsed: show dots.
         if self._expanded:
@@ -420,7 +450,7 @@ class Sidebar(QWidget):
         # Two-row card: name on top (elided, never wraps), cycle + amount below.
         # A single row could not fit "name · cycle · amount" in 230px — the
         # amount got squeezed to nothing or the card grew past the sidebar.
-        for _, name, cycle_nm, amount, color, is_overdue in reminders[:10]:
+        for _, name, cycle_nm, amount, color, is_overdue in reminders[:_REM_MAX_CARDS]:
             row = QFrame()
             row.setStyleSheet(
                 f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
@@ -429,6 +459,15 @@ class Sidebar(QWidget):
             # Fixed width keeps every card identical and inside the sidebar,
             # regardless of how long the card name is.
             row.setFixedWidth(_REM_CARD_W)
+            # Fixed height as well — otherwise a short sidebar compresses the
+            # cards into unreadable slivers instead of scrolling them.
+            row.setFixedHeight(_REM_CARD_H)
+            # Tooltip on the card (and every child) so hovering anywhere works.
+            # Setting it only on the elided label meant the surrounding padding
+            # showed nothing.
+            due_word = "Overdue" if is_overdue else "Due"
+            row.setToolTip(
+                f"{name}\n{cycle_nm}\n{due_word}: {fmt_money(amount)}")
             outer = QVBoxLayout(row)
             outer.setContentsMargins(9, 6, 9, 6)
             outer.setSpacing(3)
@@ -441,7 +480,8 @@ class Sidebar(QWidget):
             # Elide rather than wrap — keeps every card the same height.
             fm = name_lbl.fontMetrics()
             name_lbl.setText(fm.elidedText(name, Qt.ElideRight, _REM_TEXT_W))
-            name_lbl.setToolTip(f"{name} \u2014 {cycle_nm}")
+            # Children must not eat the hover, or the card tooltip never shows.
+            name_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             top.addWidget(name_lbl, 1)
             if is_overdue:
                 flag = QLabel("!")
@@ -450,6 +490,7 @@ class Sidebar(QWidget):
                 flag.setStyleSheet(
                     f"background:{color};color:white;border-radius:7px;"
                     f"font-size:9px;font-weight:800;")
+                flag.setAttribute(Qt.WA_TransparentForMouseEvents, True)
                 top.addWidget(flag, 0)
             outer.addLayout(top)
 
@@ -458,16 +499,17 @@ class Sidebar(QWidget):
             bottom.setSpacing(5)
             cyc = QLabel()
             cyc.setStyleSheet(f"color:{C['text3']};font-size:10px;")
-            cyc.setText(cyc.fontMetrics().elidedText(cycle_nm, Qt.ElideRight, 88))
+            cyc.setText(cyc.fontMetrics().elidedText(cycle_nm, Qt.ElideRight, 84))
+            cyc.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             bottom.addWidget(cyc, 1)
             amt = QLabel(fmt_money(amount))
             amt.setStyleSheet(f"color:{color};font-size:11px;font-weight:800;")
             amt.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            amt.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             bottom.addWidget(amt, 0)
             outer.addLayout(bottom)
 
-            self._rem_lay.addWidget(row)
-        self._rem_lay.addStretch()
+            self._rem_lay.addWidget(row, 0, Qt.AlignTop)
 
     def update_nw(self):
         """No-op — net worth now shown on Home tab."""

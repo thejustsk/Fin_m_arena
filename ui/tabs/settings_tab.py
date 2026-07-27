@@ -1364,7 +1364,7 @@ class SettingsTab(QWidget):
             ]),
             ("\U0001f9ed  Walkthrough", "#EC4899", [
                 ("Location", "Settings > User Guide > Walk Through. A full-page guided tour of the app."),
-                ("Structure", "11 topics with 36 sub-steps. Left panel: accordion sidebar (one topic expanded at a time). Right panel: Live Prototype plus a How It Works explanation."),
+                ("Structure", "12 topics with 42 sub-steps. Left panel: accordion sidebar (one topic expanded at a time). Right panel: Live Prototype plus a How It Works explanation."),
                 ("Navigation", "Previous/Next buttons with a step counter. A 'Go to this tab' button jumps to the real tab in the app."),
                 ("Prototypes", "Real Qt widgets with sample data — you see the actual UI components, not screenshots."),
             ]),

@@ -295,4 +295,18 @@ QMessageBox QPushButton {{
     min-height: 32px;
 }}
 
+/* Tooltips — the global `*` rule above sets a colour but no background,
+   which left tooltips rendering as dark-on-dark (effectively invisible).
+   Give them an explicit dark chip so setToolTip() is actually readable. */
+QToolTip {{
+    background: #111827;
+    color: #FFFFFF;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 6px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 240;
+}}
+
 """
