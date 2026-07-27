@@ -25,11 +25,51 @@ class SplitRepo:
         return cid
 
     def get_self_contact(self):
-        """Get or create the 'You' contact."""
+        """Get or create the 'self' contact, named after the user profile."""
         row = self.db.execute("SELECT contact_id FROM split_contacts WHERE is_self=1").fetchone()
         if row:
             return row["contact_id"]
-        return self.create_contact("You", is_self=1)
+        name = "You"
+        try:
+            from services.user_service import get_user_name
+            name = get_user_name(self.db) or "You"
+        except Exception:
+            pass
+        return self.create_contact(name, is_self=1)
+
+    def self_display_name(self):
+        """Label for the current user in Split UIs — "Alex (You)" or "You"."""
+        try:
+            row = self.db.execute(
+                "SELECT name FROM split_contacts WHERE is_self=1").fetchone()
+            nm = (row["name"] or "").strip() if row else ""
+        except Exception:
+            nm = ""
+        if not nm:
+            try:
+                from services.user_service import get_user_name
+                nm = get_user_name(self.db)
+            except Exception:
+                nm = ""
+        if not nm or nm.lower() == "you":
+            return "You"
+        return f"{nm} (You)"
+
+    def display_name_for(self, contact):
+        """Display label for a contact row/dict — adds "(You)" for self."""
+        if contact is None:
+            return ""
+        try:
+            is_self = contact["is_self"]
+            name = contact["name"]
+        except (KeyError, IndexError, TypeError):
+            return ""
+        name = (name or "").strip()
+        if not is_self:
+            return name
+        if not name or name.lower() == "you":
+            return "You"
+        return f"{name} (You)"
 
     def list_contacts(self):
         return self.db.execute("SELECT * FROM split_contacts ORDER BY is_self DESC, name ASC").fetchall()
@@ -204,8 +244,9 @@ class SplitRepo:
         Returns list of (from_contact_id, from_name, to_contact_id, to_name, amount).
         """
         balances = self.get_group_balances(group_id)
-        # Get names
-        contacts = {c["contact_id"]: c["name"] for c in self.list_contacts()}
+        # Get names ("Alex (You)" for the current user)
+        contacts = {c["contact_id"]: self.display_name_for(c)
+                    for c in self.list_contacts()}
 
         creditors = [(cid, amt) for cid, amt in balances.items() if amt > 0.01]
         debtors = [(cid, -amt) for cid, amt in balances.items() if amt < -0.01]

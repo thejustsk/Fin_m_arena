@@ -332,6 +332,14 @@ class SetupWizard(QWidget):
         lay.setSpacing(20)
         lay.setContentsMargins(0, 8, 0, 0)
 
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Your name (e.g. Alex)")
+        self.name_edit.setMaxLength(40)
+        self.name_edit.setMinimumHeight(48)
+        self.name_edit.setStyleSheet(INPUT_STYLE)
+        self.name_edit.returnPressed.connect(self._next)
+        lay.addWidget(self.name_edit)
+
         self.pw1 = QLineEdit()
         self.pw1.setEchoMode(QLineEdit.Password)
         self.pw1.setPlaceholderText("Password (min 4 characters)")
@@ -564,6 +572,14 @@ class SetupWizard(QWidget):
     # ══════════════════════════════════════════════
     # HELPERS
     # ══════════════════════════════════════════════
+    def _save_user_name(self, name):
+        """Persist the display name. Never blocks setup if it fails."""
+        try:
+            from services.user_service import set_user_name
+            set_user_name(self.repo.db, name)
+        except Exception:
+            pass
+
     def _generate_2fa(self):
         if self._totp_secret:
             return
@@ -764,7 +780,7 @@ class SetupWizard(QWidget):
         self.stack.setCurrentIndex(self.step)
 
         titles = [
-            ("Create Your Password", "Secure your financial data with a strong password"),
+            ("Welcome \u2014 Let's Get Started", "Tell us your name and secure your data with a password"),
             ("Two-Factor Authentication", "Scan the QR code with Google Authenticator or similar app"),
             ("Sign in with Google", "Optional \u2014 alternative login if you forget your password"),
             ("Add Your Accounts", "Add your bank accounts and cash wallets"),
@@ -796,14 +812,19 @@ class SetupWizard(QWidget):
         self._update_ui()
 
     def _next(self):
-        # Step 0: Password
+        # Step 0: Name + Password
         if self.step == 0:
+            name = self.name_edit.text().strip()
+            if not name:
+                self.pw_err.setText("Please enter your name.")
+                self.name_edit.setFocus(); return
             pw = self.pw1.text()
             if len(pw) < 4:
                 self.pw_err.setText("Password must be at least 4 characters."); return
             if pw != self.pw2.text():
                 self.pw_err.setText("Passwords do not match."); return
             self.pw_err.setText("")
+            self._save_user_name(name)
             self.sec.set_pw(pw)
             self.step = 1
             self._generate_2fa()

@@ -152,20 +152,21 @@ class SplitTab(QWidget):
     # ═══════════════════════════════════════════════════════════
     def _build_status_card(self, parent_lay):
         self.status_card = QFrame()
+        # Matches the Wealth dashboard's Net Position header gradient
         self.status_card.setStyleSheet(
             "QFrame{"
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 #7C3AED,stop:1 #4F46E5);"
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #1e1b4b,stop:1 #312e81);"
             "border-radius:14px;}"
             "QLabel{background:transparent;border:none;}")
         sc_lay = QVBoxLayout(self.status_card)
         sc_lay.setContentsMargins(24, 18, 24, 18)
         sc_lay.setSpacing(10)
 
-        title = QLabel("\U0001f91d  YOUR SPLIT STATUS")
-        title.setStyleSheet("color:white;font-size:13px;font-weight:700;"
-                            "letter-spacing:1px;")
-        sc_lay.addWidget(title)
+        self.status_title = QLabel("\U0001f91d  YOUR SPLIT STATUS")
+        self.status_title.setStyleSheet("color:white;font-size:13px;font-weight:700;"
+                                        "letter-spacing:1px;")
+        sc_lay.addWidget(self.status_title)
 
         row = QHBoxLayout()
         row.setSpacing(24)
@@ -237,6 +238,11 @@ class SplitTab(QWidget):
                 unsettled += 1
             else:
                 settled += 1
+        if hasattr(self, "status_title"):
+            who = self.sr.self_display_name()
+            self.status_title.setText(
+                "\U0001f91d  SPLIT STATUS" if who == "You"
+                else f"\U0001f91d  SPLIT STATUS \u2014 {who}")
         self.lbl_owed_val.setText(fmt_money(total_owed_to_me))
         self.lbl_owe_val.setText(fmt_money(total_i_owe))
         self.lbl_settled_val.setText(str(settled))
@@ -296,7 +302,7 @@ class SplitTab(QWidget):
             combo.blockSignals(True)
             combo.clear()
             for m in self._members:
-                combo.addItem(m["name"], m["contact_id"])
+                combo.addItem(self.sr.display_name_for(m), m["contact_id"])
             combo.blockSignals(False)
         self._suppress_settle_auto = False
 
@@ -350,7 +356,8 @@ class SplitTab(QWidget):
         self.overview_lay.addWidget(bal_title)
 
         balances = self.sr.get_group_balances(gid)
-        contacts = {c["contact_id"]: c["name"] for c in self.sr.list_contacts()}
+        contacts = {c["contact_id"]: self.sr.display_name_for(c)
+                    for c in self.sr.list_contacts()}
 
         if balances:
             for cid, balance in sorted(balances.items(), key=lambda x: -x[1]):
@@ -585,7 +592,7 @@ class SplitTab(QWidget):
         for m in self._members:
             row = QHBoxLayout()
             row.setSpacing(6)
-            lbl = QLabel(m["name"])
+            lbl = QLabel(self.sr.display_name_for(m))
             lbl.setStyleSheet(f"font-size:12px;color:{C['text']};")
             lbl.setFixedWidth(100)
             row.addWidget(lbl)
@@ -924,7 +931,7 @@ class SplitTab(QWidget):
             for s in shares_data:
                 row = QHBoxLayout()
                 row.setSpacing(6)
-                lbl = QLabel(s["name"])
+                lbl = QLabel(self.sr.display_name_for(s))
                 lbl.setStyleSheet(f"font-size:12px;color:{C['text']};")
                 lbl.setFixedWidth(110)
                 row.addWidget(lbl)

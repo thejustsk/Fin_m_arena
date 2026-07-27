@@ -100,10 +100,133 @@ class SettingsTab(QWidget):
         lay.addWidget(self.tabs)
 
     # ══════════════════════════════════════════════
+    # 0. USER PROFILE — display name (password-confirmed edit)
+    # ══════════════════════════════════════════════
+    def _build_profile_card(self):
+        from services.user_service import get_user_name
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};"
+            f"border-left:3px solid {C['accent']};border-radius:10px;}}"
+            f"QLabel{{background:transparent;border:none;}}")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(16, 12, 16, 12)
+        row.setSpacing(12)
+
+        icon = QLabel("\U0001f464")
+        icon.setStyleSheet("font-size:22px;")
+        row.addWidget(icon)
+
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        cap = QLabel("YOUR NAME")
+        cap.setStyleSheet(
+            f"color:{C['text3']};font-size:10px;font-weight:700;letter-spacing:1px;")
+        col.addWidget(cap)
+        name = get_user_name(self.db)
+        self.profile_name_lbl = QLabel(name or "Not set")
+        self.profile_name_lbl.setStyleSheet(
+            f"color:{C['text'] if name else C['text3']};font-size:15px;font-weight:800;")
+        col.addWidget(self.profile_name_lbl)
+        row.addLayout(col, 1)
+
+        edit_btn = QPushButton("\u270f\ufe0f  Edit")
+        edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        edit_btn.setMinimumHeight(34)
+        edit_btn.clicked.connect(self._edit_user_name)
+        row.addWidget(edit_btn)
+        return card
+
+    def _edit_user_name(self):
+        """Change the display name — password/TOTP confirmed, same as wealth edits."""
+        from services.user_service import get_user_name, set_user_name
+        from ui.wealth_verify import WealthEditVerifyDialog
+
+        current = get_user_name(self.db)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit Your Name")
+        dlg.setMinimumWidth(380)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(22, 18, 22, 18)
+        lay.setSpacing(12)
+
+        title = QLabel("\U0001f464  Your Name")
+        title.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        lay.addWidget(title)
+
+        desc = QLabel("Shown on the Home greeting and as \u201cName (You)\u201d in Split.")
+        desc.setStyleSheet(f"font-size:12px;color:{C['text3']};")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        field = QLineEdit(current)
+        field.setPlaceholderText("e.g. Alex")
+        field.setMaxLength(40)
+        field.setMinimumHeight(38)
+        lay.addWidget(field)
+
+        err = QLabel("")
+        err.setStyleSheet(f"color:{C['red']};font-size:12px;font-weight:600;")
+        lay.addWidget(err)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(dlg.reject)
+        btns.addWidget(cancel)
+        save = QPushButton("Save")
+        save.setObjectName("primary")
+        save.setMinimumHeight(36)
+        btns.addWidget(save)
+        lay.addLayout(btns)
+
+        def _do_save():
+            new_name = field.text().strip()
+            if not new_name:
+                err.setText("Name cannot be empty.")
+                field.setFocus()
+                return
+            if new_name == current:
+                dlg.accept()
+                return
+            # Confirm identity before changing (same dialog used for wealth edits)
+            if not WealthEditVerifyDialog.verify_user(self.sec, dlg):
+                return
+            set_user_name(self.db, new_name)
+            dlg.accept()
+            self.profile_name_lbl.setText(new_name)
+            self.profile_name_lbl.setStyleSheet(
+                f"color:{C['text']};font-size:15px;font-weight:800;")
+            self._broadcast_profile_change()
+            QMessageBox.information(self, "Saved", f"Your name is now \u201c{new_name}\u201d.")
+
+        save.clicked.connect(_do_save)
+        field.returnPressed.connect(_do_save)
+        field.setFocus()
+        dlg.exec_()
+
+    def _broadcast_profile_change(self):
+        """Refresh Home + Split so the new name shows immediately."""
+        mw = self.window()
+        tabs = getattr(mw, "_tabs", None)
+        if not isinstance(tabs, dict):
+            return
+        for key in ("home", "split", "wealth"):
+            tab = tabs.get(key)
+            if tab is None or not hasattr(tab, "refresh"):
+                continue
+            try:
+                tab.refresh()
+            except Exception:
+                pass
+
+    # ══════════════════════════════════════════════
     # 1. ACCOUNTS — single-line rows, grouped by type
     # ══════════════════════════════════════════════
     def _accounts_tab(self):
         w = QWidget(); l = QVBoxLayout(w); l.setSpacing(12)
+        l.addWidget(self._build_profile_card())
         ab = QPushButton("+ Add Account"); ab.setObjectName("primary"); ab.clicked.connect(self._add_account)
         l.addWidget(ab)
         self.acct_scroll = QScrollArea()

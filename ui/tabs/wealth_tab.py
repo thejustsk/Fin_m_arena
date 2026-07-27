@@ -23,6 +23,10 @@ from ui.wealth_verify import WealthEditVerifyDialog
 EM_DASH = "\u2014"
 MDOT = "\u00b7"
 
+# Max alert cards built per refresh. Keeps the dashboard responsive on
+# databases with a very large number of overdue items.
+ALERT_RENDER_LIMIT = 150
+
 
 def TODAY():
     return date.today().isoformat()
@@ -4635,35 +4639,32 @@ class DashboardPage(QWidget):
             self._nav_cb(idx)
 
     def _build(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        inner = QWidget()
-        inner.setStyleSheet("background:transparent;")
-        lay = QVBoxLayout(inner)
-        lay.setContentsMargins(32, 24, 32, 24)
-        lay.setSpacing(16)
+        """Fixed header (title + net bar + KPI grid), scrollable alerts below.
+
+        The header keeps its natural height and the alerts region takes every
+        remaining pixel, so a long alert list scrolls on its own instead of
+        pushing the KPI cards off-screen.
+        """
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(32, 24, 32, 24)
+        outer.setSpacing(16)
 
         hdr = QLabel("\U0001f4ca  Wealth Dashboard")
         hdr.setStyleSheet(f"font-size:22px;font-weight:800;color:{C['text']};")
-        lay.addWidget(hdr)
+        outer.addWidget(hdr)
 
-        # Net Position Bar
-        lay.addWidget(self._build_net_bar())
-        # KPI Grid 2×3
-        lay.addWidget(self._build_kpi_grid())
-        # Alerts (hidden if empty)
+        # ── Fixed region ──
+        net_bar = self._build_net_bar()
+        net_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        outer.addWidget(net_bar)
+
+        kpi_grid = self._build_kpi_grid()
+        kpi_grid.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        outer.addWidget(kpi_grid)
+
+        # ── Scrollable region: Alerts & Upcoming ──
         self.alerts_frame = self._build_alerts_frame()
-        lay.addWidget(self.alerts_frame)
-        # Quick Access 2×3
-        lay.addWidget(self._build_quick_access())
-
-        lay.addStretch()
-        scroll.setWidget(inner)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll)
+        outer.addWidget(self.alerts_frame, 1)
 
     # ── Net Position Bar ───────────────────────────────────────
     def _build_net_bar(self):
@@ -4763,49 +4764,116 @@ class DashboardPage(QWidget):
 
     # ── Alerts ─────────────────────────────────────────────────
     def _build_alerts_frame(self):
+        """Alerts panel: fixed title row + independently scrolling list.
+
+        Returns the outer frame. Alert cards are appended to
+        ``self._alerts_lay`` by refresh().
+        """
         f = QFrame()
         f.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}"
-            f"QLabel{{background:transparent;border:none;}}")
-        self._alerts_lay = QVBoxLayout(f)
-        self._alerts_lay.setContentsMargins(16, 12, 16, 12)
-        self._alerts_lay.setSpacing(6)
-        f.hide()
+            f"QFrame#alertsPanel{{background:{C['surface']};"
+            f"border:1px solid {C['border2']};border-radius:12px;}}")
+        f.setObjectName("alertsPanel")
+        shell = QVBoxLayout(f)
+        shell.setContentsMargins(16, 12, 16, 12)
+        shell.setSpacing(8)
+
+        # Fixed title (stays put while the list scrolls)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self._alerts_title = QLabel("\u23f0  Alerts & Upcoming")
+        self._alerts_title.setStyleSheet(
+            f"font-size:14px;font-weight:700;color:{C['text']};"
+            f"background:transparent;border:none;")
+        head.addWidget(self._alerts_title)
+        head.addStretch()
+        self._alerts_count = QLabel("")
+        self._alerts_count.setStyleSheet(
+            f"font-size:11px;font-weight:700;color:{C['text3']};"
+            f"background:transparent;border:none;")
+        head.addWidget(self._alerts_count)
+        shell.addLayout(head)
+
+        # Scrollable list
+        self._alerts_scroll = QScrollArea()
+        self._alerts_scroll.setWidgetResizable(True)
+        self._alerts_scroll.setFrameShape(QFrame.NoFrame)
+        self._alerts_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._alerts_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;border:none;}")
+        inner = QWidget()
+        inner.setStyleSheet("background:transparent;")
+        self._alerts_lay = QVBoxLayout(inner)
+        self._alerts_lay.setContentsMargins(0, 0, 6, 0)
+        self._alerts_lay.setSpacing(8)
+        self._alerts_lay.setAlignment(Qt.AlignTop)
+        self._alerts_scroll.setWidget(inner)
+        shell.addWidget(self._alerts_scroll, 1)
         return f
 
-    # ── Quick Access ───────────────────────────────────────────
-    def _build_quick_access(self):
-        wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
-        grid = QGridLayout(wrap); grid.setSpacing(10)
-        tiles = [
-            ("\U0001f91d", "Loans I Give",  C["amber"],  1),
-            ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
-            ("\U0001f3e6", "FD I Deposit",  C["accent"], 3),
-            ("\U0001f9fe", "FD Others",     C["red"],    4),
-            ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
-            ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
-        ]
-        for i, (icon, name, color, idx) in enumerate(tiles):
-            grid.addWidget(self._tile(icon, name, color, idx), i // 3, i % 3)
-        return wrap
+    def _alert_card(self, alert):
+        """One rich alert card — Cards-tab reminder styling, fmt_money amounts.
 
-    def _tile(self, icon, name, color, idx):
-        t = QFrame()
-        t.setCursor(QCursor(Qt.PointingHandCursor))
-        t.setMinimumHeight(50)
-        t.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};"
-            f"border-left:3px solid {color};border-radius:8px;}}"
-            f"QFrame:hover{{border-color:{color};background:{C['surface2']};}}"
+        *alert* is a dict with: icon, color, title, subtitle, amount,
+        amount_caption, badge.
+        """
+        card = QFrame()
+        color = alert["color"]
+        card.setStyleSheet(
+            f"QFrame#alertCard{{background:{C['surface']};"
+            f"border:1px solid {C['border2']};border-left:3px solid {color};"
+            f"border-radius:8px;}}"
+            f"QFrame#alertCard:hover{{background:{C['surface2']};}}"
             f"QLabel{{background:transparent;border:none;}}")
-        lay = QHBoxLayout(t); lay.setContentsMargins(14, 8, 14, 8); lay.setSpacing(8)
-        il = QLabel(icon); il.setStyleSheet("font-size:18px;"); lay.addWidget(il)
-        nl = QLabel(name); nl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
-        lay.addWidget(nl, 1)
-        ar = QLabel("\u203a"); ar.setStyleSheet(f"font-size:18px;color:{C['text3']};"); lay.addWidget(ar)
-        self._clickables.append((t, idx))
-        self._bind_click(t, idx)
-        return t
+        card.setObjectName("alertCard")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(12, 10, 12, 10)
+        row.setSpacing(10)
+
+        icon = QLabel(alert["icon"])
+        icon.setStyleSheet("font-size:18px;")
+        icon.setFixedWidth(24)
+        icon.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        row.addWidget(icon)
+
+        mid = QVBoxLayout()
+        mid.setSpacing(2)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(6)
+        title = QLabel(alert["title"])
+        title.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
+        title.setWordWrap(True)
+        title_row.addWidget(title)
+        if alert.get("badge"):
+            badge = QLabel(alert["badge"])
+            badge.setStyleSheet(
+                f"font-size:9px;font-weight:800;color:{color};"
+                f"background:{_hex_rgba(color, 0.12)};border-radius:4px;"
+                f"padding:2px 6px;letter-spacing:0.5px;")
+            title_row.addWidget(badge)
+        title_row.addStretch()
+        mid.addLayout(title_row)
+        if alert.get("subtitle"):
+            sub = QLabel(alert["subtitle"])
+            sub.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;")
+            sub.setWordWrap(True)
+            mid.addWidget(sub)
+        row.addLayout(mid, 1)
+
+        right = QVBoxLayout()
+        right.setSpacing(1)
+        right.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        amt = QLabel(alert["amount"])
+        amt.setStyleSheet(f"font-size:14px;font-weight:800;color:{color};")
+        amt.setAlignment(Qt.AlignRight)
+        right.addWidget(amt)
+        if alert.get("amount_caption"):
+            cap = QLabel(alert["amount_caption"])
+            cap.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;")
+            cap.setAlignment(Qt.AlignRight)
+            right.addWidget(cap)
+        row.addLayout(right)
+        return card
 
     # ── Data helpers ───────────────────────────────────────────
     def _sync_statuses(self):
@@ -4989,13 +5057,20 @@ class DashboardPage(QWidget):
         self._np_net.setStyleSheet(f"color:{net_col};font-size:28px;font-weight:900;")
 
         # ── Update Alerts ──
-        # Rows were added with addLayout(), and takeAt() on a nested layout does
-        # NOT delete the labels inside it — they stayed parented to the frame and
-        # piled up on every refresh. Clear recursively instead.
+        # Cards are real QWidgets cleared recursively — nested layouts used to
+        # leak their labels because takeAt().widget() is None for a layout.
         _clear_layout(self._alerts_lay)
 
-        alerts = []
-        # Overdue loans I give — show what's still outstanding, not the original amount
+        def _due_phrase(days):
+            if days == 0:
+                return "today"
+            if days == 1:
+                return "tomorrow"
+            return f"in {days} days"
+
+        alerts = []   # (sort_key, dict)
+
+        # 1. Overdue loans I gave out
         od_give = db.execute("""
             SELECT b.name, l.loan_amount, l.due_date,
                    COALESCE(SUM(r.amount_paid),0) AS rep
@@ -5007,9 +5082,18 @@ class DashboardPage(QWidget):
         for r in od_give:
             days = _days_since(r["due_date"], today)
             outstanding = max((r["loan_amount"] or 0) - r["rep"], 0)
-            alerts.append(("\u26a0\ufe0f", f"{r['name']} \u2014 overdue {days}d",
-                           fmt_money(outstanding), C["red"]))
-        # Overdue loans I take
+            paid = r["rep"] or 0
+            sub = f"Due {r['due_date'] or EM_DASH}  {MDOT}  Lent {fmt_money(r['loan_amount'] or 0)}"
+            if paid > 0:
+                sub += f"  {MDOT}  Repaid {fmt_money(paid)}"
+            alerts.append((-1000 - days, {
+                "icon": "\u26a0\ufe0f", "color": C["red"], "badge": "OVERDUE",
+                "title": f"{r['name']} owes you",
+                "subtitle": f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  {sub}",
+                "amount": fmt_money(outstanding), "amount_caption": "outstanding",
+            }))
+
+        # 2. Overdue loans I took
         lt_by_id = {r["loan_id"]: r for r in lt}
         od_take = db.execute("""
             SELECT l.loan_id, le.name, l.due_date FROM borrowed_loans l
@@ -5021,81 +5105,147 @@ class DashboardPage(QWidget):
             outstanding = borrowed_outstanding(
                 loan, lt_paid.get(r["loan_id"], 0), lt_reps.get(r["loan_id"], [])
             ) if loan else 0
-            alerts.append(("\u26a0\ufe0f", f"{r['name']} \u2014 overdue {days}d",
-                           fmt_money(outstanding), C["red"]))
-        # EMI due soon (7 days) — skip rows with no actual EMI amount
+            paid = lt_paid.get(r["loan_id"], 0)
+            sub = f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  Due {r['due_date'] or EM_DASH}"
+            if paid > 0:
+                sub += f"  {MDOT}  Repaid {fmt_money(paid)}"
+            alerts.append((-1000 - days, {
+                "icon": "\U0001f3db\ufe0f", "color": C["red"], "badge": "OVERDUE",
+                "title": f"You owe {r['name']}",
+                "subtitle": sub,
+                "amount": fmt_money(outstanding), "amount_caption": "outstanding",
+            }))
+
+        # 3. Deposits I hold that are overdue for return
+        for d in fo:
+            if d["status"] != "OVERDUE":
+                continue
+            rd = d.get("expected_return_date")
+            days = _days_since(rd, today)
+            out = deposit_outstanding(
+                d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
+            rate = d.get("interest_rate") or 0
+            sub = f"Overdue by {days} day{'' if days == 1 else 's'}  {MDOT}  Return by {rd or EM_DASH}"
+            sub += f"  {MDOT}  {'Interest-free' if not rate else f'{rate}% interest'}"
+            alerts.append((-1000 - days, {
+                "icon": "\U0001f9fe", "color": C["red"], "badge": "OVERDUE",
+                "title": f"Return deposit to {d.get('depositor_name') or 'depositor'}",
+                "subtitle": sub,
+                "amount": fmt_money(out), "amount_caption": "to return",
+            }))
+
+        # 4. EMI due within 7 days
         soon7 = (today + timedelta(days=7)).isoformat()
         emi_due = db.execute("""
-            SELECT le.name, b.emi_amount, b.due_date FROM borrowed_loans b
+            SELECT le.name, b.emi_amount, b.due_date, b.principal_amount
+            FROM borrowed_loans b
             JOIN lenders le ON le.lender_id=b.lender_id
             WHERE b.status IN ('ACTIVE','PARTIALLY_PAID')
               AND b.emi_amount IS NOT NULL AND b.emi_amount > 0
               AND b.due_date BETWEEN ? AND ?
             ORDER BY b.due_date""", (today_s, soon7)).fetchall()
         for r in emi_due:
-            alerts.append(("\U0001f514", f"{r['name']} EMI due {r['due_date']}",
-                           fmt_money(r["emi_amount"]), C["amber"]))
-        # Deposits I owe back, due soon (30 days)
+            days = _days_since(r["due_date"], today) * -1
+            alerts.append((days, {
+                "icon": "\U0001f514", "color": C["amber"],
+                "badge": "DUE SOON" if days <= 3 else "",
+                "title": f"EMI to {r['name']}",
+                "subtitle": (f"Due {_due_phrase(days)} on {r['due_date']}  {MDOT}  "
+                             f"Principal {fmt_money(r['principal_amount'] or 0)}"),
+                "amount": fmt_money(r["emi_amount"]), "amount_caption": "EMI due",
+            }))
+
+        # 5. Deposits due back within 30 days
         soon30 = (today + timedelta(days=30)).isoformat()
         for d in fo:
             rd = d.get("expected_return_date")
-            if d["status"] == "OVERDUE":
-                days = _days_since(rd, today)
-                out = deposit_outstanding(
-                    d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
-                alerts.append(("\u26a0\ufe0f",
-                               f"{d.get('depositor_name') or 'Deposit'} \u2014 return overdue {days}d",
-                               fmt_money(out), C["red"]))
-            elif rd and today_s <= str(rd) <= soon30:
-                out = deposit_outstanding(
-                    d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
-                alerts.append(("\U0001f9fe",
-                               f"{d.get('depositor_name') or 'Deposit'} return due {rd}",
-                               fmt_money(out), C["amber"]))
-        # FD maturing soon (30 days) — LEFT JOIN so FDs with no linked bank
-        # account still raise an alert instead of vanishing.
+            if d["status"] == "OVERDUE" or not rd or not (today_s <= str(rd) <= soon30):
+                continue
+            days = _days_since(rd, today) * -1
+            out = deposit_outstanding(
+                d, fo_paid.get(d["deposit_id"], 0), fo_reps.get(d["deposit_id"], []))
+            rate = d.get("interest_rate") or 0
+            alerts.append((days, {
+                "icon": "\U0001f9fe", "color": C["amber"],
+                "badge": "DUE SOON" if days <= 7 else "",
+                "title": f"Deposit return to {d.get('depositor_name') or 'depositor'}",
+                "subtitle": (f"Due {_due_phrase(days)} on {rd}  {MDOT}  "
+                             f"{'Interest-free' if not rate else f'{rate}% interest'}"),
+                "amount": fmt_money(out), "amount_caption": "to return",
+            }))
+
+        # 6. FDs maturing within 30 days
         fd_alerts = db.execute("""
             SELECT COALESCE(a.display_name,'Fixed Deposit') AS display_name,
-                   f.maturity_amount, f.principal_amount, f.maturity_date
+                   f.maturity_amount, f.principal_amount, f.maturity_date,
+                   f.interest_rate
             FROM fixed_deposits f
             LEFT JOIN accounts a ON a.account_id=f.bank_account_id
             WHERE f.status='ACTIVE' AND f.maturity_date BETWEEN ? AND ?
             ORDER BY f.maturity_date""", (today_s, soon30)).fetchall()
         for r in fd_alerts:
+            days = _days_since(r["maturity_date"], today) * -1
             amt = r["maturity_amount"] or r["principal_amount"] or 0
-            alerts.append(("\U0001f3e6", f"{r['display_name']} FD maturing {r['maturity_date']}",
-                           fmt_money(amt), C["accent"]))
-        # Split pending (self involved)
+            gain = amt - (r["principal_amount"] or 0)
+            sub = (f"Matures {_due_phrase(days)} on {r['maturity_date']}  {MDOT}  "
+                   f"Principal {fmt_money(r['principal_amount'] or 0)}")
+            if gain > 0:
+                sub += f"  {MDOT}  Interest {fmt_money(gain)}"
+            alerts.append((days, {
+                "icon": "\U0001f3e6", "color": C["accent"],
+                "badge": "MATURING" if days <= 7 else "",
+                "title": f"{r['display_name']} FD matures",
+                "subtitle": sub,
+                "amount": fmt_money(amt), "amount_caption": "at maturity",
+            }))
+
+        # 7. Split settlements involving me
         if self.sr and self._self_id:
             for g in self.sr.list_groups():
                 for fid, fn, tid, tn, amt in self.sr.suggest_settlements(g["group_id"]):
-                    if fid == self._self_id or tid == self._self_id:
-                        alerts.append(("\U0001f4b8", f"{fn} \u2192 {tn} ({g['name']})",
-                                       fmt_money(amt), "#7C3AED"))
+                    if fid != self._self_id and tid != self._self_id:
+                        continue
+                    i_pay = (fid == self._self_id)
+                    alerts.append((500, {
+                        "icon": "\U0001f4b8", "color": "#7C3AED",
+                        "badge": "YOU PAY" if i_pay else "YOU RECEIVE",
+                        "title": (f"Pay {tn}" if i_pay else f"Collect from {fn}"),
+                        "subtitle": f"Group: {g['name']}  {MDOT}  Suggested settlement",
+                        "amount": fmt_money(amt),
+                        "amount_caption": "to pay" if i_pay else "to receive",
+                    }))
+
+        # Most urgent first (overdue, then soonest due)
+        alerts.sort(key=lambda a: a[0])
 
         if alerts:
-            shown = alerts[:8]
-            title = "Alerts & Upcoming"
-            if len(alerts) > len(shown):
-                title += f"  ({len(shown)} of {len(alerts)})"
-            tl = QLabel(title)
-            tl.setStyleSheet(f"font-size:13px;font-weight:700;color:{C['text']};")
-            self._alerts_lay.addWidget(tl)
-            for icon, text, amt, col in shown:
-                row_w = QWidget()
-                row_w.setStyleSheet("background:transparent;")
-                row = QHBoxLayout(row_w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(8)
-                il = QLabel(icon); il.setStyleSheet("font-size:14px;"); row.addWidget(il)
-                tx = QLabel(text); tx.setStyleSheet(f"font-size:12px;color:{C['text']};font-weight:600;")
-                row.addWidget(tx, 1)
-                al = QLabel(amt); al.setStyleSheet(f"font-size:12px;font-weight:800;color:{col};")
-                row.addWidget(al)
-                self._alerts_lay.addWidget(row_w)
-            self.alerts_frame.show()
+            total = len(alerts)
+            self._alerts_count.setText(f"{total} item{'' if total == 1 else 's'}")
+            # Hard cap on rendered widgets. Building thousands of cards would
+            # stall the UI thread; the list is sorted most-urgent-first, so the
+            # cap only ever hides the least pressing items.
+            shown = alerts[:ALERT_RENDER_LIMIT]
+            for _, data in shown:
+                self._alerts_lay.addWidget(self._alert_card(data))
+            if total > len(shown):
+                more = QLabel(
+                    f"+ {total - len(shown)} more \u2014 showing the "
+                    f"{len(shown)} most urgent")
+                more.setStyleSheet(
+                    f"font-size:11px;color:{C['text3']};font-weight:600;"
+                    f"background:transparent;border:none;padding:8px 4px;")
+                more.setAlignment(Qt.AlignCenter)
+                self._alerts_lay.addWidget(more)
+            self._alerts_scroll.verticalScrollBar().setValue(0)
         else:
-            self.alerts_frame.hide()
+            self._alerts_count.setText("")
+            empty = QLabel("\u2705  Nothing needs your attention right now.")
+            empty.setStyleSheet(
+                f"font-size:12px;color:{C['text3']};font-weight:600;"
+                f"background:transparent;border:none;padding:18px 4px;")
+            empty.setAlignment(Qt.AlignCenter)
+            self._alerts_lay.addWidget(empty)
+        self.alerts_frame.show()
     def load_list(self, force=False):
         self.refresh()
 

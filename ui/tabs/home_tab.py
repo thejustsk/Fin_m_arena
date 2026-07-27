@@ -220,11 +220,9 @@ class HomeTab(QWidget):
 
         # ── Top: Greeting + Date ──
         top_row = QHBoxLayout()
-        h = datetime.now().hour
-        icon = "☀️" if h < 12 else ("🌤️" if h < 17 else "🌙")
-        greet = QLabel(f"Good {'Morning' if h < 12 else 'Afternoon' if h < 17 else 'Evening'} {icon}")
-        greet.setStyleSheet(f"font-size:28px;font-weight:800;color:{C['text']};")
-        top_row.addWidget(greet)
+        self.greet = QLabel(self._greeting_text())
+        self.greet.setStyleSheet(f"font-size:28px;font-weight:800;color:{C['text']};")
+        top_row.addWidget(self.greet)
         top_row.addStretch()
         today_lbl = QLabel(date.today().strftime("%A, %d %B %Y"))
         today_lbl.setStyleSheet(f"font-size:14px;color:{C['text3']};font-weight:600;")
@@ -333,7 +331,23 @@ class HomeTab(QWidget):
             card.set_selected(p == period)
         self._load_data()
 
+    def _greeting_text(self):
+        """"Good Morning, Alex ☀️" — falls back to no name when unset."""
+        h = datetime.now().hour
+        icon = "\u2600\ufe0f" if h < 12 else ("\U0001f324\ufe0f" if h < 17 else "\U0001f319")
+        try:
+            from services.user_service import get_user_name, greeting_for
+            part = greeting_for(h)
+            name = get_user_name(self.db)
+        except Exception:
+            part = "Morning" if h < 12 else ("Afternoon" if h < 17 else "Evening")
+            name = ""
+        return f"Good {part}, {name} {icon}" if name else f"Good {part} {icon}"
+
     def refresh(self):
+        # Name/time can change while the app is open
+        if hasattr(self, "greet"):
+            self.greet.setText(self._greeting_text())
         self._on_period("month")
 
     def _date_range(self, period):
