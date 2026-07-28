@@ -24,6 +24,14 @@ from ui.sidebar import fmt_money
 from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_header, _switch_tabs, FILTER_FIELDS, FlowLayout
 from services.nw_constants import (split_need_want, NW_FROM_LABEL,
                                    NW_NONE, NW_NEED, NW_WANT)
+
+
+def _nw_tint(hex_color, strong):
+    """Soft background tint for the Need/Want indicator block."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{0.12 if strong else 0.06})"
+
 try:
     from ui.tabs.wealth_tab import _metric_card, _confirm
 except ImportError:
@@ -763,10 +771,16 @@ class _AuditSubTab(QWidget):
                 row_lay.setContentsMargins(0, 0, 0, 0)
                 row_lay.setSpacing(8)
 
-                # Checkbox with "Select" text
+                # ── Need / Want indicator ──
+                # Full-height colour block so the tag is readable at a glance
+                # instead of being buried in the edit dialog.
+                nw_box = self._nw_indicator(r.get("neednwant"))
+                row_lay.addWidget(nw_box)
+
+                # Checkbox with "Select" text — stretches to the card's height
                 chk = QPushButton("  Select  ")
-                chk.setFixedHeight(34)
                 chk.setMinimumWidth(82)
+                chk.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
                 chk.setFocusPolicy(Qt.NoFocus)
                 chk.setCursor(QCursor(Qt.PointingHandCursor))
                 chk.setStyleSheet(
@@ -786,15 +800,15 @@ class _AuditSubTab(QWidget):
                         f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                     self._update_bulk_count()
                 chk.clicked.connect(_toggle_chk)
-                row_lay.addWidget(chk, 0, Qt.AlignVCenter)
+                row_lay.addWidget(chk)
 
                 # Card
                 row_lay.addWidget(card, 1)
 
-                # Edit button with "Edit" text
+                # Edit button with "Edit" text — matches the card's height
                 edit_btn = QPushButton("\u270f\ufe0f Edit")
-                edit_btn.setFixedHeight(34)
                 edit_btn.setMinimumWidth(72)
+                edit_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
                 edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
                 edit_btn.setStyleSheet(
@@ -802,7 +816,7 @@ class _AuditSubTab(QWidget):
                     f"border:1.5px solid {C['border']};border-radius:8px;font-size:12px;font-weight:600;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                 edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
-                row_lay.addWidget(edit_btn, 0, Qt.AlignVCenter)
+                row_lay.addWidget(edit_btn)
 
                 self._all_render_items.append(("card", row_widget))
 
@@ -865,6 +879,33 @@ class _AuditSubTab(QWidget):
     def _checked_ids(self):
         """Get IDs of checked transaction cards."""
         return [tx_id for tx_id, checked in getattr(self, '_check_states', {}).items() if checked]
+
+    # ── Need / Want indicator ────────────────────────────────────
+    #  Colour + text, matched to the Need vs Want charts:
+    #  Need = indigo, Want = amber, Not Set = grey.
+    _NW_STYLE = {
+        NW_NEED: ("NEED",    C["accent"]),
+        NW_WANT: ("WANT",    C["amber"]),
+        NW_NONE: ("NOT SET", C["text3"]),
+    }
+
+    def _nw_indicator(self, value):
+        """Full-height tag block shown to the left of a transaction card."""
+        label, color = self._NW_STYLE.get(
+            value if value in self._NW_STYLE else NW_NONE)
+        box = QLabel(label)
+        box.setAlignment(Qt.AlignCenter)
+        box.setFixedWidth(62)
+        # Ignored vertical policy => the row layout stretches it to the
+        # tallest sibling, which is the transaction card.
+        box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
+        box.setToolTip(f"Need/Want: {label.title()} \u2014 use Edit or Bulk Update to change")
+        is_set = value in (NW_NEED, NW_WANT)
+        box.setStyleSheet(
+            f"QLabel{{background:{_nw_tint(color, is_set)};color:{color};"
+            f"border:1.5px solid {color};border-radius:8px;"
+            f"font-size:10px;font-weight:800;letter-spacing:0.5px;}}")
+        return box
 
     def _update_bulk_count(self):
         n = len(self._checked_ids())
@@ -998,6 +1039,11 @@ class _AuditSubTab(QWidget):
                 upd_lay.addWidget(ok_btn)
                 ok_btn.setFocus()
                 QApplication.processEvents()
+            except Exception:
+                pass
+            # Reload this list so the Need/Want indicator reflects the edit
+            try:
+                self.load_records()
             except Exception:
                 pass
             # Notify parent to refresh other tabs
