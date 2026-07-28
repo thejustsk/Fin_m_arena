@@ -859,8 +859,10 @@ class DatabaseTab(QWidget):
         # visible. Rebuild it on entry so its KPIs animate on-screen instead
         # of completing while hidden.
         if idx == 1 and hasattr(self, '_last_monthly'):
+            # Queue after the stacked page has been painted. Rebuilding in the
+            # same click event starts count-up while Summary is still hidden.
             y, m, txns = self._last_monthly
-            self._build_monthly_summary(txns, y, m)
+            QTimer.singleShot(80, lambda: self._build_monthly_summary(txns, y, m))
         # WebEngine/Chart.js receives its first layout while this stack page
         # is hidden. Resize after it becomes visible and once more after Qt
         # finishes the stacked-widget geometry pass.

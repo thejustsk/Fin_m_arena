@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QMessageBox, QDialog, QFormLayout, QCheckBox,
     QSizePolicy
 )
-from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtCore import Qt, QDate, QTimer
 from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
@@ -444,7 +444,9 @@ class SplitTab(QWidget):
         _switch_tabs(self._sub_btns, idx)
         self.sub_stack.setCurrentIndex(idx)
         if idx == 0:
-            self._refresh_overview()
+            # Group KPI cards must be built after Overview is visible so the
+            # count-up is seen instead of running on a hidden stack page.
+            QTimer.singleShot(80, self._refresh_overview)
 
     def on_activated(self):
         self._replay_status = True

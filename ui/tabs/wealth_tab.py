@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QMessageBox, QDialog, QFormLayout, QSizePolicy, QCheckBox,
     QGridLayout
 )
-from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal as _Signal
+from PyQt5.QtCore import Qt, QDate, QThread, QTimer, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
@@ -5388,12 +5388,12 @@ class WealthTab(QWidget):
         if i == 0:
             # The dashboard may have refreshed while another Wealth sub-page
             # was visible. Replay only when the user returns to it.
-            self.dashboard_page.replay_kpis()
+            QTimer.singleShot(80, self.dashboard_page.replay_kpis)
 
     def on_activated(self):
         """Refresh only the visible page and replay dashboard KPIs on landing."""
         if self.stack.currentIndex() == 0:
-            self.dashboard_page.replay_kpis()
+            QTimer.singleShot(80, self.dashboard_page.replay_kpis)
         else:
             self.refresh()
 

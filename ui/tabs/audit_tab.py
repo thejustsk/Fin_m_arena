@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QStackedWidget, QMessageBox,
     QDialog, QFormLayout, QScrollArea, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QDate, QEventLoop
+from PyQt5.QtCore import Qt, QDate, QEventLoop, QTimer
 from PyQt5.QtGui import QCursor
 
 from ui.theme import C
@@ -353,7 +353,8 @@ class _AuditSubTab(QWidget):
         if idx == 0:
             self.load_records()
         else:
-            self.load_insights()
+            # Insights KPI cards are rebuilt only after their page is visible.
+            QTimer.singleShot(80, self.load_insights)
 
     def refresh(self):
         self.load_records()
