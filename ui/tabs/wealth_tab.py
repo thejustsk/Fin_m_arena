@@ -846,7 +846,10 @@ class _FunctionPage(QWidget):
         if idx == 0:
             self._refresh_entry_dropdowns()
         elif idx == 1:
-            self.load_list()
+            # Returning to a Wealth list used to short-circuit because it had
+            # already loaded once, leaving KPI labels at their final value.
+            # Rebuild after the stacked page is visible so count-up is seen.
+            QTimer.singleShot(80, lambda: self.load_list(force=True))
 
     def refresh(self):
         self._loaded = False
@@ -5395,14 +5398,15 @@ class WealthTab(QWidget):
         # Mark MF page as user-visited (enables loading dialog)
         if hasattr(self._pages[i], '_user_visited'):
             self._pages[i]._user_visited = True
-        self._pages[i].load_list()
-        # The dashboard aggregates every other page, so it must always
-        # recompute — its load_list() short-circuits on nothing, but going
-        # through refresh() keeps the intent explicit.
         if i == 0:
-            # The dashboard may have refreshed while another Wealth sub-page
-            # was visible. Replay only when the user returns to it.
+            # The dashboard aggregates every other page; replay only after it
+            # is visible so KPI animation is not consumed in the background.
             QTimer.singleShot(80, self.dashboard_page.replay_kpis)
+        else:
+            # Each function page owns a list + KPI row. Force its rebuild
+            # after the selected stacked page is visible.
+            page = self._pages[i]
+            QTimer.singleShot(80, lambda p=page: p.load_list(force=True))
 
     def on_activated(self):
         """Refresh only the visible page and replay dashboard KPIs on landing."""
