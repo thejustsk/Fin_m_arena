@@ -771,12 +771,6 @@ class _AuditSubTab(QWidget):
                 row_lay.setContentsMargins(0, 0, 0, 0)
                 row_lay.setSpacing(8)
 
-                # ── Need / Want indicator ──
-                # Full-height colour block so the tag is readable at a glance
-                # instead of being buried in the edit dialog.
-                nw_box = self._nw_indicator(r.get("neednwant"))
-                row_lay.addWidget(nw_box)
-
                 # Checkbox with "Select" text — stretches to the card's height
                 chk = QPushButton("  Select  ")
                 chk.setMinimumWidth(82)
@@ -801,6 +795,12 @@ class _AuditSubTab(QWidget):
                     self._update_bulk_count()
                 chk.clicked.connect(_toggle_chk)
                 row_lay.addWidget(chk)
+
+                # ── Need / Want indicator ──
+                # Full-height block so the tag is readable at a glance instead
+                # of being buried in the edit dialog. Click to cycle the value.
+                nw_box = self._nw_indicator(tx_id, r.get("neednwant"))
+                row_lay.addWidget(nw_box)
 
                 # Card
                 row_lay.addWidget(card, 1)
@@ -889,23 +889,93 @@ class _AuditSubTab(QWidget):
         NW_NONE: ("NOT SET", C["text3"]),
     }
 
-    def _nw_indicator(self, value):
-        """Full-height tag block shown to the left of a transaction card."""
-        label, color = self._NW_STYLE.get(
+    # Click cycle. Not Set is a starting state only — once tagged, the box
+    # flips between Want and Need and never returns to Not Set.
+    _NW_NEXT = {
+        NW_NONE: NW_WANT,
+        NW_WANT: NW_NEED,
+        NW_NEED: NW_WANT,
+    }
+
+    def _nw_style_for(self, value):
+        """(label, colour) for a stored neednwant value, None-safe."""
+        return self._NW_STYLE.get(
             value if value in self._NW_STYLE else NW_NONE)
-        box = QLabel(label)
+
+    def _paint_nw_box(self, box, value):
+        """Apply the label, colour and tooltip for *value* to *box*."""
+        label, color = self._nw_style_for(value)
+        nxt_label, _ = self._nw_style_for(self._NW_NEXT.get(value, NW_WANT))
+        box.setText(label)
+        box.setToolTip(f"Need/Want: {label.title()}\nClick to set {nxt_label.title()}")
+        # White fill so the row stays clean; colour lives in the text + border.
+        box.setStyleSheet(
+            f"QLabel{{background:#FFFFFF;color:{color};"
+            f"border:1.5px solid {color};border-radius:8px;"
+            f"font-size:10px;font-weight:800;letter-spacing:0.5px;}}"
+            f"QLabel:hover{{background:{_nw_tint(color, True)};}}")
+
+    def _nw_indicator(self, tx_id, value):
+        """Full-height, clickable Need/Want tag for a transaction row."""
+        box = QLabel()
         box.setAlignment(Qt.AlignCenter)
         box.setFixedWidth(62)
         # Ignored vertical policy => the row layout stretches it to the
         # tallest sibling, which is the transaction card.
         box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
-        box.setToolTip(f"Need/Want: {label.title()} \u2014 use Edit or Bulk Update to change")
-        is_set = value in (NW_NEED, NW_WANT)
-        box.setStyleSheet(
-            f"QLabel{{background:{_nw_tint(color, is_set)};color:{color};"
-            f"border:1.5px solid {color};border-radius:8px;"
-            f"font-size:10px;font-weight:800;letter-spacing:0.5px;}}")
+        box.setCursor(QCursor(Qt.PointingHandCursor))
+        self._paint_nw_box(box, value if value in self._NW_STYLE else NW_NONE)
+        box.mousePressEvent = (
+            lambda e, _tid=tx_id, _b=box: self._cycle_nw(_tid, _b))
         return box
+
+    def _cycle_nw(self, tx_id, box):
+        """Advance a transaction's Need/Want tag one step and save it.
+
+        Deliberately unauthenticated: this is a low-risk classification
+        toggle, not a money edit, so it confirms with a toast instead of a
+        password prompt.
+        """
+        from ui.widgets.toast import Toast
+        try:
+            row = self.tx.get(tx_id)
+            if not row:
+                Toast.show_message(self, "Transaction not found.", kind="error")
+                return
+            current = row.get("neednwant")
+            if current not in self._NW_STYLE:
+                current = NW_NONE
+            new_val = self._NW_NEXT.get(current, NW_WANT)
+
+            self.db.execute("UPDATE transactions SET neednwant=? WHERE id=?",
+                            (new_val, tx_id))
+            self.db.commit()
+        except Exception as e:
+            Toast.show_message(self, f"Could not update: {e}", kind="error")
+            return
+
+        # Repaint in place — a full reload would lose scroll position.
+        self._paint_nw_box(box, new_val)
+        # Keep the cached row in sync so the edit dialog and a later
+        # re-render both see the new value.
+        for cache in (getattr(self, "_rows", None), getattr(self, "_all_rows", None)):
+            if isinstance(cache, list):
+                for c in cache:
+                    if isinstance(c, dict) and c.get("id") == tx_id:
+                        c["neednwant"] = new_val
+
+        label, _ = self._nw_style_for(new_val)
+        Toast.show_message(self, f"Marked as {label}", kind="success")
+
+        # Other tabs (Home charts, Database totals) now hold stale figures.
+        try:
+            parent_tab = self.parent()
+            while parent_tab and not hasattr(parent_tab, "_notify_data_changed"):
+                parent_tab = parent_tab.parent()
+            if parent_tab and hasattr(parent_tab, "_notify_data_changed"):
+                parent_tab._notify_data_changed()
+        except Exception:
+            pass
 
     def _update_bulk_count(self):
         n = len(self._checked_ids())
