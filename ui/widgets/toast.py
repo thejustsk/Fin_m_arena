@@ -94,9 +94,32 @@ class Toast(QLabel):
         self.hide()
         self.deleteLater()
 
+    def _restyle(self, text, kind, msec):
+        """Reuse this chip for a new message instead of rebuilding it."""
+        fg, bg, border = _KIND_STYLE.get(kind, _KIND_STYLE["info"])
+        self.setText(text)
+        self.setStyleSheet(
+            f"QLabel{{background:{bg};color:{fg};border:1.5px solid {border};"
+            f"border-radius:10px;padding:10px 18px;"
+            f"font-size:13px;font-weight:700;}}")
+        self.adjustSize()
+        self._reposition()
+        # Cancel any in-flight fade-out and snap back to fully visible.
+        fade_out = getattr(self, "_fade_out", None)
+        if fade_out is not None:
+            fade_out.stop()
+        self._effect.setOpacity(1.0)
+        self.show()
+        self.raise_()
+        self._timer.start(msec)
+
     @staticmethod
     def show_message(widget, text, kind="info", msec=3000):
         """Show *text* over *widget*'s window. Returns the Toast, or None.
+
+        Rapid repeat calls reuse the existing chip — cheaper than tearing a
+        widget down and building another, and it avoids a visible flicker
+        when tagging several rows in quick succession.
 
         Failures are swallowed: a notification must never break the action
         that triggered it.
@@ -108,9 +131,13 @@ class Toast(QLabel):
             prev = Toast._active.get(win)
             if prev is not None:
                 try:
-                    prev._cleanup()
+                    prev._restyle(text, kind, msec)
+                    return prev
+                except RuntimeError:
+                    # Underlying C++ object already destroyed — fall through.
+                    Toast._active.pop(win, None)
                 except Exception:
-                    pass
+                    Toast._active.pop(win, None)
             t = Toast(win, text, kind=kind, msec=msec)
             Toast._active[win] = t
             return t

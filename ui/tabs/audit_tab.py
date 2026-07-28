@@ -935,8 +935,20 @@ class _AuditSubTab(QWidget):
         Deliberately unauthenticated: this is a low-risk classification
         toggle, not a money edit, so it confirms with a toast instead of a
         password prompt.
+
+        Performance note: this must stay cheap. It writes one row, repaints
+        one label, and does NOT re-render the list or refresh sibling tabs —
+        a full `_notify_data_changed()` costs well over a second because it
+        rebuilds every tab. Other tabs are marked dirty instead and catch up
+        the next time you navigate to them.
         """
         from ui.widgets.toast import Toast
+        # The row may have been re-rendered (filter reload, lazy batch) since
+        # this handler was bound, leaving a dangling C++ object.
+        try:
+            box.objectName()
+        except RuntimeError:
+            return
         try:
             row = self.tx.get(tx_id)
             if not row:
@@ -967,13 +979,22 @@ class _AuditSubTab(QWidget):
         label, _ = self._nw_style_for(new_val)
         Toast.show_message(self, f"Marked as {label}", kind="success")
 
-        # Other tabs (Home charts, Database totals) now hold stale figures.
+        # Sibling tabs (Home charts, Database totals) now hold stale figures.
+        # Flag them rather than rebuilding everything on every click.
+        self._mark_siblings_stale()
+
+    def _mark_siblings_stale(self):
+        """Tell the main window other tabs need a refresh — without doing it now.
+
+        MainWindow._nav() already calls refresh() when you switch tabs, so the
+        stale data corrects itself on navigation at zero cost to this click.
+        """
         try:
-            parent_tab = self.parent()
-            while parent_tab and not hasattr(parent_tab, "_notify_data_changed"):
-                parent_tab = parent_tab.parent()
-            if parent_tab and hasattr(parent_tab, "_notify_data_changed"):
-                parent_tab._notify_data_changed()
+            node = self.parent()
+            while node is not None and not hasattr(node, "_tabs"):
+                node = node.parent()
+            if node is not None:
+                setattr(node, "_data_dirty", True)
         except Exception:
             pass
 
