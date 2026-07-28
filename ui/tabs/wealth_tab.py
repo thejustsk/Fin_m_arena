@@ -230,7 +230,13 @@ def _clear_layout(layout):
 
 
 
-def _metric_card(label, value, color=None):
+def _metric_card(label, value, color=None, formatter=None):
+    """Build a Wealth KPI card, animating raw numeric values from zero.
+
+    List pages rebuild their KPI rows when opened. Passing raw values here
+    ensures count-up starts after that page is visible rather than relying on
+    a stale preformatted label.
+    """
     color = color or C["text"]
     card = QFrame()
     card.setStyleSheet(
@@ -240,8 +246,12 @@ def _metric_card(label, value, color=None):
     lay = QVBoxLayout(card)
     lay.setContentsMargins(14, 10, 14, 10)
     lay.setSpacing(4)
-    v = QLabel(value)
+    v = QLabel()
     v.setStyleSheet(f"font-size:18px;font-weight:800;color:{color};")
+    if isinstance(value, (int, float)):
+        animate_value(v, value, formatter or fmt_money, old_value=0)
+    else:
+        v.setText(str(value))
     l = QLabel(label)
     l.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
     lay.addWidget(v)
@@ -1297,9 +1307,10 @@ class LoansGivePage(_FunctionPage):
         )
         pending_count = len([l for l in loans if l["status"] != "CLOSED"])
         _fill_stats_row(self._stats_row, [
-            _metric_card("Total Pending", fmt_money(total_pending), C["amber"]),
-            _metric_card("Pending Loans", str(pending_count)),
-            _metric_card("Total Loans", str(self.repos["loans"].count_total())),
+            _metric_card("Total Pending", total_pending, C["amber"]),
+            _metric_card("Pending Loans", pending_count, formatter=lambda v: str(int(round(v)))),
+            _metric_card("Total Loans", self.repos["loans"].count_total(),
+                         formatter=lambda v: str(int(round(v)))),
         ])
 
         # ── Filter & sort ──
@@ -2041,9 +2052,10 @@ class LoansTakePage(_FunctionPage):
                     method=l.get("interest_method") or "COMPOUND")
             total_outstanding += a["current_value"]
         _fill_stats_row(self._stats_row, [
-            _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
-            _metric_card("Active Loans", str(len(active))),
-            _metric_card("Total Loans", str(self.repos["borrowed"].count_total())),
+            _metric_card("Total Outstanding", total_outstanding, C["amber"]),
+            _metric_card("Active Loans", len(active), formatter=lambda v: str(int(round(v)))),
+            _metric_card("Total Loans", self.repos["borrowed"].count_total(),
+                         formatter=lambda v: str(int(round(v)))),
         ])
 
         # Alerts
@@ -2444,10 +2456,10 @@ class FDGivePage(_FunctionPage):
         total_active_m = sum(f["maturity_amount"] or f["principal_amount"] for f in active_fds)
         total_matured_m = sum(f["maturity_amount"] or f["principal_amount"] for f in matured_fds)
         _fill_stats_row(self._stats_row, [
-            _metric_card("Active Principal", fmt_money(total_active_p), C["accent"]),
-            _metric_card("Active Maturity", fmt_money(total_active_m), C["accent"]),
-            _metric_card("Matured Value", fmt_money(total_matured_m), C["green"]),
-            _metric_card("Total FDs", str(len(fds))),
+            _metric_card("Active Principal", total_active_p, C["accent"]),
+            _metric_card("Active Maturity", total_active_m, C["accent"]),
+            _metric_card("Matured Value", total_matured_m, C["green"]),
+            _metric_card("Total FDs", len(fds), formatter=lambda v: str(int(round(v)))),
         ])
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
@@ -3014,9 +3026,10 @@ class FDOthersPage(_FunctionPage):
                 cv = a["current_value"]
             total_outstanding += cv
         _fill_stats_row(self._stats_row, [
-            _metric_card("Total Outstanding", fmt_money(total_outstanding), C["amber"]),
-            _metric_card("Active Deposits", str(len(active))),
-            _metric_card("Total Deposits", str(self.repos["deposits"].count_total())),
+            _metric_card("Total Outstanding", total_outstanding, C["amber"]),
+            _metric_card("Active Deposits", len(active), formatter=lambda v: str(int(round(v)))),
+            _metric_card("Total Deposits", self.repos["deposits"].count_total(),
+                         formatter=lambda v: str(int(round(v)))),
         ])
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
@@ -3818,10 +3831,11 @@ class MFPage(_FunctionPage):
         total_cur = sum(i["current_value"] for i in items)
         overall_ret = MFService.simple_return(total_inv, total_cur)
         _fill_stats_row(self._stats_row, [
-            _metric_card("Invested", fmt_money(total_inv)),
-            _metric_card("Current Value", fmt_money(total_cur), C["accent"]),
-            _metric_card("Overall Return", f"{overall_ret:+.2f}%",
-                          C["green"] if overall_ret >= 0 else C["red"]),
+            _metric_card("Invested", total_inv),
+            _metric_card("Current Value", total_cur, C["accent"]),
+            _metric_card("Overall Return", overall_ret,
+                         C["green"] if overall_ret >= 0 else C["red"],
+                         formatter=lambda v: f"{v:+.2f}%"),
         ])
         search = self._search_input.text().strip().lower() if hasattr(self, "_search_input") else ""
         if search:
