@@ -338,20 +338,20 @@ def run_migrations(db):
     for t in ["Personal", "Business", "Tax", "Recurring", "Important"]:
         c.execute("INSERT OR IGNORE INTO note_tags VALUES(?,?,1)", (t.lower(), t))
 
-    # 7. Safe ALTER TABLE — add columns if missing (existing DBs)
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('min_txn_alert', '499')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('complete_page_size', '150')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('scroll_trigger_px', '400')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('user_email', '')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('user_name', '')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('theme', 'light')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_page_size', '150')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_scroll_trigger', '400')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('notes_page_size', '50')")
-        c.execute("INSERT OR IGNORE INTO preferences VALUES('notes_scroll_trigger', '200')")
+    # 7. Seed application preferences once (INSERT OR IGNORE)
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('min_txn_alert', '499')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('complete_page_size', '150')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('scroll_trigger_px', '400')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('user_email', '')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('user_name', '')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('theme', 'light')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_page_size', '150')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_scroll_trigger', '400')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('notes_page_size', '50')")
+    c.execute("INSERT OR IGNORE INTO preferences VALUES('notes_scroll_trigger', '200')")
 
-
-        _safe_cols = [
+    # 8. Safe ALTER TABLE — add columns if missing (existing DBs)
+    _safe_cols = [
         ("cards", "credit_limit", "REAL DEFAULT 0"),
         ("cards", "statement_day", "INTEGER DEFAULT 1"),
         ("cards", "joining_fee", "REAL DEFAULT 0"),

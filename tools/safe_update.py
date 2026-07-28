@@ -28,7 +28,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DB_DIR = ROOT / "finance_data"
 DB = DB_DIR / "finance.db"
-BRANCH = "arena/019fa316-fin-m-arena"
 SIDECARS = ("finance.db-wal", "finance.db-shm")
 
 # config.py is tracked, so `git reset --hard` overwrites it -- taking any
@@ -71,6 +70,20 @@ def rescue_config_secrets():
 
 def _run(*args):
     return subprocess.run(args, cwd=str(ROOT), capture_output=True, text=True)
+
+
+def current_branch():
+    """Return the checked-out branch, refusing detached-HEAD updates.
+
+    An update must follow the branch the user is already working on. A
+    hard-coded branch can silently downgrade a newer checkout.
+    """
+    result = _run("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+    branch = result.stdout.strip()
+    if result.returncode or not branch:
+        print("Cannot safely update from a detached HEAD. Check out a branch first.")
+        sys.exit(1)
+    return branch
 
 
 def snapshot():
@@ -124,14 +137,15 @@ def main():
     print("2/5  Protecting local credentials...")
     rescue_config_secrets()
 
-    print("3/5  Fetching latest code...")
-    r = _run("git", "fetch", "origin", BRANCH)
+    branch = current_branch()
+    print(f"3/5  Fetching latest code for '{branch}'...")
+    r = _run("git", "fetch", "origin", branch)
     if r.returncode:
         print(r.stderr)
         sys.exit(1)
 
     print("4/5  Updating working tree...")
-    r = _run("git", "reset", "--hard", f"origin/{BRANCH}")
+    r = _run("git", "reset", "--hard", f"origin/{branch}")
     if r.returncode:
         print(r.stderr)
         sys.exit(1)
