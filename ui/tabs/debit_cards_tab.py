@@ -465,7 +465,7 @@ class DebitCardsTab(QWidget):
     def _build(self):
         root = QVBoxLayout(self); root.setContentsMargins(28,16,28,16); root.setSpacing(10)
         hr = QHBoxLayout(); hr.setSpacing(12)
-        h = QLabel("\U0001f4b3  Debit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
+        h = QLabel("\U0001f3e7  Debit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
         ab = QPushButton("\uff0b  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38)
         ab.setCursor(QCursor(Qt.PointingHandCursor)); ab.clicked.connect(self._add_card); hr.addWidget(ab); root.addLayout(hr)
 

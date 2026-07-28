@@ -203,7 +203,7 @@ def _build_home_tiles():
         ("🗄️", "Database", "#8B5CF6"),
         ("💰", "Balances", C['green']),
         ("💳", "Credit Cards", C['red']),
-        ("💳", "Debit Cards", "#F59E0B"),
+        ("🏧", "Debit Cards", "#F59E0B"),
         ("🤝", "Split", "#7C3AED"),
         ("🔍", "Audit", C['amber']),
         ("📈", "Wealth", "#10B981"),

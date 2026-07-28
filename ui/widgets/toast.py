@@ -15,6 +15,9 @@ from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
 from ui.theme import C
 
 
+# Distance from the top of the window to the toast.
+_TOP_MARGIN = 24
+
 _KIND_STYLE = {
     "success": ("#065F46", "#D1FAE5", "#10B981"),   # text, bg, border
     "info":    ("#1E3A8A", "#DBEAFE", "#3B82F6"),
@@ -30,7 +33,7 @@ class Toast(QLabel):
     # replaces the message instead of stacking overlapping chips.
     _active = {}
 
-    def __init__(self, parent_window, text, kind="info", msec=1800):
+    def __init__(self, parent_window, text, kind="info", msec=3000):
         super().__init__(parent_window)
         fg, bg, border = _KIND_STYLE.get(kind, _KIND_STYLE["info"])
         self.setText(text)
@@ -67,11 +70,12 @@ class Toast(QLabel):
         self._timer.start(msec)
 
     def _reposition(self):
+        """Float near the top-centre of the window."""
         p = self.parentWidget()
         if not p:
             return
         x = max(0, (p.width() - self.width()) // 2)
-        y = max(0, p.height() - self.height() - 40)
+        y = _TOP_MARGIN
         self.move(x, y)
 
     def _begin_fade_out(self):
@@ -91,7 +95,7 @@ class Toast(QLabel):
         self.deleteLater()
 
     @staticmethod
-    def show_message(widget, text, kind="info", msec=1800):
+    def show_message(widget, text, kind="info", msec=3000):
         """Show *text* over *widget*'s window. Returns the Toast, or None.
 
         Failures are swallowed: a notification must never break the action

@@ -36,7 +36,7 @@ NAV_GROUPS = [
     ]),
     ("CARDS", [
         ("cards", "💳", "Credit Cards"),
-        ("debit_cards", "💳", "Debit Cards"),
+        ("debit_cards", "🏧", "Debit Cards"),
     ]),
     ("REVIEW & PLANNING", [
         ("audit", "🔍", "Audit"),
