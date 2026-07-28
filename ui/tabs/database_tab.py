@@ -1211,9 +1211,23 @@ class DatabaseTab(QWidget):
         self.ft_num = QDoubleSpinBox(); self.ft_num.setPrefix("₹ ")
         self.ft_num.setRange(0,99999999); self.ft_num.setMinimumHeight(34)
         self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
-        # Apply directly to the controls. This deliberately wins over the
-        # global input QSS and keeps the filter bar visually borderless.
-        _filter_control_qss = f"background:{C['surface2']};border:none;border-radius:7px;padding:6px 10px;"
+        # The filter bar is one control group, not six individual cards.
+        # Override both the widgets and their native drop-down/spin subcontrols
+        # so the global input QSS cannot reintroduce separate outlines.
+        _filter_control_qss = f"""
+            QDateEdit, QComboBox, QLineEdit, QDoubleSpinBox {{
+                background: transparent; color:{C['text']}; border:0px;
+                border-radius:0px; padding:6px 8px;
+            }}
+            QDateEdit:hover, QDateEdit:focus, QComboBox:hover, QComboBox:focus,
+            QLineEdit:hover, QLineEdit:focus, QDoubleSpinBox:hover, QDoubleSpinBox:focus {{
+                background:{C['surface2']}; border:0px;
+            }}
+            QDateEdit::drop-down, QComboBox::drop-down,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                border:0px; background:transparent;
+            }}
+        """
         for control in (self.f_date_from, self.f_date_to, self.fc,
                         self.ft_combo, self.ft_text, self.ft_num):
             control.setStyleSheet(_filter_control_qss)
