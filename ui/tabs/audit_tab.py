@@ -1176,9 +1176,10 @@ class _AuditSubTab(QWidget):
                 ok_btn.clicked.connect(upd_dlg.accept)
                 upd_lay.addWidget(ok_btn)
                 ok_btn.setFocus()
-                QApplication.processEvents()
             except Exception:
                 pass
+            from ui.widgets.toast import Toast
+            Toast.show_message(self, "Transaction updated", kind="success")
             # Reload this list so the Need/Want indicator reflects the edit
             try:
                 self.load_records()
@@ -1320,6 +1321,8 @@ class _AuditSubTab(QWidget):
             # The list has already refreshed; do not open a second modal.
         except Exception:
             pass
+        from ui.widgets.toast import Toast
+        Toast.show_message(self, f"{len(all_ids)} transaction(s) deleted", kind="success")
 
     def _cascade_amount(self, tx_id, new_amount):
         """Push edited transaction amount into the linked wealth table."""

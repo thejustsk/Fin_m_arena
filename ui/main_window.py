@@ -358,7 +358,12 @@ class MainWindow(QMainWindow):
         # Update sidebar highlight
         self.sidebar.highlight(key)
         tab = self.stack.widget(idx)
-        if hasattr(tab, "refresh"):
+        if hasattr(tab, "on_activated"):
+            try:
+                tab.on_activated()
+            except Exception as e:
+                print(f"Activation error on {key}: {e}")
+        elif hasattr(tab, "refresh"):
             try:
                 tab.refresh()
             except Exception as e:

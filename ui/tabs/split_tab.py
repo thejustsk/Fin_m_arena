@@ -430,10 +430,12 @@ class SplitTab(QWidget):
             self.status_title.setText(
                 "\U0001f91d  SPLIT STATUS" if who == "You"
                 else f"\U0001f91d  SPLIT STATUS \u2014 {who}")
-        animate_value(self.lbl_owed_val, total_owed_to_me, fmt_money)
-        animate_value(self.lbl_owe_val, total_i_owe, fmt_money)
-        animate_value(self.lbl_settled_val, settled, lambda value: str(int(round(value))))
-        animate_value(self.lbl_unset_val, unsettled, lambda value: str(int(round(value))))
+        replay = getattr(self, "_replay_status", False)
+        self._replay_status = False
+        animate_value(self.lbl_owed_val, total_owed_to_me, fmt_money, old_value=0 if replay else None)
+        animate_value(self.lbl_owe_val, total_i_owe, fmt_money, old_value=0 if replay else None)
+        animate_value(self.lbl_settled_val, settled, lambda value: str(int(round(value))), old_value=0 if replay else None)
+        animate_value(self.lbl_unset_val, unsettled, lambda value: str(int(round(value))), old_value=0 if replay else None)
 
     # ═══════════════════════════════════════════════════════════
     #  NAVIGATION
@@ -443,6 +445,10 @@ class SplitTab(QWidget):
         self.sub_stack.setCurrentIndex(idx)
         if idx == 0:
             self._refresh_overview()
+
+    def on_activated(self):
+        self._replay_status = True
+        self.refresh()
 
     def refresh(self):
         self._load_groups()

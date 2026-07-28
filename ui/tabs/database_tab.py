@@ -477,6 +477,7 @@ class ChartView(QWidget):
             # WebEngine otherwise exposes a white backing while local HTML is
             # loading or where its page is transparent.
             self.view.page().setBackgroundColor(QColor(C["bg"]))
+            self.view.loadFinished.connect(self._resize_after_load)
             lay.addWidget(self.view)
         else:
             self.view = None
@@ -484,6 +485,19 @@ class ChartView(QWidget):
             lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;padding:40px;")
             lbl.setAlignment(Qt.AlignCenter)
             lay.addWidget(lbl)
+
+    def _resize_after_load(self, ok):
+        """Resize Chart.js only after its HTML has a real visible viewport."""
+        if not ok or not self.view:
+            return
+        for delay in (0, 100, 280):
+            QTimer.singleShot(delay, self.resize_charts)
+
+    def resize_charts(self):
+        if not self.view:
+            return
+        self.view.page().runJavaScript(
+            "if(window.Chart){Object.values(Chart.instances).forEach(function(chart){chart.resize();});}")
 
     def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db, need, want, nw_none=0):
         if not self.view: return
@@ -854,6 +868,7 @@ class DatabaseTab(QWidget):
             # Chart.js listens for browser resize events; Qt widget resize on
             # its own is not always propagated when a stacked page was hidden.
             self.mv.view.page().runJavaScript("window.dispatchEvent(new Event('resize'));")
+            self.mv.resize_charts()
 
     def _m_txns(self):
         w = QWidget()
@@ -1002,9 +1017,10 @@ class DatabaseTab(QWidget):
 
             # Type header
             group_label = QLabel(ACCT_TYPE_LABELS.get(atype, atype))
+            group_label.setMinimumHeight(26)
             group_label.setStyleSheet(
-                f"color:{ACCT_TYPE_COLORS.get(atype, '#6B7280')};"
-                f"font-size:13px;font-weight:700;padding:4px 0;")
+                f"color:{ACCT_TYPE_COLORS.get(atype, C['text2'])};background:transparent;"
+                "border:none;font-size:13px;font-weight:800;padding:4px 0;")
             group_lay.addWidget(group_label)
 
             # Grid of cards — max 3 per row
@@ -1132,7 +1148,8 @@ class DatabaseTab(QWidget):
         bar = QFrame()
         bar.setStyleSheet(
             f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}"
-            f"QDateEdit,QComboBox,QLineEdit,QDoubleSpinBox{{background:{C['surface2']};border:none;border-radius:7px;}}")
+            f"QFrame QDateEdit,QFrame QComboBox,QFrame QLineEdit,QFrame QDoubleSpinBox"
+            f"{{background:{C['surface2']};border:none;border-radius:7px;}}")
         row = QHBoxLayout(bar)
         row.setContentsMargins(4, 4, 4, 4)
         row.setSpacing(6)

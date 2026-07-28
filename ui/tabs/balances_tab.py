@@ -195,13 +195,20 @@ class BalancesTab(QWidget):
     # ─────────────────────────────────────────
     # REFRESH
     # ─────────────────────────────────────────
+    def on_activated(self):
+        """Replay header KPIs when the user lands on Balances."""
+        self._animate_headers = True
+        self.refresh()
+
     def refresh(self):
+        replay = getattr(self, "_animate_headers", False)
+        self._animate_headers = False
         today = date.today()
         today_iso = today.isoformat()
 
         nw = self.bal.net_worth()
         nw_color = "#10B981" if nw >= 0 else "#EF4444"
-        animate_value(self.nw_val, nw, fmt_money)
+        animate_value(self.nw_val, nw, fmt_money, old_value=0 if replay else None)
         self.nw_val.setStyleSheet(f"color:{nw_color};font-size:26px;font-weight:900;")
 
         type_totals = self.bal.by_type()
@@ -216,7 +223,7 @@ class BalancesTab(QWidget):
                 vc = "#FFFFFF"
             else:
                 vc = "#10B981" if val >= 0 else "#EF4444"
-            animate_value(val_lbl, val, fmt_money)
+            animate_value(val_lbl, val, fmt_money, old_value=0 if replay else None)
             val_lbl.setStyleSheet(
                 f"color:{vc};font-size:15px;font-weight:700;"
                 f"background:transparent;border:none;")

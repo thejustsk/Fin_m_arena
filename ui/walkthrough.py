@@ -770,13 +770,7 @@ def _build_cc_reminders():
 def _build_dc_carousel():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
     card = QFrame(); card.setFixedHeight(160)
-    # Match the debit-card carousel to the active app theme: Black Steel in
-    # dark mode, Silverforge in light mode.
-    gradient = ("#242830", "#050607") if is_dark() else ("#b8bcc2", "#5f656d")
-    card.setStyleSheet(
-        "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-        f"stop:0 {gradient[0]},stop:1 {gradient[1]});border-radius:16px;}}"
-        "QLabel{background:transparent;border:none;}")
+    card.setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #b8bcc2,stop:1 #5f656d);border-radius:16px;}QLabel{background:transparent;border:none;}")
     cl = QVBoxLayout(card); cl.setContentsMargins(20, 12, 20, 12); cl.setSpacing(4)
     cl.addWidget(_make_label("SBI Debit Card", 13, "white", True))
     cl.addWidget(_make_label("SBI Savings", 10, "rgba(255,255,255,0.7)"))
@@ -2070,14 +2064,20 @@ class WalkthroughPage(QWidget):
 
         if sub.get("proto_func"):
             proto_frame = QFrame()
+            # The live-prototype *container* follows the card-design language:
+            # Silverforge in Light mode and Black Steel in Dark mode. Individual
+            # prototype cards keep their own real component styling.
+            proto_start, proto_end = (("#242830", "#050607") if is_dark()
+                                      else ("#c9ced3", "#59616b"))
             proto_frame.setStyleSheet(
-                f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #c9ced3,stop:1 #59616b);border:1px solid {C['border2']};border-radius:10px;}}"
-                f"QLabel{{background:transparent;border:none;}}")
+                f"QFrame{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {proto_start},stop:1 {proto_end});"
+                f"border:1px solid {C['border2']};border-radius:10px;}}"
+                "QLabel{background:transparent;border:none;}")
             proto_lay = QVBoxLayout(proto_frame)
             proto_lay.setContentsMargins(16, 12, 16, 12)
             proto_lay.setSpacing(6)
             proto_title = QLabel("🔍 Live Prototype")
-            proto_title.setStyleSheet("color:#1E293B;font-size:11px;font-weight:700;background:transparent;border:none;")
+            proto_title.setStyleSheet("color:white;font-size:11px;font-weight:700;background:transparent;border:none;")
             proto_lay.addWidget(proto_title)
             proto_widget = sub["proto_func"]()
             proto_lay.addWidget(proto_widget)

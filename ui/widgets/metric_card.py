@@ -10,33 +10,26 @@ from ui.theme import C
 # SHARED TABLE STYLE — one style for ALL tables
 # ═══════════════════════════════════════════════
 
-TABLE_QSS = f"""
-    QTableWidget {{
-        background: {C['surface']};
-        border: 1px solid {C['border2']};
-        border-radius: {C['radius']};
-        gridline-color: transparent;
-    }}
-    QTableWidget::item {{
-        padding: 10px 14px;
-        border-bottom: 1px solid {C['border2']};
-    }}
-    QTableWidget::item:selected {{
-        background: {C['accent_bg']};
-        color: {C['text']};
-    }}
-    QHeaderView::section {{
-        background: {C['surface2']};
-        color: {C['text3']};
-        font-weight: 700;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        padding: 12px 14px;
-        border: none;
-        border-bottom: 2px solid {C['border2']};
-    }}
-"""
+def table_qss():
+    """Build table styling from the *current* palette.
+
+    This cannot be a module-level f-string: that would freeze whichever theme
+    happened to be active when this module was first imported, leaving tables
+    black after returning from Dark mode to Light mode.
+    """
+    return f"""
+        QTableWidget {{
+            background: {C['surface']}; border: 1px solid {C['border2']};
+            border-radius: {C['radius']}; gridline-color: transparent;
+        }}
+        QTableWidget::item {{ padding: 10px 14px; border-bottom: 1px solid {C['border2']}; }}
+        QTableWidget::item:selected {{ background: {C['accent_bg']}; color: {C['text']}; }}
+        QHeaderView::section {{
+            background: {C['surface2']}; color: {C['text3']}; font-weight: 700;
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+            padding: 12px 14px; border: none; border-bottom: 2px solid {C['border2']};
+        }}
+    """
 
 
 def style_table(table, stretch_last=True):
@@ -49,7 +42,7 @@ def style_table(table, stretch_last=True):
     table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
     if stretch_last:
         table.horizontalHeader().setStretchLastSection(True)
-    table.setStyleSheet(TABLE_QSS)
+    table.setStyleSheet(table_qss())
     return table
 
 
