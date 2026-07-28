@@ -37,6 +37,15 @@ INSERT OR IGNORE INTO transactions (id, tx_date, account_id, pay_method, tx_type
 INSERT OR IGNORE INTO transactions (id, tx_date, account_id, pay_method, tx_type, amount, person_org, description, created_at, transaction_kind, transfer_group_id, category, neednwant, pf_category, gmail_source_id, updated_at) VALUES ('0bde670a-7d77-41cd-97b5-a5283a62a45d', '2026-07-26', 'fbd52adb-f2cc-4fa1-82a1-bb6ec4f75c8c', 'PHONEPAY', 'DEBIT', 800.0, 'BANGLORE FOODIES', 'Split: MTR FOOD', '2026-07-27T14:52:31.765031', 'SPLIT', NULL, 'finance', 0, 'commitment', NULL, NULL);
 INSERT OR IGNORE INTO transactions (id, tx_date, account_id, pay_method, tx_type, amount, person_org, description, created_at, transaction_kind, transfer_group_id, category, neednwant, pf_category, gmail_source_id, updated_at) VALUES ('2566ffa0-e6ac-49ed-a229-7a089fd3f443', '2026-07-27', 'fbd52adb-f2cc-4fa1-82a1-bb6ec4f75c8c', 'PHONEPAY', 'CREDIT', 230.0, 'BANGLORE FOODIES', 'ASHLEY → You', '2026-07-27T15:18:11.923599', 'SPLIT_SETTLEMENT', NULL, 'finance', 0, 'commitment', NULL, NULL);
 
+-- Clear any placeholder "You" contact the app auto-created while the split
+-- tables were empty. Without this there would be two is_self=1 rows and the
+-- header would read every balance off the empty one (0 owed / all settled).
+DELETE FROM split_group_members WHERE contact_id IN (
+    SELECT contact_id FROM split_contacts WHERE is_self=1
+      AND contact_id <> '8caccfa7-8999-4803-9235-886c9fa3bde9');
+DELETE FROM split_contacts WHERE is_self=1
+  AND contact_id <> '8caccfa7-8999-4803-9235-886c9fa3bde9';
+
 -- split_contacts: 12 rows
 INSERT OR IGNORE INTO split_contacts (contact_id, name, phone, is_self, created_at) VALUES ('8caccfa7-8999-4803-9235-886c9fa3bde9', 'You', NULL, 1, '2026-07-27');
 INSERT OR IGNORE INTO split_contacts (contact_id, name, phone, is_self, created_at) VALUES ('dad03f2f-5565-4816-8229-7ebfb584e356', 'THEJUS K', NULL, 0, '2026-07-27');
