@@ -16,7 +16,9 @@ finance_data/*.db-shm
 finance_data/*.sqlite
 finance_data/*.sqlite3
 finance_data/backups/
+finance_data/pre_update/
 finance_data/recovery/*.db
+finance_data/*.db.rawcopy
 
 # Keep the recovery SQL, it is a one-off rescue artefact.
 !finance_data/recovery/split_recovery.sql
