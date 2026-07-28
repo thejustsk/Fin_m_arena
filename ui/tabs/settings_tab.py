@@ -92,7 +92,7 @@ class SettingsTab(QWidget):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._accounts_tab(), "Accounts")
-        self.tabs.addTab(self._lookups_tab(), "Categories & Lookups")
+        self.tabs.addTab(self._lookups_tab(), "Categories && Lookups")
         self.tabs.addTab(self._security_tab(), "Security")
         self.tabs.addTab(self._prefs_tab(), "Preferences")
         self.tabs.addTab(self._data_mgmt_tab(), "Data Management")
@@ -346,7 +346,7 @@ class SettingsTab(QWidget):
     def _categories_tab(self):
         w = QWidget(); l = QVBoxLayout(w)
         ab = QPushButton("+ Add Category"); ab.clicked.connect(self._add_category); l.addWidget(ab)
-        self.cat_table = mk_table(["Icon", "Name", "PF Category", "Tax", "Color", "Action"])
+        self.cat_table = mk_table(["Icon", "Name", "Money Purpose", "Tax", "Color", "Action"])
         l.addWidget(self.cat_table)
         return w
 
@@ -395,7 +395,11 @@ class SettingsTab(QWidget):
         f.addRow("Icon:", icon_row)
 
         name = QLineEdit(); name.setPlaceholderText("Category name"); f.addRow("Name:", name)
-        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"]); f.addRow("PF Category:", pf)
+        pf = QComboBox()
+        # Show friendly names, store the permanent pf_id.
+        for _pf in self.lu.list_pf_categories():
+            pf.addItem(_pf["display_name"], _pf["pf_id"])
+        f.addRow("Money Purpose:", pf)
 
         # Color disc selector
         color_row = QHBoxLayout()
@@ -423,7 +427,7 @@ class SettingsTab(QWidget):
             try:
                 cid = name.text().strip().lower().replace(" ", "_")
                 self.lu.add_category(cid, name.text().strip(), self._new_cat_color,
-                                      pf.currentText(), 1 if tax.isChecked() else 0)
+                                      pf.currentData(), 1 if tax.isChecked() else 0)
                 self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
                                 (f"cat_icon_{cid}", self._new_cat_icon))
                 self.db.commit()
@@ -458,8 +462,13 @@ class SettingsTab(QWidget):
         f.addRow("Icon:", icon_row)
 
         name = QLineEdit(); name.setText(cat_data.get("display_name", "")); f.addRow("Name:", name)
-        pf = QComboBox(); pf.addItems(["commitment", "consumption", "growth", "safety", "nc"])
-        pf.setCurrentText(cat_data.get("default_pf_category", "nc")); f.addRow("PF Category:", pf)
+        pf = QComboBox()
+        for _pf in self.lu.list_pf_categories():
+            pf.addItem(_pf["display_name"], _pf["pf_id"])
+        _cur_pf = pf.findData(cat_data.get("default_pf_category", "nc"))
+        if _cur_pf >= 0:
+            pf.setCurrentIndex(_cur_pf)
+        f.addRow("Money Purpose:", pf)
 
         # Color disc selector
         current_color = cat_data.get("color_hex", "#4F46E5")
@@ -489,7 +498,7 @@ class SettingsTab(QWidget):
         if d.exec_() == QDialog.Accepted:
             self.db.execute(
                 "UPDATE categories SET display_name=?, color_hex=?, default_pf_category=?, tax_deductible=? WHERE category_id=?",
-                (name.text().strip(), self._edit_cat_color, pf.currentText(),
+                (name.text().strip(), self._edit_cat_color, pf.currentData(),
                  1 if tax.isChecked() else 0, cid))
             self.db.execute("INSERT OR REPLACE INTO preferences VALUES(?, ?)",
                             (f"cat_icon_{cid}", self._edit_cat_icon))
@@ -1144,6 +1153,16 @@ class SettingsTab(QWidget):
         il.addWidget(sub)
 
         sections = [
+            ("\U0001f3f7\ufe0f  Core Concepts", "#0EA5E9", [
+                ("Category", "What the money was spent on \u2014 Food & Dining, Transport, Rent, Salary and so on. 13 are seeded on a fresh install and you can add your own. Each category carries a default Money Purpose that is applied automatically when you pick it."),
+                ("Money Purpose", "Why the money moved, one level above Category. Commitment (obligations you cannot skip: rent, EMIs, bills), Consumption (day-to-day living), Growth (investments and education), Safety (health, insurance, emergency), Internal Transfer (money moving between your own accounts \u2014 not real spending) and Uncategorised. Two coffees and a rent payment are both expenses, but only one is a Commitment. Stored internally as pf_category; older builds labelled this \u201cPF Category\u201d."),
+                ("Need vs Want", "Your own judgement on a single transaction. Every expense is one of three states: Need (unavoidable), Want (discretionary) or Not Set (untagged). Set it with the three buttons on the Transaction Entry screen, or in bulk from Audit. The Home, Database and Audit charts show all three, so untagged spending is visible rather than silently lumped in with Want."),
+                ("Need/Want vs Money Purpose", "They answer different questions and are deliberately separate. Money Purpose is a fixed property of the category (rent is always a Commitment). Need/Want is your personal call on that specific purchase \u2014 a restaurant meal might be a Want on Friday and a Need when you are travelling for work."),
+                ("Transaction Kind", "How a transaction was created. REGULAR is manual entry. TRANSFER moves money between your own accounts and always creates a linked pair. The rest are generated automatically by the Wealth and Split tabs: LOAN_GIVEN, LOAN_REPAYMENT, LOAN_TAKEN, EMI_PAYMENT, FD_DEPOSIT, FD_WITHDRAWAL, DEPOSIT_RECEIVED, DEPOSIT_REPAYMENT, MF_PURCHASE, MF_REDEMPTION, SPLIT and SPLIT_SETTLEMENT."),
+                ("Account Types", "CURRENT is a bank or savings account. CREDIT_CARD carries a negative balance because it represents money owed. WALLET covers Paytm, PhonePe and similar. CASH is physical money. Account type drives how balances are totalled on the Balances tab."),
+                ("Asset vs Liability", "The Wealth tab keeps both sides straight. Money Lent and My Fixed Deposits are assets \u2014 money owed to you or held for you. Money Borrowed and Deposits Received are liabilities \u2014 money you must pay back. Deposits Received is the one that catches people out: someone else's money sitting with you is a debt, not savings."),
+                ("Status Values", "Shared across every wealth record. ACTIVE (running, nothing paid), PARTIALLY_PAID (some payments made), OVERDUE (past the due date with a balance outstanding), REPAID (fully settled), CLOSED (manually archived by you). Fixed deposits add MATURED, WITHDRAWN and PREMATURE_WITHDRAWN. Statuses recalculate automatically on every refresh."),
+            ]),
             ("\U0001f3e0  Home", "#4F46E5", [
                 ("Greeting", "Personalised header — 'Good Morning/Afternoon/Evening, <your name>' with a time-of-day icon. Your name comes from the setup wizard and can be changed in Settings > Accounts."),
                 ("KPI Period Cards", "Income, Expense and Savings for Today / Week / Month / Year. Click a period button to switch every card at once."),
@@ -1151,7 +1170,7 @@ class SettingsTab(QWidget):
                 ("Quick Access", "Tiles that jump straight to the main tabs. Top Transactions lists your largest recent movements."),
             ]),
             ("\U0001f4dd  Transactions", "#4F46E5", [
-                ("Regular Entry", "Record income (CREDIT) and expenses (DEBIT) with account, category, payment method, need/want tagging, person/org, and description. Auto-creates payment methods if not found."),
+                ("Regular Entry", "Record income (CREDIT) and expenses (DEBIT) with account, category, payment method, person/org and description. Three buttons set Need / Want / Not Set for the transaction. A read-only \u201cPurpose:\u201d badge shows the Money Purpose inherited from the chosen category. Payment methods are auto-created if you type one that does not exist."),
                 ("Transfer", "Move money between your own accounts. Creates two linked transactions (DEBIT + CREDIT) with a shared transfer_group_id. Swap button to flip From/To. Success animation on completion."),
                 ("Gmail Queue", "Not yet available. The Gmail tab currently shows a Coming Soon screen; no inbox sync happens today."),
             ]),
@@ -1186,15 +1205,15 @@ class SettingsTab(QWidget):
                 ("Dashboard", "Landing page for the Wealth tab. Fixed Net Position bar (Investments, Receivable, Payable, Split Net, NET) plus 6 clickable KPI cards. Below sits a scrollable Alerts & Upcoming list."),
                 ("Net Position", "Investments = active + matured FDs plus mutual funds at current value. Receivable = outstanding on loans you gave. Payable = loans you took plus deposits you hold for others. NET = Investments + Receivable − Payable + Split Net."),
                 ("Alerts & Upcoming", "Rich cards sorted most-urgent-first: overdue loans (both directions), overdue deposit returns, EMIs due within 7 days, deposit returns and FD maturities within 30 days, and split settlements involving you."),
-                ("Loans I Give", "Track money lent to others. Entry: borrower, amount, interest rate/method, dates. List: color-coded cards by status, progress bar, inline edit, repayment history, Print PDF."),
-                ("Loans I Take", "Track money borrowed. EMI and Non-EMI types. EMI preview on entry. Amount types: Updated EMI, Original EMI, Full Pay, Custom. Alerts for overdue and upcoming EMIs."),
-                ("FD I Deposit", "Track fixed deposits. Simple/Compound interest with compounding frequency. Maturity preview on entry. Mark Matured, Mark Withdrawn (with premature fee calculation)."),
-                ("FD Others Deposit", "Money other people deposited with you — treated as a liability, since you owe it back. Interest-free toggle, repayment log, Mark as Closed when fully returned."),
+                ("Money Lent", "Track money lent to others. Entry: borrower, amount, interest rate/method, dates. List: color-coded cards by status, progress bar, inline edit, repayment history, Print PDF."),
+                ("Money Borrowed", "Track money you borrowed. Two repayment types: EMI Loan (fixed monthly) and Flexible Repayment (variable, pay what you can). EMI preview on entry. Payment amount options: Updated EMI, Original EMI, Full Pay, Custom. Alerts for overdue loans and upcoming EMIs."),
+                ("My Fixed Deposits", "Track fixed deposits. Simple/Compound interest with compounding frequency. Maturity preview on entry. Mark Matured, Mark Withdrawn (with premature fee calculation)."),
+                ("Deposits Received", "Money other people deposited with you — treated as a liability, since you owe it back. Interest-free toggle, repayment log, Mark as Closed when fully returned."),
                 ("Mutual Funds", "Track MF investments. Purchase/SIP and Redemption. Auto-fetch NAV from api.mfapi.in. Background NAV fetch on app start. Fully-redeemed schemes (0 units) show a grey card with 0.00% return."),
             ]),
             ("\U0001f50d  Audit", "#D97706", [
                 ("Filters & Records", "11 filter fields with multi-value chips. Regular and Wealth transaction sub-tabs. Each card has Select (for bulk) and Edit buttons. Lazy scroll with configurable page size."),
-                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, PF Category. Both require 2FA/password verification. Progress popup during updates."),
+                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, Money Purpose. Both require 2FA/password verification. Progress popup during updates."),
                 ("Insights", "Analytics with quick period buttons. 4 KPI cards + 4 Chart.js charts. Auto-aggregates by month if range > 90 days."),
             ]),
             ("\U0001f4cb  Notes", "#EC4899", [
@@ -1206,7 +1225,7 @@ class SettingsTab(QWidget):
             ("\u2699\ufe0f  Settings", "#6B7280", [
                 ("Your Name", "Profile card at the top of Accounts. Shows the name captured during setup; Edit requires password/TOTP confirmation. Used for the Home greeting and the '(You)' label in Split."),
                 ("Accounts", "Grouped by type. Single-line rows with name, label, type badge, opening balance, status. Add/Edit/Activate/Deactivate. CC accounts redirect to card editor."),
-                ("Categories", "Icon picker (96 emoji palette), color disc picker (24 colors), PF category, tax deductible flag. Instant update on save. A fresh install seeds 13 starter categories; add your own at any time."),
+                ("Categories", "Icon picker (96 emoji palette), color disc picker (24 colors), default Money Purpose, tax deductible flag. Instant update on save. A fresh install seeds 13 starter categories; add your own at any time."),
                 ("Payment Methods", "Add new, activate/deactivate toggle (does NOT delete, just hides from dropdowns). A fresh install seeds 23 starter methods; new ones are also created automatically when you type an unknown method during entry."),
                 ("Security", "2FA toggle, Edit 2FA Key (QR code), Google OAuth link/unlink, Change Password, Tab Security (per-tab password protection)."),
                 ("Preferences", "Theme (Light, locked) and Currency (Indian Rupee). Separate pagination settings for Database, Wealth and Notes. High-value transaction alert threshold."),
@@ -1248,6 +1267,8 @@ class SettingsTab(QWidget):
             ("\U0001f4be  Data Storage", "#4F46E5", [
                 ("SQLite Database", "All data stored locally in finance_data/finance.db. No internet required for core features. No data sent to external servers unless you enable Google Drive backup. Single file, easy to back up and move."),
                 ("Schema", "Tables include: accounts, transactions, categories, payment_methods, pf_categories, cards, card_cycles, debit_cards, borrowers, loans, repayments, lenders, borrowed_loans, borrowed_loan_repayments, depositors, deposits_from_others, deposit_repayments_to_others, fixed_deposits, mf_schemes, mf_transactions, notes, notes_trash, note_tags, split_contacts, split_groups, split_group_members, split_expenses, split_shares, split_settlements, budgets, recurring_rules, audit_log, app_security, tab_security, period_locks, preferences."),
+                ("Groundwork \u2014 not yet exposed", "Three tables exist with working service code behind them but no screen to drive them yet: budgets (per-category spending limits with alert thresholds), recurring_rules (scheduled repeating transactions) and period_locks (freeze a month so its transactions can no longer be edited). Nothing is written to them today, so they stay empty until the matching UI is built."),
+                ("Need/Want Storage", "Stored on each transaction as an integer: 0 = Not Set, 1 = Need, 2 = Want. NULL is treated the same as 0. Every screen reads these through one shared helper (services/nw_constants.py) so Home, Database, Audit and the PDF reports can never disagree."),
                 ("Relationships", "Transactions link to accounts. Wealth items (loans, FDs, MFs, deposits) and every split expense/settlement create linked ledger transactions via linked_txn_id. Transfers use transfer_group_id. Notes link to transactions via a JSON array."),
                 ("Migrations", "Schema upgrades run automatically on app start. New columns/tables added via ALTER TABLE or CREATE TABLE IF NOT EXISTS, and default preferences are inserted with INSERT OR IGNORE. Existing data is preserved across upgrades."),
                 ("Preferences", "Key/value table holding your settings: pagination sizes for Database, Wealth and Notes, scroll triggers, high-value alert threshold, your display name, and Google Drive backup frequency/retention."),
@@ -1264,7 +1285,7 @@ class SettingsTab(QWidget):
                 ("Cascade on Edit", "Editing a transaction's amount in Audit cascades to the linked wealth record (loan_amount, principal_amount, etc.). Editing the date cascades similarly. Status is auto-recalculated afterwards."),
                 ("Cascade on Delete", "Deleting a transaction in Audit unlinks the wealth record (sets linked_txn_id to NULL). Transfer transactions are deleted in pairs."),
                 ("Status Auto-Calc", "Status is computed automatically: ACTIVE (no payments), PARTIALLY_PAID (some payments), OVERDUE (past due date with a balance), REPAID (fully paid), CLOSED (manually marked). FDs additionally use MATURED, WITHDRAWN and PREMATURE_WITHDRAWN. Recalculated whenever a page or the dashboard refreshes."),
-                ("Interest Maths", "Loans I Give use principal minus repayments. Loans I Take and interest-bearing deposits run a full analysis supporting Simple or Compound interest, EMI or Non-EMI, using your actual payment dates. The Wealth dashboard reuses exactly the same functions, so its totals always match the sub-pages."),
+                ("Interest Maths", "Money Lent uses principal minus repayments. Money Borrowed and interest-bearing deposits run a full analysis supporting Simple or Compound interest, EMI or Flexible Repayment, using your actual payment dates. The Wealth dashboard reuses exactly the same functions, so its totals always match the sub-pages."),
                 ("Split Balances", "Each group balance = what a member paid minus their share, adjusted by settlements. Positive means they are owed; negative means they owe. Settlement suggestions use a greedy algorithm to minimise the number of transfers."),
             ]),
             ("\U0001f4b3  Card Billing (FIFO)", "#D97706", [
@@ -1331,6 +1352,8 @@ class SettingsTab(QWidget):
                 ("Header Cards", "Full-width hero headers use the same deep indigo gradient (#1e1b4b to #312e81): the Wealth dashboard's Net Position bar, the Split status card and the Balances net-worth card."),
                 ("Global QSS", "Input widgets are styled globally: QDialog (themed bg), QMessageBox (white bg, dark text), QComboBox (rounded with dropdown arrow), QDateEdit (rounded, styled calendar), QSpinBox/QDoubleSpinBox (rounded), QLineEdit (rounded, hover/focus states)."),
                 ("Cards", "Standard card: white background, 1px #E5E7EB border, 12px radius. Hover: #C7D2FE border, #FAFBFF background. Accent cards use a coloured border plus a tinted background."),
+                ("Startup Splash", "A loading dialog appears while the app boots, reporting each stage: loading accounts and categories, building the interface, then preparing the home page. Wealth and Notes keep loading quietly in the background after the splash closes, so those tabs open instantly on first visit."),
+                ("Uppercase Fields", "Person/Org, descriptions and similar free-text inputs force uppercase as you type, so the same payee never appears twice with different capitalisation."),
                 ("Buttons", "Primary: indigo background, white text, no border. Ghost: transparent background, text2 colour, border. Pill: rounded with accent border. All have hover states."),
                 ("Typography", "Segoe UI / system-ui font family. Sizes: 22px (page titles), 18px (section titles), 14px (card titles), 13px (body), 12px (secondary), 11px (captions), 10px (labels). Weights: 800 (titles), 700 (emphasis), 600 (labels), 500 (body)."),
             ]),

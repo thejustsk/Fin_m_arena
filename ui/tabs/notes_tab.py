@@ -17,6 +17,7 @@ from PyQt5.QtGui import QCursor, QColor
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header, FILTER_FIELDS
+from services.nw_constants import NW_FROM_LABEL
 
 
 # ═══════════════════════════════════════════════
@@ -790,8 +791,7 @@ class NotesTab(QWidget):
             elif key == "tx_type": txns = [t for t in txns if t.get("tx_type") in vals]
             elif key == "kind": txns = [t for t in txns if t.get("transaction_kind", "REGULAR") in vals]
             elif key == "neednwant":
-                nw_map = {"Need": 1, "Want": 0, "None": 2}
-                nw_ints = [nw_map.get(v, -1) for v in vals]
+                nw_ints = [NW_FROM_LABEL.get(v, -1) for v in vals]
                 txns = [t for t in txns if t.get("neednwant") in nw_ints]
             elif key == "pf_category": txns = [t for t in txns if t.get("pf_category") in vals]
             elif key == "person_org":

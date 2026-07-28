@@ -1013,7 +1013,7 @@ class _FunctionPage(QWidget):
 # ══════════════════════════════════════════════════════════════════════════
 class LoansGivePage(_FunctionPage):
     ICON = "\U0001f91d"
-    TITLE = "Loans I Give"
+    TITLE = "Money Lent"
 
     def _sort_options(self):
         return ["Status", "Borrower", "Amount", "Due Date"]
@@ -1338,7 +1338,7 @@ class LoansGivePage(_FunctionPage):
             self._init_lazy_scroll()
 
     def _build_lg_card(self, l, a):
-        """Build a single Loans I Give card from pre-computed data."""
+        """Build a single Money Lent card from pre-computed data."""
         pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
         color = status_color(l["status"])
         mth = l.get("interest_method") or "SIMPLE"
@@ -1632,7 +1632,7 @@ class LoansGivePage(_FunctionPage):
 # ══════════════════════════════════════════════════════════════════════════
 class LoansTakePage(_FunctionPage):
     ICON = "\U0001f3db\ufe0f"
-    TITLE = "Loans I Take"
+    TITLE = "Money Borrowed"
 
     _FREQ_LABELS = ["Annual", "Quarterly", "Semi-Annual"]
     _FREQ_VALUES = ["ANNUAL", "QUARTERLY", "SEMI_ANNUAL"]
@@ -1677,7 +1677,7 @@ class LoansTakePage(_FunctionPage):
         f1 = QFormLayout(p1)
         self.lt_loan_lender = SearchableCombo(placeholder="Search lender\u2026")
         self.lt_emi_type = QComboBox()
-        self.lt_emi_type.addItems(["EMI Loan (fixed monthly)", "Non-EMI Loan (variable)"])
+        self.lt_emi_type.addItems(["EMI Loan (fixed monthly)", "Flexible Repayment (variable)"])
         self.lt_emi_type.currentIndexChanged.connect(self._toggle_emi_type)
         self.lt_loan_freq = QComboBox()
         self.lt_loan_freq.addItems(self._FREQ_LABELS)
@@ -2127,7 +2127,7 @@ class LoansTakePage(_FunctionPage):
             self._init_lazy_scroll()
 
     def _build_lt_card(self, l, a):
-        """Build a single Loans I Take card from pre-computed data."""
+        """Build a single Money Borrowed card from pre-computed data."""
         color = status_color(l["status"])
         mth = l.get("interest_method") or "COMPOUND"
         mth_tag = "SI" if mth == "SIMPLE" else "CI"
@@ -2135,7 +2135,7 @@ class LoansTakePage(_FunctionPage):
         freq_short = {"ANNUAL": "Ann", "QUARTERLY": "Qtr", "SEMI_ANNUAL": "Semi"}.get(freq_tag, "")
         ci_extra = f" {freq_short}" if mth == "COMPOUND" else ""
         emi_type = l.get("emi_type") or "EMI"
-        emi_str = f"EMI {fmt_money(a['original_emi'])}" if emi_type == "EMI" else "Non-EMI"
+        emi_str = f"EMI {fmt_money(a['original_emi'])}" if emi_type == "EMI" else "Flexible Repayment"
         sub = (f"Rate {l['interest_rate']}% {mth_tag}{ci_extra} {MDOT} "
                f"{emi_str} {MDOT} Due {l['due_date'] or EM_DASH}")
         pct = (a["total_paid"] / a["total_expected"] * 100) if a["total_expected"] else 0
@@ -2304,7 +2304,7 @@ class LoansTakePage(_FunctionPage):
 
 class FDGivePage(_FunctionPage):
     ICON = "\U0001f3e6"
-    TITLE = "FD I Deposit"
+    TITLE = "My Fixed Deposits"
 
     def _sort_options(self):
         return ["Status", "Account", "Maturity Date"]
@@ -2697,7 +2697,7 @@ class FDGivePage(_FunctionPage):
 # ══════════════════════════════════════════════════════════════════════════
 class FDOthersPage(_FunctionPage):
     ICON = "\U0001f9fe"
-    TITLE = "FD Others Deposit"
+    TITLE = "Deposits Received"
 
     def _sort_options(self):
         return ["Status", "Depositor", "Amount", "Return Date"]
@@ -4723,12 +4723,12 @@ class DashboardPage(QWidget):
         wrap = QWidget(); wrap.setStyleSheet("background:transparent;")
         grid = QGridLayout(wrap); grid.setSpacing(12)
         # FD Others is money held for other people -> a liability, so it gets
-        # the same warning colour family as "Loans I Take" rather than green.
+        # the same warning colour family as "Money Borrowed" rather than green.
         items = [
-            ("\U0001f91d", "Loans I Give",  C["amber"],  1),
-            ("\U0001f3db\ufe0f", "Loans I Take",  C["red"],    2),
-            ("\U0001f3e6", "FD I Deposit",  C["accent"], 3),
-            ("\U0001f9fe", "FD Others",     C["red"],    4),
+            ("\U0001f91d", "Money Lent",  C["amber"],  1),
+            ("\U0001f3db\ufe0f", "Money Borrowed",  C["red"],    2),
+            ("\U0001f3e6", "My Fixed Deposits",  C["accent"], 3),
+            ("\U0001f9fe", "Deposits Received",     C["red"],    4),
             ("\U0001f4c8", "Mutual Funds",  "#10B981",   5),
             ("\U0001f91d", "Split Expenses", "#7C3AED",  6),
         ]
@@ -4933,7 +4933,7 @@ class DashboardPage(QWidget):
         # with what the sub-tabs show.
         self._sync_statuses()
 
-        # 1. Loans I Give — outstanding = principal - repaid (matches LoansGivePage)
+        # 1. Money Lent — outstanding = principal - repaid (matches LoansGivePage)
         lg = db.execute("""
             SELECT l.loan_id, l.loan_amount, l.status, l.due_date,
                    COALESCE(SUM(r.amount_paid),0) AS rep
@@ -4944,7 +4944,7 @@ class DashboardPage(QWidget):
         lg_od = sum(1 for r in lg if r["status"] == "OVERDUE")
         lg_act = sum(1 for r in lg if r["status"] in ACTIVE_SET)
 
-        # 2. Loans I Take — full interest-aware analysis (matches LoansTakePage)
+        # 2. Money Borrowed — full interest-aware analysis (matches LoansTakePage)
         lt = db.execute("""
             SELECT * FROM borrowed_loans
             WHERE status NOT IN ('CLOSED','REPAID')""").fetchall()
@@ -5296,10 +5296,10 @@ class WealthTab(QWidget):
         nav_row = QHBoxLayout()
         nav_row.setSpacing(8)
         self.btn_dash = QPushButton("\U0001f4ca Dashboard")
-        self.btn_lg = QPushButton("\U0001f91d Loans I Give")
-        self.btn_lt = QPushButton("\U0001f3db\ufe0f Loans I Take")
-        self.btn_fd = QPushButton("\U0001f3e6 FD I Deposit")
-        self.btn_fo = QPushButton("\U0001f9fe FD Others")
+        self.btn_lg = QPushButton("\U0001f91d Money Lent")
+        self.btn_lt = QPushButton("\U0001f3db\ufe0f Money Borrowed")
+        self.btn_fd = QPushButton("\U0001f3e6 My Fixed Deposits")
+        self.btn_fo = QPushButton("\U0001f9fe Deposits Received")
         self.btn_mf = QPushButton("\U0001f4c8 Mutual Funds")
         self._nav_btns = [self.btn_dash, self.btn_lg, self.btn_lt, self.btn_fd,
                           self.btn_fo, self.btn_mf]

@@ -21,4 +21,3 @@ BACKUP_RETENTION = 14
 
 DB_KEY = ""
 
-

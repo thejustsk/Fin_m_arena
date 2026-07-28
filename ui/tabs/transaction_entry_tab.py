@@ -418,7 +418,7 @@ class TransactionEntryTab(QWidget):
         lay.addLayout(r3)
 
         r4 = QHBoxLayout(); r4.setSpacing(6)
-        self.pf_label = QLabel("PF: —")
+        self.pf_label = QLabel("Purpose: —")
         self.pf_label.setStyleSheet(f"color:{C['text3']};font-size:12px;font-style:italic;")
         r4.addWidget(self.pf_label)
         self.status_label = QLabel("")
@@ -785,7 +785,7 @@ class TransactionEntryTab(QWidget):
 
     def _update_pf(self):
         cid = self.cat_combo.get_data(); pf = self._cat_pf.get(cid)
-        self.pf_label.setText(f"PF: {pf.replace('_', ' ').title() if pf else '—'}")
+        self.pf_label.setText(f"Purpose: {pf.replace('_', ' ').title() if pf else '—'}")
 
     def _refresh_sidebar(self):
         p = self.parent()

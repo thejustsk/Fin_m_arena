@@ -203,7 +203,7 @@ def _build_home_tiles():
         ("🗄️", "Database", "#8B5CF6"),
         ("💰", "Balances", C['green']),
         ("💳", "Credit Cards", C['red']),
-        ("💳", "Debit Cards", "#F59E0B"),
+        ("🏧", "Debit Cards", "#F59E0B"),
         ("🤝", "Split", "#7C3AED"),
         ("🔍", "Audit", C['amber']),
         ("📈", "Wealth", "#10B981"),
@@ -431,10 +431,10 @@ def _build_wealth_dashboard():
     lay.addWidget(bar)
 
     grid = QVBoxLayout(); grid.setSpacing(6)
-    kpis = [("\U0001f91d", "Loans I Give", "Rs.92,422", "4 overdue / 8 active", C['amber']),
-            ("\U0001f3db\ufe0f", "Loans I Take", "Rs.967", "EMI Rs.83 due 2027-07-23", C['red']),
-            ("\U0001f3e6", "FD I Deposit", "Rs.152", "1 active / 0 matured", C['accent']),
-            ("\U0001f9fe", "FD Others", "Rs.5,00,056", "0 overdue / 2 active", C['red']),
+    kpis = [("\U0001f91d", "Money Lent", "Rs.92,422", "4 overdue / 8 active", C['amber']),
+            ("\U0001f3db\ufe0f", "Money Borrowed", "Rs.967", "EMI Rs.83 due 2027-07-23", C['red']),
+            ("\U0001f3e6", "My Fixed Deposits", "Rs.152", "1 active / 0 matured", C['accent']),
+            ("\U0001f9fe", "Deposits Received", "Rs.5,00,056", "0 overdue / 2 active", C['red']),
             ("\U0001f4c8", "Mutual Funds", "Rs.21,869", "+4.8% return", "#10B981"),
             ("\U0001f91d", "Split Expenses", "Rs.381 / Rs.16", "3 unsettled groups", "#7C3AED")]
     row = None
@@ -513,7 +513,7 @@ def _build_tx_entry():
     r3.addWidget(_make_input("", "Person / Org")); r3.addWidget(_make_input("", "Description"))
     lay.addLayout(r3)
     r4 = QHBoxLayout()
-    r4.addWidget(_make_label("PF: consumption", 12, C['text3'])); r4.addStretch()
+    r4.addWidget(_make_label("Purpose: Consumption", 12, C['text3'])); r4.addStretch()
     r4.addWidget(_make_btn("➕  Add Transaction", True))
     lay.addLayout(r4)
     lay.addWidget(_make_sep())
@@ -1334,7 +1334,7 @@ WALKTHROUGH_DB = [
                     "Advanced filter system:\n\n"
                     "• Date range: From/To date pickers\n"
                     "• Mode toggle: 🎯 Exact (client-side) or 🔗 Sequential (DB-level for single-value)\n"
-                    "• 11 filter fields: Account, Category, Method, Type, Kind, Need/Want, PF Category, Person/Org, Description, Min/Max Amount\n"
+                    "• 11 filter fields: Account, Category, Method, Type, Kind, Need/Want, Money Purpose, Person/Org, Description, Min/Max Amount\n"
                     "• Multi-value: Same field can have multiple values (OR-combined)\n"
                     "• +Add: Adds current filter value as a chip. Auto-loads results\n"
                     "• Chip click (✕): Removes that specific value, re-loads\n"
@@ -1580,7 +1580,7 @@ WALKTHROUGH_DB = [
                 ),
             },
             {
-                "title": "Loans I Give",
+                "title": "Money Lent",
                 "proto_func": _build_wealth_loans_give,
                 "explanation": (
                     "Track money you lend to others:\n\n"
@@ -1597,7 +1597,7 @@ WALKTHROUGH_DB = [
                 ),
             },
             {
-                "title": "Loans I Take",
+                "title": "Money Borrowed",
                 "proto_func": _build_wealth_loans_take,
                 "explanation": (
                     "Track money you borrow from others:\n\n"
@@ -1612,7 +1612,7 @@ WALKTHROUGH_DB = [
                 ),
             },
             {
-                "title": "FD I Deposit",
+                "title": "My Fixed Deposits",
                 "proto_func": _build_wealth_fd,
                 "explanation": (
                     "Track your fixed deposits:\n\n"
@@ -1625,7 +1625,7 @@ WALKTHROUGH_DB = [
                 ),
             },
             {
-                "title": "FD Others Deposit",
+                "title": "Deposits Received",
                 "proto_func": _build_wealth_fd_others,
                 "explanation": (
                     "Track deposits received from others:\n\n"
@@ -1688,7 +1688,7 @@ WALKTHROUGH_DB = [
                     "• Transfer cascade: Changes propagate to related transfer transaction\n\n"
                     "Bulk Update:\n"
                     "• Select/Done toggle buttons on each transaction\n"
-                    "• Change Category, Need/Want, PF Category in bulk\n"
+                    "• Change Category, Need/Want, Money Purpose in bulk\n"
                     "• Requires 2FA/password verification\n"
                     "• Progress popup during updates (updates UI every 10 items)"
                 ),
@@ -1811,7 +1811,7 @@ WALKTHROUGH_DB = [
                 "explanation": (
                     "Manage categories, payment methods, and tags:\n\n"
                     "Categories:\n"
-                    "• Table: Icon, Name, PF Category, Tax, Color, Edit button\n"
+                    "• Table: Icon, Name, Money Purpose, Tax, Color, Edit button\n"
                     "• Add: Icon picker (96 emoji palette), name, PF category, color picker (24 disc palette), tax checkbox\n"
                     "• Edit: Same dialog pre-filled. Icon stored in preferences table\n\n"
                     "Payment Methods:\n"

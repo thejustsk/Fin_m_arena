@@ -22,6 +22,16 @@ from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_header, _switch_tabs, FILTER_FIELDS, FlowLayout
+from services.nw_constants import (split_need_want, NW_FROM_LABEL,
+                                   NW_NONE, NW_NEED, NW_WANT)
+
+
+def _nw_tint(hex_color, strong):
+    """Soft background tint for the Need/Want indicator block."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{0.12 if strong else 0.06})"
+
 try:
     from ui.tabs.wealth_tab import _metric_card, _confirm
 except ImportError:
@@ -191,9 +201,10 @@ class TransactionEditDialog(QDialog):
             self.f_person.setEnabled(False)
 
         self.f_neednwant = QComboBox()
-        for val, label in [(None, "\u2014 Not Set"), (1, "Need"), (0, "Want")]:
+        for val, label in [(NW_NONE, "\u2014 Not Set"), (NW_NEED, "Need"), (NW_WANT, "Want")]:
             self.f_neednwant.addItem(label, val)
-        idx = self.f_neednwant.findData(tx.get("neednwant") if tx.get("neednwant") in (0, 1) else None)
+        _cur = tx.get("neednwant")
+        idx = self.f_neednwant.findData(_cur if _cur in (NW_NONE, NW_NEED, NW_WANT) else NW_NONE)
         if idx >= 0:
             self.f_neednwant.setCurrentIndex(idx)
 
@@ -224,7 +235,7 @@ class TransactionEditDialog(QDialog):
         form.addRow("Person / Org", self.f_person)
         form.addRow("Description", self.f_desc)
         form.addRow("Need / Want", self.f_neednwant)
-        form.addRow("PF Category", self.f_pf)
+        form.addRow("Money Purpose", self.f_pf)
         lay.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -465,7 +476,7 @@ class _AuditSubTab(QWidget):
         for c in self.lu.list_categories():
             self.bulk_category.addItem(c["display_name"], c["category_id"])
         self.bulk_neednwant = QComboBox()
-        for val, label in [("__nochange__", "\u2014 No Change \u2014"), (1, "Need"), (0, "Want"),
+        for val, label in [("__nochange__", "\u2014 No Change \u2014"), (NW_NEED, "Need"), (NW_WANT, "Want"),
                            ("__clear__", "Clear (Not Set)")]:
             self.bulk_neednwant.addItem(label, val)
         self.bulk_pf = QComboBox()
@@ -481,7 +492,7 @@ class _AuditSubTab(QWidget):
         bulk_lay.addWidget(self.bulk_category)
         bulk_lay.addWidget(QLabel("Need/Want:"))
         bulk_lay.addWidget(self.bulk_neednwant)
-        bulk_lay.addWidget(QLabel("PF Category:"))
+        bulk_lay.addWidget(QLabel("Money Purpose:"))
         bulk_lay.addWidget(self.bulk_pf)
         bulk_lay.addStretch()
         bulk_lay.addWidget(self.bulk_apply_btn)
@@ -686,8 +697,7 @@ class _AuditSubTab(QWidget):
             elif key == "kind":
                 rows = [t for t in rows if t.get("transaction_kind", "REGULAR") in vals]
             elif key == "neednwant":
-                nw_map = {"Need": 1, "Want": 0, "None": 2}
-                nw_ints = [nw_map.get(v, -1) for v in vals]
+                nw_ints = [NW_FROM_LABEL.get(v, -1) for v in vals]
                 rows = [t for t in rows if t.get("neednwant") in nw_ints]
             elif key == "pf_category":
                 rows = [t for t in rows if t.get("pf_category") in vals]
@@ -761,10 +771,10 @@ class _AuditSubTab(QWidget):
                 row_lay.setContentsMargins(0, 0, 0, 0)
                 row_lay.setSpacing(8)
 
-                # Checkbox with "Select" text
+                # Checkbox with "Select" text — stretches to the card's height
                 chk = QPushButton("  Select  ")
-                chk.setFixedHeight(34)
                 chk.setMinimumWidth(82)
+                chk.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
                 chk.setFocusPolicy(Qt.NoFocus)
                 chk.setCursor(QCursor(Qt.PointingHandCursor))
                 chk.setStyleSheet(
@@ -784,15 +794,21 @@ class _AuditSubTab(QWidget):
                         f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                     self._update_bulk_count()
                 chk.clicked.connect(_toggle_chk)
-                row_lay.addWidget(chk, 0, Qt.AlignVCenter)
+                row_lay.addWidget(chk)
+
+                # ── Need / Want indicator ──
+                # Full-height block so the tag is readable at a glance instead
+                # of being buried in the edit dialog. Click to cycle the value.
+                nw_box = self._nw_indicator(tx_id, r.get("neednwant"))
+                row_lay.addWidget(nw_box)
 
                 # Card
                 row_lay.addWidget(card, 1)
 
-                # Edit button with "Edit" text
+                # Edit button with "Edit" text — matches the card's height
                 edit_btn = QPushButton("\u270f\ufe0f Edit")
-                edit_btn.setFixedHeight(34)
                 edit_btn.setMinimumWidth(72)
+                edit_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
                 edit_btn.setFocusPolicy(Qt.NoFocus)
                 edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
                 edit_btn.setStyleSheet(
@@ -800,7 +816,7 @@ class _AuditSubTab(QWidget):
                     f"border:1.5px solid {C['border']};border-radius:8px;font-size:12px;font-weight:600;}}"
                     f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
                 edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
-                row_lay.addWidget(edit_btn, 0, Qt.AlignVCenter)
+                row_lay.addWidget(edit_btn)
 
                 self._all_render_items.append(("card", row_widget))
 
@@ -863,6 +879,124 @@ class _AuditSubTab(QWidget):
     def _checked_ids(self):
         """Get IDs of checked transaction cards."""
         return [tx_id for tx_id, checked in getattr(self, '_check_states', {}).items() if checked]
+
+    # ── Need / Want indicator ────────────────────────────────────
+    #  Colour + text, matched to the Need vs Want charts:
+    #  Need = indigo, Want = amber, Not Set = grey.
+    _NW_STYLE = {
+        NW_NEED: ("NEED",    C["accent"]),
+        NW_WANT: ("WANT",    C["amber"]),
+        NW_NONE: ("NOT SET", C["text3"]),
+    }
+
+    # Click cycle. Not Set is a starting state only — once tagged, the box
+    # flips between Want and Need and never returns to Not Set.
+    _NW_NEXT = {
+        NW_NONE: NW_WANT,
+        NW_WANT: NW_NEED,
+        NW_NEED: NW_WANT,
+    }
+
+    def _nw_style_for(self, value):
+        """(label, colour) for a stored neednwant value, None-safe."""
+        return self._NW_STYLE.get(
+            value if value in self._NW_STYLE else NW_NONE)
+
+    def _paint_nw_box(self, box, value):
+        """Apply the label, colour and tooltip for *value* to *box*."""
+        label, color = self._nw_style_for(value)
+        nxt_label, _ = self._nw_style_for(self._NW_NEXT.get(value, NW_WANT))
+        box.setText(label)
+        box.setToolTip(f"Need/Want: {label.title()}\nClick to set {nxt_label.title()}")
+        # White fill so the row stays clean; colour lives in the text + border.
+        box.setStyleSheet(
+            f"QLabel{{background:#FFFFFF;color:{color};"
+            f"border:1.5px solid {color};border-radius:8px;"
+            f"font-size:10px;font-weight:800;letter-spacing:0.5px;}}"
+            f"QLabel:hover{{background:{_nw_tint(color, True)};}}")
+
+    def _nw_indicator(self, tx_id, value):
+        """Full-height, clickable Need/Want tag for a transaction row."""
+        box = QLabel()
+        box.setAlignment(Qt.AlignCenter)
+        box.setFixedWidth(62)
+        # Ignored vertical policy => the row layout stretches it to the
+        # tallest sibling, which is the transaction card.
+        box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
+        box.setCursor(QCursor(Qt.PointingHandCursor))
+        self._paint_nw_box(box, value if value in self._NW_STYLE else NW_NONE)
+        box.mousePressEvent = (
+            lambda e, _tid=tx_id, _b=box: self._cycle_nw(_tid, _b))
+        return box
+
+    def _cycle_nw(self, tx_id, box):
+        """Advance a transaction's Need/Want tag one step and save it.
+
+        Deliberately unauthenticated: this is a low-risk classification
+        toggle, not a money edit, so it confirms with a toast instead of a
+        password prompt.
+
+        Performance note: this must stay cheap. It writes one row, repaints
+        one label, and does NOT re-render the list or refresh sibling tabs —
+        a full `_notify_data_changed()` costs well over a second because it
+        rebuilds every tab. Other tabs are marked dirty instead and catch up
+        the next time you navigate to them.
+        """
+        from ui.widgets.toast import Toast
+        # The row may have been re-rendered (filter reload, lazy batch) since
+        # this handler was bound, leaving a dangling C++ object.
+        try:
+            box.objectName()
+        except RuntimeError:
+            return
+        try:
+            row = self.tx.get(tx_id)
+            if not row:
+                Toast.show_message(self, "Transaction not found.", kind="error")
+                return
+            current = row.get("neednwant")
+            if current not in self._NW_STYLE:
+                current = NW_NONE
+            new_val = self._NW_NEXT.get(current, NW_WANT)
+
+            self.db.execute("UPDATE transactions SET neednwant=? WHERE id=?",
+                            (new_val, tx_id))
+            self.db.commit()
+        except Exception as e:
+            Toast.show_message(self, f"Could not update: {e}", kind="error")
+            return
+
+        # Repaint in place — a full reload would lose scroll position.
+        self._paint_nw_box(box, new_val)
+        # Keep the cached row in sync so the edit dialog and a later
+        # re-render both see the new value.
+        for cache in (getattr(self, "_rows", None), getattr(self, "_all_rows", None)):
+            if isinstance(cache, list):
+                for c in cache:
+                    if isinstance(c, dict) and c.get("id") == tx_id:
+                        c["neednwant"] = new_val
+
+        label, _ = self._nw_style_for(new_val)
+        Toast.show_message(self, f"Marked as {label}", kind="success")
+
+        # Sibling tabs (Home charts, Database totals) now hold stale figures.
+        # Flag them rather than rebuilding everything on every click.
+        self._mark_siblings_stale()
+
+    def _mark_siblings_stale(self):
+        """Tell the main window other tabs need a refresh — without doing it now.
+
+        MainWindow._nav() already calls refresh() when you switch tabs, so the
+        stale data corrects itself on navigation at zero cost to this click.
+        """
+        try:
+            node = self.parent()
+            while node is not None and not hasattr(node, "_tabs"):
+                node = node.parent()
+            if node is not None:
+                setattr(node, "_data_dirty", True)
+        except Exception:
+            pass
 
     def _update_bulk_count(self):
         n = len(self._checked_ids())
@@ -996,6 +1130,11 @@ class _AuditSubTab(QWidget):
                 upd_lay.addWidget(ok_btn)
                 ok_btn.setFocus()
                 QApplication.processEvents()
+            except Exception:
+                pass
+            # Reload this list so the Need/Want indicator reflects the edit
+            try:
+                self.load_records()
             except Exception:
                 pass
             # Notify parent to refresh other tabs
@@ -1504,14 +1643,13 @@ class _AuditSubTab(QWidget):
             if r["tx_type"] == "DEBIT":
                 cn = r.get("cat_name") or "Other"
                 cats[cn] = cats.get(cn, 0) + r["amount"]
-        need = sum(r["amount"] for r in rows if r.get("neednwant") == 1 and r["tx_type"] == "DEBIT")
-        want = sum(r["amount"] for r in rows if r.get("neednwant") == 0 and r["tx_type"] == "DEBIT")
+        need, want, nw_none = split_need_want(rows)
         self.chart_view.render(
             list(cats.keys()), [round(v, 2) for v in cats.values()],
             all_accts, acct_totals, trend_labels,
             [round(trend_cr.get(d, 0), 2) for d in all_dates],
             [round(trend_db.get(d, 0), 2) for d in all_dates],
-            round(need, 2), round(want, 2))
+            round(need, 2), round(want, 2), round(nw_none, 2))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
