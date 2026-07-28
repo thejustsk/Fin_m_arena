@@ -469,6 +469,9 @@ class ChartView(QWidget):
         if _check_webengine():
             from PyQt5.QtWebEngineWidgets import QWebEngineView
             self.view = QWebEngineView()
+            # WebEngine otherwise exposes a white backing while local HTML is
+            # loading or where its page is transparent.
+            self.view.page().setBackgroundColor(QColor(C["bg"]))
             lay.addWidget(self.view)
         else:
             self.view = None

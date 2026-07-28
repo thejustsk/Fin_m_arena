@@ -28,6 +28,7 @@ LIGHT = {
     "sidebar": "#FFFFFF", "sidebar_text": "#4338CA",
     "tooltip_bg": "#111827", "tooltip_fg": "#FFFFFF", "tooltip_border": "#374151",
     "shadow": "rgba(16,24,40,0.08)",
+    "chart_surface": "#FFFFFF",
     "skeleton": "#E9ECEF", "skeleton_hi": "#F4F6F8",
     "radius": "12px", "radius_sm": "8px",
 }
@@ -48,6 +49,8 @@ DARK = {
     "sidebar": "#141720", "sidebar_text": "#A9A3FF",
     "tooltip_bg": "#F2F4F8", "tooltip_fg": "#0F1117", "tooltip_border": "#4A5163",
     "shadow": "rgba(0,0,0,0.45)",
+    # Slightly raised from the normal card surface so charts remain readable.
+    "chart_surface": "#202632",
     "skeleton": "#252A35", "skeleton_hi": "#2F3542",
     "radius": "12px", "radius_sm": "8px",
 }
@@ -97,7 +100,7 @@ def chart_vars():
     """Colour substitutions for the Chart.js HTML templates."""
     return {
         "__PAGE_BG__": C["bg"],
-        "__CARD_BG__": C["surface"],
+        "__CARD_BG__": C["chart_surface"],
         "__CARD_BORDER__": C["border2"],
         "__TITLE__": C["text2"],
         "__SHADOW__": C["shadow"],

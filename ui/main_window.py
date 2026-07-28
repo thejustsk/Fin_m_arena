@@ -147,18 +147,19 @@ class MainWindow(QMainWindow):
         """
         from ui.theme import apply_theme, save_theme_pref, active_theme
         from PyQt5.QtWidgets import QApplication
-        from PyQt5.QtCore import QCoreApplication, QEvent
 
         if name == active_theme():
             return
         current_key = self._current_key()
         app = QApplication.instance()
+        old_tabs = []
 
         self.setUpdatesEnabled(False)
         try:
-            # Order matters for speed. app.setStyleSheet() re-polishes every
-            # live widget (~1s with all tabs built), so tear the old tree down
-            # *before* swapping the stylesheet, not after.
+            # Remove old pages before changing the application stylesheet so
+            # Qt does not polish their entire (often large) widget trees.
+            # Destruction itself is deliberately staged after the themed page
+            # is visible; forcing every deferred deletion here freezes the UI.
             old_tabs = list(self._tabs.values())
             self._tabs = {}
             self._stale_tabs = {k for k, _ in self._tab_classes}
@@ -166,9 +167,6 @@ class MainWindow(QMainWindow):
                 w = self.stack.widget(0)
                 self.stack.removeWidget(w)
                 w.setParent(None)
-            for w in old_tabs:
-                w.deleteLater()
-            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
             apply_theme(name, app)
             save_theme_pref(self.db, name)
@@ -203,6 +201,21 @@ class MainWindow(QMainWindow):
             Toast.show_message(self, f"{name.title()} theme applied", kind="success")
         except Exception:
             pass
+        self._dispose_tabs_gradually(old_tabs)
+
+    def _dispose_tabs_gradually(self, tabs):
+        """Delete detached pre-theme pages in small event-loop slices.
+
+        Wealth and Notes can contain thousands of child widgets. Releasing all
+        of them synchronously makes a theme switch feel frozen even though the
+        new themed page is already ready.
+        """
+        if not tabs:
+            return
+        tab = tabs.pop()
+        tab.deleteLater()
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(20, lambda: self._dispose_tabs_gradually(tabs))
 
     def _ensure_tab(self, key):
         """Build a tab on demand after a theme switch, swapping out its

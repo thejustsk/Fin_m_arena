@@ -20,7 +20,8 @@ HOME_CHART_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Segoe UI',system-ui,sans-serif; background:transparent; padding:12px; }
+html, body { min-height:100%; background:__PAGE_BG__; }
+body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; }
 .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .card { background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
