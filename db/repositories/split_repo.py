@@ -26,7 +26,18 @@ class SplitRepo:
 
     def get_self_contact(self):
         """Get or create the 'self' contact, named after the user profile."""
-        row = self.db.execute("SELECT contact_id FROM split_contacts WHERE is_self=1").fetchone()
+        # If more than one is_self row exists, prefer the one actually used by
+        # the data. An unqualified SELECT can return an empty duplicate, which
+        # makes every balance read as zero. run_migrations() merges duplicates,
+        # but ordering here keeps the answer right even before that runs.
+        row = self.db.execute(
+            "SELECT c.contact_id FROM split_contacts c "
+            "WHERE c.is_self=1 "
+            "ORDER BY ("
+            "  (SELECT COUNT(*) FROM split_group_members m WHERE m.contact_id=c.contact_id)"
+            " + (SELECT COUNT(*) FROM split_shares s WHERE s.contact_id=c.contact_id)"
+            " + (SELECT COUNT(*) FROM split_expenses e WHERE e.paid_by=c.contact_id)"
+            ") DESC, c.created_at ASC LIMIT 1").fetchone()
         if row:
             return row["contact_id"]
         name = "You"

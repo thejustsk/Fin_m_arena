@@ -444,4 +444,77 @@ def run_migrations(db):
         except Exception:
             pass
 
+    _merge_duplicate_self_contacts(c)
+
     c.commit()
+
+
+def _merge_duplicate_self_contacts(c):
+    """Collapse multiple ``split_contacts.is_self=1`` rows into one.
+
+    Only one row may represent "you". A second one can appear when the app is
+    opened against a database whose split tables are empty -- SplitTab's
+    constructor calls get_self_contact(), which creates a fresh "You" -- and
+    the real contact is restored afterwards.
+
+    The damage is silent and total: get_self_contact() returns whichever row
+    SQLite hands back first, and if that is the freshly created one it belongs
+    to no group, so the Split header reports 0 owed / 0 owing and marks every
+    group settled while the real balances sit under the other id.
+
+    The surviving row is the one actually referenced by group memberships,
+    expenses, shares and settlements; the empty impostor is repointed to it and
+    deleted. A tie is broken by the oldest created_at, so the original wins.
+    """
+    try:
+        rows = c.execute(
+            "SELECT contact_id, name, created_at FROM split_contacts "
+            "WHERE is_self=1").fetchall()
+    except Exception:
+        return
+    if len(rows) < 2:
+        return
+
+    def usage(cid):
+        n = 0
+        for sql in (
+            "SELECT COUNT(*) FROM split_group_members WHERE contact_id=?",
+            "SELECT COUNT(*) FROM split_expenses      WHERE paid_by=?",
+            "SELECT COUNT(*) FROM split_shares        WHERE contact_id=?",
+            "SELECT COUNT(*) FROM split_settlements   WHERE from_contact=?",
+            "SELECT COUNT(*) FROM split_settlements   WHERE to_contact=?",
+        ):
+            try:
+                n += c.execute(sql, (cid,)).fetchone()[0]
+            except Exception:
+                pass
+        return n
+
+    scored = []
+    for r in rows:
+        cid = r["contact_id"] if hasattr(r, "keys") else r[0]
+        created = (r["created_at"] if hasattr(r, "keys") else r[2]) or ""
+        named = (r["name"] if hasattr(r, "keys") else r[1]) or ""
+        scored.append((usage(cid), named.strip().lower() != "you", created, cid))
+    # Most referenced first; then a real name over the "You" placeholder;
+    # then oldest. Negate created_at ordering by sorting ascending on it.
+    scored.sort(key=lambda t: (-t[0], not t[1], t[2]))
+    keep = scored[0][3]
+
+    for _, _, _, cid in scored[1:]:
+        for sql in (
+            "UPDATE OR IGNORE split_group_members SET contact_id=?  WHERE contact_id=?",
+            "UPDATE split_expenses                SET paid_by=?     WHERE paid_by=?",
+            "UPDATE split_shares                  SET contact_id=?  WHERE contact_id=?",
+            "UPDATE split_settlements             SET from_contact=? WHERE from_contact=?",
+            "UPDATE split_settlements             SET to_contact=?   WHERE to_contact=?",
+        ):
+            try:
+                c.execute(sql, (keep, cid))
+            except Exception:
+                pass
+        try:
+            c.execute("DELETE FROM split_group_members WHERE contact_id=?", (cid,))
+            c.execute("DELETE FROM split_contacts WHERE contact_id=?", (cid,))
+        except Exception:
+            pass
