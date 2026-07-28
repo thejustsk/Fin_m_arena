@@ -5061,7 +5061,10 @@ class DashboardPage(QWidget):
         v, d = self._kpi[5]
         animate_value(v, mf_cur, fmt_money); d.setText(f"{mf_ret:+.1f}% return")
         v, d = self._kpi[6]
-        v.setText(f"{fmt_money(sp_owed)} / {fmt_money(sp_owe)}")
+        # The card has a paired Owed / Owe display; animate the leading owed
+        # figure while preserving the paired liability figure throughout.
+        animate_value(v, sp_owed,
+                      lambda value: f"{fmt_money(value)} / {fmt_money(sp_owe)}")
         d.setText(f"{sp_unset} unsettled group{'' if sp_unset == 1 else 's'}")
 
         # ── Update Net Position ──
