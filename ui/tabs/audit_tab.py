@@ -824,16 +824,17 @@ class _AuditSubTab(QWidget):
         from collections import OrderedDict
         from ui.tabs.database_tab import _get_pref, COMPLETE_PAGE_SIZE
 
-        # Clear existing (immediate delete, no ghost widgets)
-        import sip
+        # Clear existing rows through Qt's normal ownership lifecycle.
+        # Calling sip.delete() on a row that owns nested transaction cards
+        # during an edit/delete event can detach those children briefly and
+        # make Qt show them as transient top-level windows. Detach the whole
+        # row first, then let Qt delete it safely on the next event turn.
         while self._cards_lay.count():
             item = self._cards_lay.takeAt(0)
             w = item.widget()
             if w:
-                try:
-                    sip.delete(w)
-                except Exception:
-                    w.deleteLater()
+                w.setParent(None)
+                w.deleteLater()
 
         self._check_states = {}
         self._all_render_items = []  # list of (type, data) tuples
@@ -1145,15 +1146,9 @@ class _AuditSubTab(QWidget):
                 self._recalc_status(tx_id)
             # Mark linked wealth record as updated (for badge sync)
             self._mark_wealth_updated(tx_id)
-            self.load_records()
             from ui.widgets.toast import Toast
             Toast.show_message(self, "Transaction updated", kind="success")
-            # Reload this list so the Need/Want indicator reflects the edit
-            try:
-                self.load_records()
-            except Exception:
-                pass
-            # Notify parent to refresh other tabs
+            # Notify parent to refresh this and the sibling tabs once.
             parent_tab = self.parent()
             while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
                 parent_tab = parent_tab.parent()
@@ -1247,9 +1242,8 @@ class _AuditSubTab(QWidget):
             self.tx.delete(del_id)
 
         self.db.commit()
-        self.load_records()
 
-        # Notify other tabs
+        # Notify this and the sibling tabs once.
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
             parent_tab = parent_tab.parent()
@@ -1466,10 +1460,8 @@ class _AuditSubTab(QWidget):
         self.bulk_category.setCurrentIndex(0)
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
-        self.load_records()
         from ui.widgets.toast import Toast
         Toast.show_message(self, f"{len(ids)} transactions updated", kind="success")
-        self.load_records()
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
             parent_tab = parent_tab.parent()
