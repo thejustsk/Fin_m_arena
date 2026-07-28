@@ -5386,7 +5386,9 @@ class WealthTab(QWidget):
         # recompute — its load_list() short-circuits on nothing, but going
         # through refresh() keeps the intent explicit.
         if i == 0:
-            self.dashboard_page.refresh()
+            # The dashboard may have refreshed while another Wealth sub-page
+            # was visible. Replay only when the user returns to it.
+            self.dashboard_page.replay_kpis()
 
     def on_activated(self):
         """Refresh only the visible page and replay dashboard KPIs on landing."""

@@ -1111,26 +1111,6 @@ class _AuditSubTab(QWidget):
             # Verify on SAVE, not on open
             if not self._verify_edit():
                 return
-            # Show updating popup
-            from PyQt5.QtWidgets import QApplication
-            upd_dlg = QDialog(self)
-            upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-            upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
-            upd_dlg.setFixedSize(340, 140)
-            upd_frame = QFrame(upd_dlg)
-            upd_frame.setGeometry(10, 10, 320, 120)
-            upd_frame.setStyleSheet(
-                f"QFrame{{background:{C['surface']};border:1.5px solid {C['accent']};"
-                f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
-            upd_lay = QVBoxLayout(upd_frame)
-            upd_lay.setContentsMargins(16, 12, 16, 12)
-            upd_lbl = QLabel("\U0001f504  Updating...")
-            upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
-            upd_lbl.setAlignment(Qt.AlignCenter)
-            upd_lay.addWidget(upd_lbl)
-            # Do not show a nested progress dialog here: rebuilding the list
-            # while it is open can surface detached transaction-card widgets.
-
             update_kw = {field: new for field, (old, new) in changes.items()}
             self.tx.update(tx_id, **update_kw)
             self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), tx_id))
@@ -1166,18 +1146,6 @@ class _AuditSubTab(QWidget):
             # Mark linked wealth record as updated (for badge sync)
             self._mark_wealth_updated(tx_id)
             self.load_records()
-            # Close updating popup and show done state
-            try:
-                upd_lbl.setText("\u2705  Updated!")
-                upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
-                ok_btn = QPushButton("OK")
-                ok_btn.setObjectName("primary")
-                ok_btn.setFixedHeight(28)
-                ok_btn.clicked.connect(upd_dlg.accept)
-                upd_lay.addWidget(ok_btn)
-                ok_btn.setFocus()
-            except Exception:
-                pass
             from ui.widgets.toast import Toast
             Toast.show_message(self, "Transaction updated", kind="success")
             # Reload this list so the Need/Want indicator reflects the edit
@@ -1242,25 +1210,6 @@ class _AuditSubTab(QWidget):
         if not self._verify_edit():
             return
 
-        # ── Step 4: Show updating popup ──
-        from PyQt5.QtWidgets import QApplication
-        upd_dlg = QDialog(self)
-        upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
-        upd_dlg.setFixedSize(340, 140)
-        upd_frame = QFrame(upd_dlg)
-        upd_frame.setGeometry(10, 10, 320, 120)
-        upd_frame.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1.5px solid {C['red']};"
-            f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
-        upd_lay = QVBoxLayout(upd_frame)
-        upd_lay.setContentsMargins(16, 12, 16, 12)
-        upd_lbl = QLabel("\U0001f504  Deleting...")
-        upd_lbl.setStyleSheet(f"color:{C['red']};font-size:13px;font-weight:700;")
-        upd_lbl.setAlignment(Qt.AlignCenter)
-        upd_lay.addWidget(upd_lbl)
-        # Keep the operation non-modal; completion is reflected in the list.
-
         # ── Step 5: Delete all related transactions ──
         all_ids = [tx_id] + [rt["id"] for rt in related_txns]
         # Clean audit_log entries first (no ON DELETE CASCADE)
@@ -1307,20 +1256,6 @@ class _AuditSubTab(QWidget):
         if parent_tab and hasattr(parent_tab, '_notify_data_changed'):
             parent_tab._notify_data_changed()
 
-        # ── Step 6: Show done popup ──
-        try:
-            count = len(all_ids)
-            upd_lbl.setText(f"\u2705  {count} transaction(s) deleted!")
-            upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
-            ok_btn = QPushButton("OK")
-            ok_btn.setObjectName("primary")
-            ok_btn.setFixedHeight(28)
-            ok_btn.clicked.connect(upd_dlg.accept)
-            upd_lay.addWidget(ok_btn)
-            ok_btn.setFocus()
-            # The list has already refreshed; do not open a second modal.
-        except Exception:
-            pass
         from ui.widgets.toast import Toast
         Toast.show_message(self, f"{len(all_ids)} transaction(s) deleted", kind="success")
 
@@ -1483,24 +1418,6 @@ class _AuditSubTab(QWidget):
             return
         if not self._verify_edit():
             return
-        # Show updating popup
-        from PyQt5.QtWidgets import QApplication
-        upd_dlg = QDialog(self)
-        upd_dlg.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        upd_dlg.setAttribute(Qt.WA_TranslucentBackground)
-        upd_dlg.setFixedSize(340, 140)
-        upd_frame = QFrame(upd_dlg)
-        upd_frame.setGeometry(10, 10, 320, 120)
-        upd_frame.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1.5px solid {C['accent']};"
-            f"border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
-        upd_lay = QVBoxLayout(upd_frame)
-        upd_lay.setContentsMargins(16, 12, 16, 12)
-        upd_lbl = QLabel("\U0001f504  Updating...")
-        upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
-        upd_lbl.setAlignment(Qt.AlignCenter)
-        upd_lay.addWidget(upd_lbl)
-        # Keep the operation non-modal; completion is reflected in the list.
         cat_val = self.bulk_category.currentData()
         nw_val = self.bulk_neednwant.currentData()
         pf_val = self.bulk_pf.currentData()
@@ -1512,7 +1429,6 @@ class _AuditSubTab(QWidget):
         if pf_val != "__nochange__":
             updates["pf_category"] = None if pf_val == "__clear__" else pf_val
         if not updates:
-            upd_dlg.close()
             QMessageBox.information(self, "Nothing to Apply",
                                     "Pick at least one field to change.")
             return
@@ -1547,28 +1463,12 @@ class _AuditSubTab(QWidget):
                             old_val = tx.get(field)
                             if old_val != new_val:
                                 self.audit.log(rel_id, field, old_val, new_val, reason="Transfer cascade from bulk update")
-            # Keep UI responsive during bulk update
-            if (i + 1) % 10 == 0:
-                upd_lbl.setText(f"\U0001f504  Updating {i+1}/{len(ids)}...")
-                QApplication.processEvents()
         self.bulk_category.setCurrentIndex(0)
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
-        # Refresh records BEFORE showing done popup
         self.load_records()
-        # Show done state in popup
-        try:
-            upd_lbl.setText(f"\u2705  {len(ids)} transactions updated!")
-            upd_lbl.setStyleSheet(f"color:{C['green']};font-size:13px;font-weight:700;")
-            ok_btn = QPushButton("OK")
-            ok_btn.setObjectName("primary")
-            ok_btn.setFixedHeight(28)
-            ok_btn.clicked.connect(upd_dlg.accept)
-            upd_lay.addWidget(ok_btn)
-            ok_btn.setFocus()
-            # The list has already refreshed; do not open a second modal.
-        except Exception:
-            pass
+        from ui.widgets.toast import Toast
+        Toast.show_message(self, f"{len(ids)} transactions updated", kind="success")
         self.load_records()
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):

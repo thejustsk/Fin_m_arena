@@ -363,11 +363,16 @@ CHART_TEMPLATE = """<!DOCTYPE html>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Segoe UI',system-ui,sans-serif; background:__PAGE_BG__; padding:20px; }
 .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-.card { background:__CARD_BG__; border-radius:16px; padding:24px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
-.card.full { grid-column:1 / -1; }
+.card { background:__CARD_BG__; border-radius:16px; padding:24px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; min-height:330px; }
+.card.full { grid-column:1 / -1; min-height:270px; }
 .title { font-size:14px; font-weight:700; color:__TITLE__; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-canvas { max-height:260px; }
+/* Chart.js with maintainAspectRatio:false needs an explicit canvas height.
+   Without one, a chart first created inside a hidden stacked page can retain
+   its tiny initial viewport until the user visits it again. */
+canvas { display:block; width:100% !important; height:250px !important; max-height:none; }
+#c3 { height:190px !important; }
+#c4 { height:90px !important; }
 </style>
 </head><body>
 <div class="grid">
@@ -850,6 +855,12 @@ class DatabaseTab(QWidget):
     def _switch_m(self, idx):
         self.m_stack.setCurrentIndex(idx)
         _switch_tabs(self.m_sub_btns, idx)
+        # Summary is usually prepared while the Transactions sub-page is
+        # visible. Rebuild it on entry so its KPIs animate on-screen instead
+        # of completing while hidden.
+        if idx == 1 and hasattr(self, '_last_monthly'):
+            y, m, txns = self._last_monthly
+            self._build_monthly_summary(txns, y, m)
         # WebEngine/Chart.js receives its first layout while this stack page
         # is hidden. Resize after it becomes visible and once more after Qt
         # finishes the stacked-widget geometry pass.
@@ -1200,6 +1211,12 @@ class DatabaseTab(QWidget):
         self.ft_num = QDoubleSpinBox(); self.ft_num.setPrefix("₹ ")
         self.ft_num.setRange(0,99999999); self.ft_num.setMinimumHeight(34)
         self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
+        # Apply directly to the controls. This deliberately wins over the
+        # global input QSS and keeps the filter bar visually borderless.
+        _filter_control_qss = f"background:{C['surface2']};border:none;border-radius:7px;padding:6px 10px;"
+        for control in (self.f_date_from, self.f_date_to, self.fc,
+                        self.ft_combo, self.ft_text, self.ft_num):
+            control.setStyleSheet(_filter_control_qss)
         row.addWidget(self.fstk, 1)
 
         # Load button
