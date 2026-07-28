@@ -1155,15 +1155,20 @@ class DatabaseTab(QWidget):
         lay.setContentsMargins(0, 8, 0, 0)
         lay.setSpacing(6)
 
-        # ── Single-line filter bar ──
+        # ── Filter toolbar ──────────────────────────────────────
+        # Keep all filtering behaviour below intact, but present it as one
+        # calm, integrated toolbar instead of a card containing several more
+        # outlined mini-cards.
         bar = QFrame()
+        bar.setObjectName("filter-toolbar")
         bar.setStyleSheet(
-            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}"
-            f"QFrame QDateEdit,QFrame QComboBox,QFrame QLineEdit,QFrame QDoubleSpinBox"
-            f"{{background:{C['surface2']};border:none;border-radius:7px;}}")
+            f"QFrame#filter-toolbar{{background:{C['surface']};"
+            f"border:1px solid {C['border2']};border-radius:14px;}}"
+            f"QFrame#filter-toolbar QLabel{{background:transparent;border:none;"
+            f"color:{C['text3']};font-size:11px;font-weight:700;}}")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(4, 4, 4, 4)
-        row.setSpacing(6)
+        row.setContentsMargins(14, 10, 14, 10)
+        row.setSpacing(8)
 
         # From date
         row.addWidget(QLabel("From"))
@@ -1211,21 +1216,20 @@ class DatabaseTab(QWidget):
         self.ft_num = QDoubleSpinBox(); self.ft_num.setPrefix("₹ ")
         self.ft_num.setRange(0,99999999); self.ft_num.setMinimumHeight(34)
         self.fstk.addWidget(self.ft_combo); self.fstk.addWidget(self.ft_text); self.fstk.addWidget(self.ft_num)
-        # The filter bar is one control group, not six individual cards.
-        # Override both the widgets and their native drop-down/spin subcontrols
-        # so the global input QSS cannot reintroduce separate outlines.
+        # Flat integrated fields: a subtle fill distinguishes controls from
+        # the toolbar without six separate outlined boxes.
         _filter_control_qss = f"""
             QDateEdit, QComboBox, QLineEdit, QDoubleSpinBox {{
-                background: transparent; color:{C['text']}; border:0px;
-                border-radius:0px; padding:6px 8px;
+                background:{C['surface2']}; color:{C['text']}; border:none;
+                border-radius:8px; padding:6px 10px; font-size:12px;
             }}
-            QDateEdit:hover, QDateEdit:focus, QComboBox:hover, QComboBox:focus,
-            QLineEdit:hover, QLineEdit:focus, QDoubleSpinBox:hover, QDoubleSpinBox:focus {{
-                background:{C['surface2']}; border:0px;
+            QDateEdit:hover, QComboBox:hover, QLineEdit:hover, QDoubleSpinBox:hover,
+            QDateEdit:focus, QComboBox:focus, QLineEdit:focus, QDoubleSpinBox:focus {{
+                background:{C['accent_bg']}; border:none;
             }}
             QDateEdit::drop-down, QComboBox::drop-down,
             QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-                border:0px; background:transparent;
+                border:none; background:transparent;
             }}
         """
         for control in (self.f_date_from, self.f_date_to, self.fc,
