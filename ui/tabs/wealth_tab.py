@@ -4931,6 +4931,13 @@ class DashboardPage(QWidget):
             except Exception:
                 pass
 
+    def replay_kpis(self):
+        """Replay dashboard figures when the user lands on the Wealth tab."""
+        for value_label, _detail_label in self._kpi.values():
+            value_label._cu_value = 0.0
+        self._np_net._cu_value = 0.0
+        self.refresh()
+
     # ── Refresh ────────────────────────────────────────────────
     def refresh(self):
         db = self.db
@@ -5380,6 +5387,13 @@ class WealthTab(QWidget):
         # through refresh() keeps the intent explicit.
         if i == 0:
             self.dashboard_page.refresh()
+
+    def on_activated(self):
+        """Refresh only the visible page and replay dashboard KPIs on landing."""
+        if self.stack.currentIndex() == 0:
+            self.dashboard_page.replay_kpis()
+        else:
+            self.refresh()
 
     def refresh(self):
         """Refresh the visible sub-page; mark the rest to catch up on demand.
