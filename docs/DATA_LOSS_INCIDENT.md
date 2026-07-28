@@ -83,6 +83,42 @@ is `INSERT OR IGNORE`, so it never updates or deletes and is safe to re-run.
 | 5 | Startup preflight warns when tables exist only in the `-wal` | `db/integrity.py` |
 | 6 | `safe_update.py` snapshots, updates, and restores the DB if git removes it | `tools/safe_update.py` |
 
+## Follow-up: the same trap took out `config.py`
+
+Right after the database fix, the app crashed on launch with:
+
+```
+ImportError: cannot import name 'GOOGLE_CLIENT_ID' from 'config'
+```
+
+Same root cause, different file. `config.py` is tracked, the committed copy has
+never contained the Google keys, and `git reset --hard` overwrote the local copy
+that did. The credentials were typed straight into a tracked file, so an update
+was always going to erase them.
+
+It crashed the *whole app*, not just the Drive feature, because the import runs
+inside `QThread.run()` in the Settings tab. An uncaught exception there aborts
+the process (verified: old code exits 134/SIGABRT, new code exits 0).
+
+Fixes:
+
+| Fix | File |
+| --- | ---- |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` default to `""`, then `config_local.py` overrides them | `config.py` |
+| Import guarded so it can never raise | `services/drive_backup.py` |
+| Drive status thread wrapped in try/except | `ui/tabs/settings_tab.py` |
+| NAV fetch thread fully guarded (same crash class) | `ui/tabs/wealth_tab.py` |
+| `safe_update.py` rescues secrets into `config_local.py` before updating | `tools/safe_update.py` |
+
+**Put credentials in `config_local.py` from now on** — it is git-ignored, so no
+update can touch it:
+
+```python
+# config_local.py
+GOOGLE_CLIENT_ID     = "xxxx.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET = "GOCSPX-xxxx"
+```
+
 ## Updating from now on
 
 Use:

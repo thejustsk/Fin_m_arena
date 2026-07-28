@@ -18,7 +18,14 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 from datetime import datetime
 
-from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+try:
+    from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+except ImportError:
+    # An older or reset config.py may not define these at all. Import must not
+    # fail: this module gets imported from a QThread, where an uncaught
+    # exception terminates the whole process.
+    GOOGLE_CLIENT_ID = ""
+    GOOGLE_CLIENT_SECRET = ""
 
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _DRIVE_API = "https://www.googleapis.com/drive/v3"

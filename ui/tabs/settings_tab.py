@@ -1869,8 +1869,14 @@ class SettingsTab(QWidget):
             class _StatusWorker(QThread):
                 finished = _Signal(dict)
                 def run(self_):
-                    from services.drive_backup import get_drive_backup_status
-                    self_.finished.emit(get_drive_backup_status())
+                    # Never let this thread raise. An uncaught exception inside
+                    # QThread.run() aborts the entire process, so a missing
+                    # config value would take the whole app down.
+                    try:
+                        from services.drive_backup import get_drive_backup_status
+                        self_.finished.emit(get_drive_backup_status())
+                    except Exception as exc:
+                        self_.finished.emit({"status": f"Unavailable ({exc.__class__.__name__})"})
             def _on_status(info):
                 if hasattr(self, 'gdrive_status'):
                     self.gdrive_status.setText(info.get("status", "Not connected"))

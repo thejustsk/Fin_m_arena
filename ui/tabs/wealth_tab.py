@@ -65,19 +65,27 @@ class _FetchNavsWorker(QThread):
         self._items = scheme_codes
 
     def run(self):
-        import urllib.request
-        result = {}
-        for sid, code in self._items:
+        # Fully guarded: an uncaught exception in QThread.run() aborts the
+        # whole process, not just this thread.
+        try:
+            import urllib.request
+            result = {}
+            for sid, code in self._items:
+                try:
+                    url = f"https://api.mfapi.in/mf/{code}/latest"
+                    with urllib.request.urlopen(url, timeout=3) as resp:
+                        data = _json.loads(resp.read().decode())
+                    rows = data.get("data") or [] if isinstance(data, dict) else []
+                    if rows:
+                        result[sid] = float(rows[0]["nav"])
+                except Exception:
+                    pass
+            self.finished.emit(result)
+        except Exception:
             try:
-                url = f"https://api.mfapi.in/mf/{code}/latest"
-                with urllib.request.urlopen(url, timeout=3) as resp:
-                    data = _json.loads(resp.read().decode())
-                rows = data.get("data") or [] if isinstance(data, dict) else []
-                if rows:
-                    result[sid] = float(rows[0]["nav"])
+                self.finished.emit({})
             except Exception:
                 pass
-        self.finished.emit(result)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────

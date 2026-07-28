@@ -31,6 +31,43 @@ DB = DB_DIR / "finance.db"
 BRANCH = "arena/019fa316-fin-m-arena"
 SIDECARS = ("finance.db-wal", "finance.db-shm")
 
+# config.py is tracked, so `git reset --hard` overwrites it -- taking any
+# credentials typed into it with it. Rescue them into config_local.py, which is
+# git-ignored and therefore survives every future update.
+SECRET_KEYS = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DB_KEY")
+
+
+def rescue_config_secrets():
+    """Copy non-empty secrets out of config.py into config_local.py."""
+    cfg = ROOT / "config.py"
+    local = ROOT / "config_local.py"
+    if not cfg.exists():
+        return
+    text = cfg.read_text(encoding="utf-8", errors="replace")
+
+    found = {}
+    for key in SECRET_KEYS:
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith(f"{key}") and "=" in s and not s.startswith("#"):
+                val = s.split("=", 1)[1].strip()
+                if val and val not in ('""', "''"):
+                    found[key] = val
+                break
+    if not found:
+        return
+
+    existing = local.read_text(encoding="utf-8") if local.exists() else ""
+    new = [f"{k} = {v}" for k, v in found.items() if f"{k}" not in existing]
+    if not new:
+        print("  credentials already saved in config_local.py")
+        return
+    with local.open("a", encoding="utf-8") as fh:
+        if not existing:
+            fh.write("# Machine-specific settings. Git-ignored, so updates never touch it.\n")
+        fh.write("\n".join(new) + "\n")
+    print(f"  rescued {', '.join(found)} -> config_local.py")
+
 
 def _run(*args):
     return subprocess.run(args, cwd=str(ROOT), capture_output=True, text=True)
@@ -81,23 +118,26 @@ def snapshot():
 
 
 def main():
-    print("1/4  Snapshotting the database...")
+    print("1/5  Snapshotting the database...")
     safe_dir = snapshot()
 
-    print("2/4  Fetching latest code...")
+    print("2/5  Protecting local credentials...")
+    rescue_config_secrets()
+
+    print("3/5  Fetching latest code...")
     r = _run("git", "fetch", "origin", BRANCH)
     if r.returncode:
         print(r.stderr)
         sys.exit(1)
 
-    print("3/4  Updating working tree...")
+    print("4/5  Updating working tree...")
     r = _run("git", "reset", "--hard", f"origin/{BRANCH}")
     if r.returncode:
         print(r.stderr)
         sys.exit(1)
     print("  " + r.stdout.strip())
 
-    print("4/4  Verifying the database survived...")
+    print("5/5  Verifying the database survived...")
     if not DB.exists():
         # Expected exactly once: the update that untracks finance_data/.
         shutil.copy2(safe_dir / "finance.db", DB)
