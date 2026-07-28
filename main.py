@@ -37,9 +37,19 @@ def main():
     if _icon_file.exists():
         app.setWindowIcon(QIcon(str(_icon_file)))
 
+    # Guard against a rolled-back / half-copied database *before* migrations
+    # run, because run_migrations() recreates missing tables as empty ones and
+    # the app would then look fine while showing no data.
+    from db.integrity import preflight_check
+    preflight_check()
+
     db = Database()
     db.connect()
     run_migrations(db)
+
+    # Fold the -wal into finance.db right away, so the file on disk is
+    # self-contained from the first moment of the session.
+    db.checkpoint()
 
     repos = {
         "accounts": AccountsRepo(db), "transactions": TransactionsRepo(db),

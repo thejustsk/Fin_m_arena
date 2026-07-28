@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────
+#  Live database — NEVER track these.
+#
+#  They were tracked once, and it cost real data: `git reset --hard`
+#  overwrites finance.db AND finance.db-wal with the committed copies,
+#  reverting the app to whatever state it was in at commit time.
+#  Split-tab data was lost exactly this way.
+#
+#  finance.db-wal / -shm are especially dangerous: in WAL mode committed
+#  rows can live only in the -wal, so a stale -wal dropped next to a
+#  stale .db rolls the whole database back with no error shown.
+# ─────────────────────────────────────────────────────────────────────
+finance_data/*.db
+finance_data/*.db-wal
+finance_data/*.db-shm
+finance_data/*.sqlite
+finance_data/*.sqlite3
+finance_data/backups/
+finance_data/recovery/*.db
+
+# Keep the recovery SQL, it is a one-off rescue artefact.
+!finance_data/recovery/split_recovery.sql
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Secrets ──
+config_local.py
+*.pem
+token.json
+credentials.json
+client_secret*.json
+
+# ── OS / editor ──
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+!finance_data/.gitkeep

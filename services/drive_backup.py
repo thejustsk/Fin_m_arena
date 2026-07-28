@@ -284,11 +284,22 @@ def backup_to_drive(retention: int = 14) -> Tuple[bool, str]:
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_name = f"finance_{ts}.db"
-    # Create a temp copy with timestamped name
-    import shutil
+    # Snapshot via sqlite's backup API, not shutil.copy2: in WAL mode the newest
+    # rows may live only in finance.db-wal, and a raw file copy would upload a
+    # database silently missing them.
+    import sqlite3
     temp_path = os.path.join(os.path.dirname(db_path), backup_name)
     try:
-        shutil.copy2(db_path, temp_path)
+        src = sqlite3.connect(db_path)
+        try:
+            src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            dst = sqlite3.connect(temp_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
     except Exception as e:
         return False, f"Failed to copy database: {e}"
 

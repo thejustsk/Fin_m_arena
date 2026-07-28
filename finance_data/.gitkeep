@@ -1,0 +1,2 @@
+# Keeps finance_data/ in the repo while its contents stay untracked.
+# The live database must NEVER be committed - see ../.gitignore
