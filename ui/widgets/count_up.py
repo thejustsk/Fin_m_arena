@@ -7,7 +7,7 @@ Deliberately conservative:
 """
 from PyQt5.QtCore import QTimer
 
-_DURATION_MS = 520
+_DURATION_MS = 850
 _INTERVAL_MS = 33          # ~30fps: smooth enough, cheap enough
 
 

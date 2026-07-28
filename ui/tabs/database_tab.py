@@ -14,6 +14,7 @@ from ui.sidebar import fmt_money
 import json, uuid as _uuid, os, subprocess, sys
 from services.nw_constants import split_need_want, NW_FROM_LABEL
 from ui.widgets.empty_state import EmptyState
+from ui.widgets.count_up import animate_value
 
 COMPLETE_PAGE_SIZE = 150  # default, overridden by preferences table
 SCROLL_TRIGGER_PX = 400   # default, overridden by preferences table
@@ -235,13 +236,13 @@ def _tx_card(tx, running_bal=None):
     if is_updated:
         upd = QLabel("Updated")
         upd.setStyleSheet(
-            "color:#4F46E5;background:#EEF2FF;border-radius:10px;"
+            f"color:{C['accent']};background:{C['accent_bg']};border-radius:10px;"
             "padding:2px 8px;font-size:10px;font-weight:700;border:none;")
         bottom.addWidget(upd)
     if is_wealth:
         lk = QLabel(f"🔗 {_KIND_LABELS.get(kind, kind)}")
         lk.setStyleSheet(
-            "color:#4F46E5;background:#EEF2FF;border-radius:10px;"
+            f"color:{C['accent']};background:{C['accent_bg']};border-radius:10px;"
             "padding:2px 8px;font-size:10px;font-weight:700;border:none;")
         bottom.addWidget(lk)
     if kind == "TRANSFER":
@@ -249,7 +250,9 @@ def _tx_card(tx, running_bal=None):
     else:
         type_text = tx_type
     type_lbl = QLabel(type_text)
-    type_lbl.setStyleSheet(f"color:{color};font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
+    type_lbl.setStyleSheet(
+        f"color:{color};background:transparent;border:none;font-size:10px;"
+        "font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
     bottom.addWidget(type_lbl)
     amt_col.addLayout(bottom)
 
@@ -282,7 +285,9 @@ def _stat_card(label, value, icon, accent):
     il = QLabel(icon); il.setFixedSize(40,40); il.setAlignment(Qt.AlignCenter)
     il.setStyleSheet(f"background:{accent}12;border-radius:20px;font-size:18px;")
     lay.addWidget(il)
-    vl = QLabel(str(value)); vl.setStyleSheet(f"color:{C['text']};font-size:22px;font-weight:800;")
+    vl = QLabel(); vl.setStyleSheet(f"color:{C['text']};font-size:22px;font-weight:800;")
+    formatter = (lambda v: str(int(round(v)))) if label == "Transactions" else fmt_money
+    animate_value(vl, value, formatter, old_value=0)
     lay.addWidget(vl)
     ll = QLabel(label); ll.setStyleSheet(f"color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
     lay.addWidget(ll)
@@ -304,7 +309,7 @@ def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     net_sign = '' if net >= 0 else '- '
     card.setStyleSheet(f"""
         QFrame {{ background:{C['surface']};
-                  border:1px solid #E5E7EB; border-radius:12px; border-top:3px solid {type_color}; }}
+                  border:1px solid {C['border2']}; border-radius:12px; border-top:3px solid {type_color}; }}
         QLabel {{ background:transparent; border:none; }}
     """)
     lay = QVBoxLayout(card); lay.setContentsMargins(16, 12, 16, 12); lay.setSpacing(6)
@@ -313,7 +318,7 @@ def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     top = QHBoxLayout()
     il = QLabel(icon); il.setStyleSheet("font-size:18px;")
     top.addWidget(il)
-    nl = QLabel(f"<b>{name}</b>"); nl.setStyleSheet("color:{C['text']};font-size:13px;")
+    nl = QLabel(f"<b>{name}</b>"); nl.setStyleSheet(f"color:{C['text']};font-size:13px;")
     top.addWidget(nl); top.addStretch()
     badge = QLabel(acct_type.replace("_", " ").title())
     badge.setStyleSheet(f"color:{type_color};font-size:9px;font-weight:700;background:{type_color}15;border-radius:6px;padding:2px 8px;")
@@ -831,9 +836,12 @@ class DatabaseTab(QWidget):
     def _switch_m(self, idx):
         self.m_stack.setCurrentIndex(idx)
         _switch_tabs(self.m_sub_btns, idx)
-        # Trigger chart resize when viz tab becomes visible
+        # WebEngine/Chart.js receives its first layout while this stack page
+        # is hidden. Resize after it becomes visible and once more after Qt
+        # finishes the stacked-widget geometry pass.
         if idx == 2 and hasattr(self, 'mv') and self.mv and self.mv.view:
-            QTimer.singleShot(150, self._force_chart_resize)
+            for delay in (0, 120, 320):
+                QTimer.singleShot(delay, self._force_chart_resize)
 
     def _force_chart_resize(self):
         """Force QWebEngineView to recalculate layout."""
@@ -841,8 +849,11 @@ class DatabaseTab(QWidget):
             self.mv.view.update()
             # Trigger geometry recalculation
             s = self.mv.view.size()
-            self.mv.view.resize(s.width(), s.height() - 1)
+            self.mv.view.resize(s.width(), max(1, s.height() - 1))
             QTimer.singleShot(50, lambda: self.mv.view.resize(s.width(), s.height()))
+            # Chart.js listens for browser resize events; Qt widget resize on
+            # its own is not always propagated when a stacked page was hidden.
+            self.mv.view.page().runJavaScript("window.dispatchEvent(new Event('resize'));")
 
     def _m_txns(self):
         w = QWidget()
@@ -932,11 +943,11 @@ class DatabaseTab(QWidget):
 
         # 5 KPI cards
         for lbl, val, ico, accent in [
-            ("Transactions", str(len(txns)), "📊", "#4F46E5"),
-            ("Credits", fmt_money(cr), "📈", "#10B981"),
-            ("Debits", fmt_money(db), "📉", "#EF4444"),
-            ("Net", fmt_money(net), "💰", "#10B981" if net >= 0 else "#EF4444"),
-            ("Transfers", fmt_money(tr), "🔄", "#8B5CF6"),
+            ("Transactions", len(txns), "📊", "#4F46E5"),
+            ("Credits", cr, "📈", "#10B981"),
+            ("Debits", db, "📉", "#EF4444"),
+            ("Net", net, "💰", "#10B981" if net >= 0 else "#EF4444"),
+            ("Transfers", tr, "🔄", "#8B5CF6"),
         ]:
             self.ms_kpi_lay.addWidget(_stat_card(lbl, val, ico, accent))
 
@@ -1119,7 +1130,9 @@ class DatabaseTab(QWidget):
 
         # ── Single-line filter bar ──
         bar = QFrame()
-        bar.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}")
+        bar.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}"
+            f"QDateEdit,QComboBox,QLineEdit,QDoubleSpinBox{{background:{C['surface2']};border:none;border-radius:7px;}}")
         row = QHBoxLayout(bar)
         row.setContentsMargins(4, 4, 4, 4)
         row.setSpacing(6)

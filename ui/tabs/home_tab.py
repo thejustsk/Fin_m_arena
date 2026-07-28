@@ -174,10 +174,10 @@ class KPICard(QFrame):
 
         self._update_style()
 
-    def set_data(self, amount, count):
-        """Set the KPI value. Numeric amounts count up; strings are shown as-is."""
+    def set_data(self, amount, count, replay=False):
+        """Set the KPI value; replay selected-period values from zero on click."""
         if isinstance(amount, (int, float)):
-            animate_value(self._amt, amount, fmt_money)
+            animate_value(self._amt, amount, fmt_money, old_value=0 if replay else None)
         else:
             self._amt.setText(str(amount))
         suffix = "txn" if count == 1 else "txns"
@@ -375,7 +375,9 @@ class HomeTab(QWidget):
             d_from, d_to = self._date_range(p)
             ptxns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
             p_debit = sum(t["amount"] for t in ptxns if t["tx_type"] == "DEBIT")
-            card.set_data(p_debit, len(ptxns))
+            # The selected period is an explicit user action, so replay its
+            # value even when the amount itself has not changed.
+            card.set_data(p_debit, len(ptxns), replay=(p == self._period))
 
         # Get selected period's transactions
         d_from, d_to = self._date_range(self._period)

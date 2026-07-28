@@ -91,6 +91,11 @@ class SettingsTab(QWidget):
         lay.addWidget(h)
 
         self.tabs = QTabWidget()
+        # QTabWidget's default pane is white on some platform styles even when
+        # its child pages are themed. Keep Settings pages on the active canvas.
+        self.tabs.setStyleSheet(
+            f"QTabWidget::pane{{background:{C['bg']};border:none;}}"
+            f"QTabWidget>QWidget{{background:{C['bg']};}}")
         self.tabs.addTab(self._accounts_tab(), "Accounts")
         self.tabs.addTab(self._lookups_tab(), "Categories && Lookups")
         self.tabs.addTab(self._security_tab(), "Security")

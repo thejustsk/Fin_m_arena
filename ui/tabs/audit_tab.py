@@ -25,6 +25,7 @@ from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_heade
 from services.nw_constants import (split_need_want, NW_FROM_LABEL,
                                    NW_NONE, NW_NEED, NW_WANT)
 from ui.widgets.empty_state import EmptyState
+from ui.widgets.count_up import animate_value
 
 
 def _nw_tint(hex_color, strong):
@@ -1127,8 +1128,8 @@ class _AuditSubTab(QWidget):
             upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
             upd_lbl.setAlignment(Qt.AlignCenter)
             upd_lay.addWidget(upd_lbl)
-            upd_dlg.show()
-            QApplication.processEvents()
+            # Do not show a nested progress dialog here: rebuilding the list
+            # while it is open can surface detached transaction-card widgets.
 
             update_kw = {field: new for field, (old, new) in changes.items()}
             self.tx.update(tx_id, **update_kw)
@@ -1257,8 +1258,7 @@ class _AuditSubTab(QWidget):
         upd_lbl.setStyleSheet(f"color:{C['red']};font-size:13px;font-weight:700;")
         upd_lbl.setAlignment(Qt.AlignCenter)
         upd_lay.addWidget(upd_lbl)
-        upd_dlg.show()
-        QApplication.processEvents()
+        # Keep the operation non-modal; completion is reflected in the list.
 
         # ── Step 5: Delete all related transactions ──
         all_ids = [tx_id] + [rt["id"] for rt in related_txns]
@@ -1317,8 +1317,7 @@ class _AuditSubTab(QWidget):
             ok_btn.clicked.connect(upd_dlg.accept)
             upd_lay.addWidget(ok_btn)
             ok_btn.setFocus()
-            QApplication.processEvents()
-            upd_dlg.exec_()
+            # The list has already refreshed; do not open a second modal.
         except Exception:
             pass
 
@@ -1498,12 +1497,7 @@ class _AuditSubTab(QWidget):
         upd_lbl.setStyleSheet(f"color:{C['accent']};font-size:13px;font-weight:700;")
         upd_lbl.setAlignment(Qt.AlignCenter)
         upd_lay.addWidget(upd_lbl)
-        upd_dlg.show()
-        QApplication.processEvents()
-        from PyQt5.QtCore import QTimer
-        import time
-        time.sleep(0.1)  # Small delay to ensure popup renders
-        QApplication.processEvents()
+        # Keep the operation non-modal; completion is reflected in the list.
         cat_val = self.bulk_category.currentData()
         nw_val = self.bulk_neednwant.currentData()
         pf_val = self.bulk_pf.currentData()
@@ -1569,8 +1563,7 @@ class _AuditSubTab(QWidget):
             ok_btn.clicked.connect(upd_dlg.accept)
             upd_lay.addWidget(ok_btn)
             ok_btn.setFocus()
-            QApplication.processEvents()
-            upd_dlg.exec_()
+            # The list has already refreshed; do not open a second modal.
         except Exception:
             pass
         self.load_records()
@@ -1635,12 +1628,16 @@ class _AuditSubTab(QWidget):
             item = self.stats_row.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for card in [
-            _metric_card("Total Credits", fmt_money(credits), C["green"]),
-            _metric_card("Total Debits", fmt_money(debits), C["red"]),
-            _metric_card("Net", fmt_money(credits - debits), C["green"] if credits >= debits else C["red"]),
-            _metric_card("Transactions", str(len(rows))),
-        ]:
+        insight_metrics = [
+            ("Total Credits", credits, C["green"], fmt_money),
+            ("Total Debits", debits, C["red"], fmt_money),
+            ("Net", credits - debits, C["green"] if credits >= debits else C["red"], fmt_money),
+            ("Transactions", len(rows), None, lambda value: str(int(round(value)))),
+        ]
+        for label, value, color, formatter in insight_metrics:
+            card = _metric_card(label, "", color)
+            value_label = card.findChildren(QLabel)[0]
+            animate_value(value_label, value, formatter, old_value=0)
             self.stats_row.addWidget(card)
 
         acct_cr, acct_db = {}, {}

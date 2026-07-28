@@ -9,6 +9,7 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header, _month_header, _get_pref, COMPLETE_PAGE_SIZE, SCROLL_TRIGGER_PX
 from ui.tabs.cards_tab import _build_cycles, _fifo_allocate, _parse_stmt_day, _cycle_name, _stmt_display
+from ui.widgets.count_up import animate_value
 
 
 _ACCT_TYPE_LABEL = {
@@ -200,14 +201,14 @@ class BalancesTab(QWidget):
 
         nw = self.bal.net_worth()
         nw_color = "#10B981" if nw >= 0 else "#EF4444"
-        self.nw_val.setText(fmt_money(nw))
+        animate_value(self.nw_val, nw, fmt_money)
         self.nw_val.setStyleSheet(f"color:{nw_color};font-size:26px;font-weight:900;")
 
         type_totals = self.bal.by_type()
         for acct_type, val_lbl in self._bd_vals.items():
             val = type_totals.get(acct_type, 0)
-            val_lbl.setText(fmt_money(val))
             if acct_type == "CREDIT_CARD":
+
                 vc = "#10B981" if val >= 0 else "#EF4444"
             elif acct_type == "WALLET":
                 vc = "#F59E0B"
@@ -215,7 +216,7 @@ class BalancesTab(QWidget):
                 vc = "#FFFFFF"
             else:
                 vc = "#10B981" if val >= 0 else "#EF4444"
-            val_lbl.setText(fmt_money(val))
+            animate_value(val_lbl, val, fmt_money)
             val_lbl.setStyleSheet(
                 f"color:{vc};font-size:15px;font-weight:700;"
                 f"background:transparent;border:none;")

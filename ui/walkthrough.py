@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QSpinBox, QCheckBox, QFormLayout)
 from PyQt5.QtCore import Qt, pyqtSignal, QDate
 from PyQt5.QtGui import QCursor
-from ui.theme import C
+from ui.theme import C, is_dark
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header
 
@@ -770,7 +770,13 @@ def _build_cc_reminders():
 def _build_dc_carousel():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
     card = QFrame(); card.setFixedHeight(160)
-    card.setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #b8bcc2,stop:1 #5f656d);border-radius:16px;}QLabel{background:transparent;border:none;}")
+    # Match the debit-card carousel to the active app theme: Black Steel in
+    # dark mode, Silverforge in light mode.
+    gradient = ("#242830", "#050607") if is_dark() else ("#b8bcc2", "#5f656d")
+    card.setStyleSheet(
+        "QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+        f"stop:0 {gradient[0]},stop:1 {gradient[1]});border-radius:16px;}}"
+        "QLabel{background:transparent;border:none;}")
     cl = QVBoxLayout(card); cl.setContentsMargins(20, 12, 20, 12); cl.setSpacing(4)
     cl.addWidget(_make_label("SBI Debit Card", 13, "white", True))
     cl.addWidget(_make_label("SBI Savings", 10, "rgba(255,255,255,0.7)"))

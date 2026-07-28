@@ -17,6 +17,7 @@ from services.loan_service import LoanService
 from services.fd_service import FDService
 from services.mf_service import MFService
 from ui.wealth_verify import WealthEditVerifyDialog
+from ui.widgets.count_up import animate_value
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -5047,18 +5048,18 @@ class DashboardPage(QWidget):
 
         # ── Update KPI cards ──
         v, d = self._kpi[1]
-        v.setText(fmt_money(lg_out)); d.setText(f"{lg_od} overdue / {lg_act} active")
+        animate_value(v, lg_out, fmt_money); d.setText(f"{lg_od} overdue / {lg_act} active")
         v, d = self._kpi[2]
         emi_txt = (f"EMI {fmt_money(next_emi[1])} due {next_emi[0]}"
                    if next_emi else f"{lt_od} overdue / {lt_act} active")
-        v.setText(fmt_money(lt_out)); d.setText(emi_txt)
+        animate_value(v, lt_out, fmt_money); d.setText(emi_txt)
         v, d = self._kpi[3]
-        v.setText(fmt_money(fd_total))
+        animate_value(v, fd_total, fmt_money)
         d.setText(f"{fd['c']} active / {fd_mat['c']} matured")
         v, d = self._kpi[4]
-        v.setText(fmt_money(fo_out)); d.setText(f"{fo_od} overdue / {fo_act} active")
+        animate_value(v, fo_out, fmt_money); d.setText(f"{fo_od} overdue / {fo_act} active")
         v, d = self._kpi[5]
-        v.setText(fmt_money(mf_cur)); d.setText(f"{mf_ret:+.1f}% return")
+        animate_value(v, mf_cur, fmt_money); d.setText(f"{mf_ret:+.1f}% return")
         v, d = self._kpi[6]
         v.setText(f"{fmt_money(sp_owed)} / {fmt_money(sp_owe)}")
         d.setText(f"{sp_unset} unsettled group{'' if sp_unset == 1 else 's'}")
@@ -5075,7 +5076,7 @@ class DashboardPage(QWidget):
         self._np_recv.setText(fmt_money(recv))
         self._np_pay.setText(fmt_money(pay))
         self._np_split.setText(fmt_money(sp_net))
-        self._np_net.setText(f"NET: {fmt_money(net)}")
+        animate_value(self._np_net, net, lambda value: f"NET: {fmt_money(value)}")
         net_col = "#a5f3fc" if net >= 0 else "#fca5a5"
         self._np_net.setStyleSheet(f"color:{net_col};font-size:28px;font-weight:900;")
 

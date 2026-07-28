@@ -22,6 +22,7 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _switch_tabs
 from ui.widgets.searchable_combo import SearchableCombo
+from ui.widgets.count_up import animate_value
 
 
 def _hex_rgba(hex_color, alpha):
@@ -80,8 +81,12 @@ def _metric_card(label, value, color=None):
     lay = QVBoxLayout(card)
     lay.setContentsMargins(14, 10, 14, 10)
     lay.setSpacing(4)
-    v = QLabel(value)
+    v = QLabel()
     v.setStyleSheet(f"font-size:18px;font-weight:800;color:{color};")
+    if isinstance(value, (int, float)):
+        animate_value(v, value, fmt_money, old_value=0)
+    else:
+        v.setText(str(value))
     l = QLabel(label)
     l.setStyleSheet(f"font-size:10px;color:{C['text3']};font-weight:600;"
                      f"text-transform:uppercase;letter-spacing:0.5px;")
@@ -425,10 +430,10 @@ class SplitTab(QWidget):
             self.status_title.setText(
                 "\U0001f91d  SPLIT STATUS" if who == "You"
                 else f"\U0001f91d  SPLIT STATUS \u2014 {who}")
-        self.lbl_owed_val.setText(fmt_money(total_owed_to_me))
-        self.lbl_owe_val.setText(fmt_money(total_i_owe))
-        self.lbl_settled_val.setText(str(settled))
-        self.lbl_unset_val.setText(str(unsettled))
+        animate_value(self.lbl_owed_val, total_owed_to_me, fmt_money)
+        animate_value(self.lbl_owe_val, total_i_owe, fmt_money)
+        animate_value(self.lbl_settled_val, settled, lambda value: str(int(round(value))))
+        animate_value(self.lbl_unset_val, unsettled, lambda value: str(int(round(value))))
 
     # ═══════════════════════════════════════════════════════════
     #  NAVIGATION
@@ -526,11 +531,11 @@ class SplitTab(QWidget):
 
         _clear_layout(self.stats_row)
         self.stats_row.addWidget(
-            _metric_card("Total Expenses", fmt_money(total_expenses), C["accent"]))
+            _metric_card("Total Expenses", total_expenses, C["accent"]))
         self.stats_row.addWidget(
-            _metric_card("Pending", fmt_money(total_pending), C["amber"]))
+            _metric_card("Pending", total_pending, C["amber"]))
         self.stats_row.addWidget(
-            _metric_card("Settled", fmt_money(total_settled), C["green"]))
+            _metric_card("Settled", total_settled, C["green"]))
 
         # Balance matrix
         bal_title = QLabel("\U0001f4ca Balance Matrix")
