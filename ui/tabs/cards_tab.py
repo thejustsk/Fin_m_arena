@@ -286,7 +286,7 @@ class CarouselView(QGraphicsView):
     def __init__(self, cards_data=None, utilizations=None, parent=None):
         super().__init__(parent)
         self.setRenderHint(QPainter.Antialiasing)
-        self.setStyleSheet("background-color:#111827;border:none;border-radius:12px;")
+        self.setStyleSheet(f"background-color:{C['text']};border:none;border-radius:12px;")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFocusPolicy(Qt.StrongFocus); self.setMouseTracking(True)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -419,7 +419,7 @@ class AddCardDialog(QDialog):
         lay=QHBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(20)
         fc=QVBoxLayout(); fc.setSpacing(8)
         hdr_text = "✏️  Edit Credit Card" if self._is_edit else "💳  Add New Credit Card"
-        hdr=QLabel(hdr_text); hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
+        hdr=QLabel(hdr_text); hdr.setStyleSheet(f"font-size:18px;font-weight:800;color:{C['text']};"); fc.addWidget(hdr)
         form=QFormLayout(); form.setSpacing(8); form.setLabelAlignment(Qt.AlignRight)
         self.card_name=QLineEdit(); self.card_name.setPlaceholderText("e.g. AMAZON PAY ICICI CARD"); self.card_name.textChanged.connect(self._upd); force_upper(self.card_name); form.addRow("Card Name *",self.card_name)
         self.issuer=QLineEdit(); self.issuer.setPlaceholderText("e.g. ICICI BANK"); self.issuer.textChanged.connect(self._upd); force_upper(self.issuer); form.addRow("Bank *",self.issuer)
@@ -713,7 +713,7 @@ class CardsTab(QWidget):
     def _build(self):
         root = QVBoxLayout(self); root.setContentsMargins(28, 16, 28, 16); root.setSpacing(10)
         hr = QHBoxLayout(); hr.setSpacing(12)
-        h = QLabel("💳  Credit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
+        h = QLabel("💳  Credit Cards"); h.setStyleSheet(f"font-size:24px;font-weight:800;color:{C['text']};"); hr.addWidget(h); hr.addStretch()
         ab = QPushButton("＋  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38)
         ab.setCursor(Qt.PointingHandCursor); ab.clicked.connect(self._add_card); hr.addWidget(ab)
         root.addLayout(hr)

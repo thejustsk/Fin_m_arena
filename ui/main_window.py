@@ -83,17 +83,13 @@ class MainWindow(QMainWindow):
             ("gmail", GmailTab),
             ("split", SplitTab),
         ]
+        self._tab_classes = tab_classes
         for key, cls in tab_classes:
             tab = cls(self.db, self.repos, self.services)
             self.stack.addWidget(tab)
             self._tabs[key] = tab
 
-        # Connect Home tab's quick-access signal
-        self._tabs["home"].go.connect(self._nav)
-
-        # Connect Audit tab's data-changed signal to refresh all tabs
-        self._tabs["audit"].set_refresh_callback(self._refresh_all_tabs)
-        self._tabs["wealth"].set_refresh_callback(self._refresh_all_tabs)
+        self._wire_tabs()
 
         layout.addWidget(self.stack)
 
@@ -113,13 +109,218 @@ class MainWindow(QMainWindow):
                     btn.setText(f" {icon}")
 
         self.sidebar.select_home()
+        self._install_shortcuts()
+
+    # ══════════════════════════════════════════════════════════
+    #  Wiring shared by the first build and any theme rebuild
+    # ══════════════════════════════════════════════════════════
+    def _wire_tabs(self):
+        """Reconnect cross-tab signals. Safe to call again after a rebuild."""
+        home = self._tabs.get("home")
+        if home is not None:
+            try:
+                home.go.connect(self._nav)
+            except Exception:
+                pass
+        for key in ("audit", "wealth"):
+            tab = self._tabs.get(key)
+            if tab is not None and hasattr(tab, "set_refresh_callback"):
+                try:
+                    tab.set_refresh_callback(self._refresh_all_tabs)
+                except Exception:
+                    pass
+
+    # ══════════════════════════════════════════════════════════
+    #  Theme
+    # ══════════════════════════════════════════════════════════
+    def toggle_theme(self):
+        from ui.theme import active_theme
+        self.set_theme("light" if active_theme() == "dark" else "dark")
+
+    def set_theme(self, name):
+        """Swap palette and rebuild every tab so inline styles pick it up.
+
+        Inline setStyleSheet() strings were baked with the old colours, so a
+        global stylesheet swap alone is not enough — the widget tree has to
+        be recreated. Done behind setUpdatesEnabled(False) to avoid a visible
+        repaint storm.
+        """
+        from ui.theme import apply_theme, save_theme_pref, active_theme
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QCoreApplication, QEvent
+
+        if name == active_theme():
+            return
+        current_key = self._current_key()
+        app = QApplication.instance()
+
+        self.setUpdatesEnabled(False)
+        try:
+            # Order matters for speed. app.setStyleSheet() re-polishes every
+            # live widget (~1s with all tabs built), so tear the old tree down
+            # *before* swapping the stylesheet, not after.
+            old_tabs = list(self._tabs.values())
+            self._tabs = {}
+            self._stale_tabs = {k for k, _ in self._tab_classes}
+            while self.stack.count():
+                w = self.stack.widget(0)
+                self.stack.removeWidget(w)
+                w.setParent(None)
+            for w in old_tabs:
+                w.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+            apply_theme(name, app)
+            save_theme_pref(self.db, name)
+
+            # Category icon cache holds themed colours — drop it.
+            try:
+                from ui.tabs.database_tab import _refresh_cat_icons
+                _refresh_cat_icons(self.db)
+            except Exception:
+                pass
+
+            # Placeholders keep _tab_map indices valid until each tab is real.
+            # Rebuilding all twelve eagerly costs seconds; _nav() materialises
+            # each one the first time you open it instead.
+            self._placeholders = {}
+            for key, _cls in self._tab_classes:
+                ph = QWidget()
+                ph.setObjectName("central")
+                self.stack.addWidget(ph)
+                self._placeholders[key] = ph
+
+            # Sidebar owns its own inline styles too.
+            self._rebuild_sidebar()
+            self._ensure_tab(current_key)
+            self._wire_tabs()
+        finally:
+            self.setUpdatesEnabled(True)
+
+        self._nav(current_key)
+        try:
+            from ui.widgets.toast import Toast
+            Toast.show_message(self, f"{name.title()} theme applied", kind="success")
+        except Exception:
+            pass
+
+    def _ensure_tab(self, key):
+        """Build a tab on demand after a theme switch, swapping out its
+        placeholder. No-op once the tab is live."""
+        stale = getattr(self, "_stale_tabs", None)
+        if not stale or key not in stale:
+            return self._tabs.get(key)
+        cls = dict(self._tab_classes).get(key)
+        if cls is None:
+            stale.discard(key)
+            return None
+        idx = self._tab_map.get(key)
+        tab = cls(self.db, self.repos, self.services)
+        ph = getattr(self, "_placeholders", {}).get(key)
+        if ph is not None:
+            self.stack.insertWidget(idx, tab)
+            self.stack.removeWidget(ph)
+            ph.setParent(None)
+            ph.deleteLater()
+            self._placeholders.pop(key, None)
+        else:
+            self.stack.insertWidget(idx, tab)
+        self._tabs[key] = tab
+        stale.discard(key)
+        # Re-attach signals for the tabs that publish them.
+        if key == "home":
+            try:
+                tab.go.connect(self._nav)
+            except Exception:
+                pass
+        elif key in ("audit", "wealth") and hasattr(tab, "set_refresh_callback"):
+            try:
+                tab.set_refresh_callback(self._refresh_all_tabs)
+            except Exception:
+                pass
+        return tab
+
+    def _current_key(self):
+        idx = self.stack.currentIndex()
+        for k, v in self._tab_map.items():
+            if v == idx:
+                return k
+        return "home"
+
+    def _rebuild_sidebar(self):
+        """Recreate the sidebar against the new palette, preserving state."""
+        from ui.sidebar import Sidebar, COLLAPSED_W, EXPANDED_W, NAV_GROUPS
+        was_expanded = getattr(self.sidebar, "_expanded", False)
+        old = self.sidebar
+        layout = self.centralWidget().layout()
+
+        new = Sidebar(self.services["balance"], self.repos)
+        new.nav.connect(self._nav)
+        layout.insertWidget(0, new)
+        old.setParent(None)
+        old.deleteLater()
+        self.sidebar = new
+
+        if not was_expanded:
+            new.setFixedWidth(COLLAPSED_W)
+            new._expanded = False
+            new.title_label.hide()
+            new.hdr_frame.hide()
+            new.title_icon.show()
+            for lbl in new._labels:
+                lbl.hide()
+            for _group, items in NAV_GROUPS:
+                for key, icon, _label in items:
+                    btn = new._btns.get(key)
+                    if btn:
+                        btn.setText(f" {icon}")
+        else:
+            new.setFixedWidth(EXPANDED_W)
+            new._expanded = True
+
+    # ══════════════════════════════════════════════════════════
+    #  Shortcuts
+    # ══════════════════════════════════════════════════════════
+    def _install_shortcuts(self):
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        self._sc_palette = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._sc_palette.activated.connect(self.open_command_palette)
+        self._sc_theme = QShortcut(QKeySequence("Ctrl+Shift+L"), self)
+        self._sc_theme.activated.connect(self.toggle_theme)
+
+    def _palette_entries(self):
+        """Build the Ctrl+K list: every tab, plus a few global actions."""
+        from ui.sidebar import NAV_GROUPS
+        from ui.theme import active_theme
+        entries = []
+        for group, items in NAV_GROUPS:
+            for key, icon, label in items:
+                entries.append(
+                    (icon, label, group.title() if group else "",
+                     lambda k=key: self._nav(k)))
+        other = "Light" if active_theme() == "dark" else "Dark"
+        entries.append(("\U0001f317", f"Switch to {other} theme",
+                        "Appearance", self.toggle_theme))
+        entries.append(("\U0001f504", "Refresh all data",
+                        "Action", self._refresh_all_tabs))
+        return entries
+
+    def open_command_palette(self):
+        from ui.widgets.command_palette import CommandPalette
+        dlg = CommandPalette(self._palette_entries(), self)
+        # Centre it near the top of the window, where the eye already is.
+        dlg.adjustSize()
+        g = self.geometry()
+        dlg.move(g.x() + (g.width() - dlg.width()) // 2, g.y() + 90)
+        dlg.exec_()
 
     def _refresh_all_tabs(self):
         """Called by AuditTab when data changes — refresh all visible tabs."""
         # Refresh category icon cache (used by all tabs for transaction cards)
         from ui.tabs.database_tab import _refresh_cat_icons
         _refresh_cat_icons(self.db)
-        for tab in self._tabs.values():
+        for tab in list(self._tabs.values()):
             if hasattr(tab, "refresh"):
                 try:
                     tab.refresh()
@@ -136,6 +337,9 @@ class MainWindow(QMainWindow):
         # Refresh category icon cache on every navigation
         from ui.tabs.database_tab import _refresh_cat_icons
         _refresh_cat_icons(self.db)
+
+        # After a theme switch tabs are rebuilt lazily — realise this one now.
+        self._ensure_tab(key)
 
         self.stack.setCurrentIndex(idx)
         # Update sidebar highlight

@@ -18,6 +18,8 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header, FILTER_FIELDS
 from services.nw_constants import NW_FROM_LABEL
+from ui.widgets.empty_state import EmptyState
+from ui.widgets.toast import Toast
 
 
 # ═══════════════════════════════════════════════
@@ -353,9 +355,12 @@ class NotesTab(QWidget):
                 w.setParent(None)
         notes = self.nr.list_active(self.search_box.text().strip() or None)
         if not notes:
-            empty = QLabel("No notes yet. Click \"+ New Note\" to create one.")
-            empty.setStyleSheet(f"color:{C['text3']};font-size:13px;padding:24px;")
-            empty.setAlignment(Qt.AlignCenter)
+            empty = EmptyState(
+                icon="\U0001f4cb",
+                title="No notes yet",
+                hint="Keep receipts, reminders and context alongside your transactions.",
+                action_text="+ New Note",
+                on_action=lambda: self._goto(1))
             self.notes_lay.addWidget(empty); return
         all_cards = []
         for n in notes:
@@ -405,11 +410,36 @@ class NotesTab(QWidget):
                     w.collapse()
 
     def _delete_note(self, note_id):
-        reply = QMessageBox.question(self, "Delete Note", "Move to Trash?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.nr.soft_delete(note_id)
-            self._load_notes(); self._load_trash()
+        """Soft-delete straight away and offer Undo.
+
+        Faster than a confirm dialog and just as safe — the note is still in
+        Trash either way, and Undo puts it back in one click.
+        """
+        note = self.nr.get(note_id)
+        title = (note or {}).get("title") or "Note"
+        self.nr.soft_delete(note_id)
+
+        # soft_delete() mints a fresh trash uuid; find it so Undo can restore.
+        trash_uid = None
+        try:
+            row = self.db.execute(
+                "SELECT uuid FROM notes_trash WHERE original_id=? "
+                "ORDER BY deleted_at DESC LIMIT 1", (note_id,)).fetchone()
+            if row:
+                trash_uid = row["uuid"]
+        except Exception:
+            pass
+
+        self._load_notes(); self._load_trash()
+
+        def _undo():
+            if trash_uid:
+                self.nr.restore(trash_uid)
+                self._load_notes(); self._load_trash()
+                Toast.show_message(self, "Note restored", kind="success")
+
+        short = title if len(title) <= 34 else title[:31] + "\u2026"
+        Toast.show_undo(self, f"Moved to Trash \u2014 {short}", on_undo=_undo)
 
     def _edit_note(self, note_id):
         note = self.nr.get(note_id)
@@ -501,7 +531,7 @@ class NotesTab(QWidget):
 
         # ── RIGHT: Link Transactions ──
         right = QFrame()
-        right.setStyleSheet(f"QFrame{{background:#fff;border:1px solid #E5E7EB;border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        right.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(14, 12, 14, 12); right_lay.setSpacing(8)
 
@@ -511,7 +541,7 @@ class NotesTab(QWidget):
 
         # Filter bar
         bar = QFrame()
-        bar.setStyleSheet("QFrame{background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:6px 10px;}")
+        bar.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;padding:6px 10px;}}")
         filt = QVBoxLayout(bar)
         filt.setContentsMargins(4, 4, 4, 4); filt.setSpacing(6)
 

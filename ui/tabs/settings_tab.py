@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, QThread, pyqtSignal as _Signal
 from PyQt5.QtGui import QCursor
 from datetime import datetime
-from ui.theme import C
+from ui.theme import C, active_theme as _active_theme
 from ui.sidebar import fmt_money
 from ui.widgets.metric_card import mk_table
 from ui.uppercase import force_upper
@@ -856,7 +856,14 @@ class SettingsTab(QWidget):
         grp1 = QFrame()
         grp1.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
         f1 = QFormLayout(grp1); f1.setContentsMargins(16,16,16,16); f1.setSpacing(10)
-        f1.addRow("Theme:", QLabel("Light (locked)"))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("\u2600\ufe0f  Light", "light")
+        self.theme_combo.addItem("\U0001f319  Dark", "dark")
+        _cur = self.theme_combo.findData(_active_theme())
+        if _cur >= 0:
+            self.theme_combo.setCurrentIndex(_cur)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        f1.addRow("Theme:", self.theme_combo)
         f1.addRow("Currency:", QLabel("\u20b9 Indian"))
         l.addWidget(grp1)
 
@@ -1447,6 +1454,18 @@ class SettingsTab(QWidget):
     # ══════════════════════════════════════════════
     # ACTIONS
     # ══════════════════════════════════════════════
+    def _on_theme_changed(self):
+        """Hand the switch to the main window, which owns the widget tree."""
+        name = self.theme_combo.currentData()
+        node = self.parent()
+        while node is not None and not hasattr(node, "set_theme"):
+            node = node.parent()
+        if node is not None:
+            # This rebuilds tabs (including this one), so defer past the
+            # signal that triggered it.
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: node.set_theme(name))
+
     def _save_prefs(self):
         try:
             for key, val in [

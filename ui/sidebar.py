@@ -65,9 +65,18 @@ ANIM_STEPS = 10
 ANIM_MS = 180
 
 # Indigo palette — white bg
-_PRIMARY = "#4338CA"
-_PRIMARY_LIGHT = "#6366F1"
-_PRIMARY_PALE = "#E0E7FF"
+# Read through functions, never bind at import — the palette can change at
+# runtime and module-level constants would freeze the light values.
+def _primary():
+    return C["sidebar_text"]
+
+
+def _primary_light():
+    return C["accent"]
+
+
+def _primary_pale():
+    return C["accent_bg"]
 
 
 def _parse_stmt_day(stmt_str):
@@ -114,7 +123,7 @@ class Sidebar(QWidget):
         self.card = QFrame()
         self.card.setObjectName("sidebar-card")
         self.card.setStyleSheet(
-            f"QFrame#sidebar-card{{background:#F0EEFF;border:1px solid {C['border2']};"
+            f"QFrame#sidebar-card{{background:{C['accent_bg']};border:1px solid {C['border2']};"
             f"border-radius:12px;}}"
             f"QLabel{{background:transparent;border:none;outline:none;}}")
         from ui.widgets.metric_card import add_shadow
@@ -135,7 +144,7 @@ class Sidebar(QWidget):
         self.title_icon.setAlignment(Qt.AlignCenter)
         self.title_icon.setStyleSheet(
             "font-size: 14px; font-weight: 800; color: white; "
-            "background: #4338CA; border: none; border-radius: 8px; "
+            f"background: {C['sidebar_text']}; border: none; border-radius: 8px; "
             "padding: 8px 12px;")
         self.title_icon.setCursor(QCursor(Qt.PointingHandCursor))
         self.title_icon.mousePressEvent = lambda e: self._toggle()
@@ -145,7 +154,7 @@ class Sidebar(QWidget):
         self.hdr_frame = QFrame()
         self.hdr_frame.setCursor(QCursor(Qt.PointingHandCursor))
         self.hdr_frame.setStyleSheet(
-            f"QFrame{{background:white;border:1px solid {C['border']};border-radius:10px;}}"
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border']};border-radius:10px;}}"
             f"QLabel{{background:transparent;border:none;outline:none;}}")
         self.hdr_frame.mousePressEvent = lambda e: self._toggle()
         hf_lay = QHBoxLayout(self.hdr_frame)
@@ -153,7 +162,7 @@ class Sidebar(QWidget):
         hf_lay.setSpacing(6)
         self.title_label = QLabel("Finance Manager")
         self.title_label.setStyleSheet(
-            f"color: {_PRIMARY}; font-size: 15px; font-weight: 800;")
+            f"color: {_primary()}; font-size: 15px; font-weight: 800;")
         hf_lay.addWidget(self.title_label)
         hdr.addWidget(self.hdr_frame, 1)
 
@@ -169,7 +178,7 @@ class Sidebar(QWidget):
             if group_label:
                 lbl = QLabel(group_label)
                 lbl.setStyleSheet(
-                    "color: #111827; font-size: 9px; font-weight: 700; "
+                    f"color:{C['text']}; font-size: 9px; font-weight: 700; "
                     "letter-spacing: 1.5px; padding: 14px 12px 4px; background: transparent; border:none;")
                 self.lay.addWidget(lbl)
                 self._labels.append(lbl)
@@ -198,7 +207,7 @@ class Sidebar(QWidget):
         # ── Due / Overdue Reminders (expanded) ──
         self._rem_header = QLabel("PAYMENT DUES")
         self._rem_header.setStyleSheet(
-            f"color: {_PRIMARY}; font-size: 9px; font-weight: 700; "
+            f"color: {_primary()}; font-size: 9px; font-weight: 700; "
             f"letter-spacing: 1.5px; padding: 10px 12px 4px; background: transparent; border: none;")
         self.lay.addWidget(self._rem_header)
         self._rem_header.hide()
@@ -248,7 +257,7 @@ class Sidebar(QWidget):
         if active:
             return f"""
                 QPushButton {{
-                    background: {_PRIMARY};
+                    background: {_primary()};
                     color: white;
                     border: none;
                     border-radius: 8px;
@@ -261,7 +270,7 @@ class Sidebar(QWidget):
         return f"""
             QPushButton {{
                 background: transparent;
-                color: {_PRIMARY};
+                color: {_primary()};
                 border: none;
                 border-radius: 8px;
                 padding: 8px 12px;
@@ -271,7 +280,7 @@ class Sidebar(QWidget):
             }}
             QPushButton:hover {{
                 background: {C['surface']};
-                color: #111827;
+                color:{C['text']};
                 font-weight: 700;
             }}
         """
@@ -356,7 +365,7 @@ class Sidebar(QWidget):
             for _ in range(min(count, 8)):
                 dot = QFrame()
                 dot.setFixedSize(32, 6)
-                dot.setStyleSheet(f"background:{_PRIMARY};border-radius:3px;")
+                dot.setStyleSheet(f"background:{_primary()};border-radius:3px;")
                 self._dots_lay.addWidget(dot, 0, Qt.AlignHCenter)
                 self._due_dots.append(dot)
         else:

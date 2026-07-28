@@ -9,10 +9,11 @@ from PyQt5.QtCore import Qt, QDate, QUrl, QTimer, QPoint, QRect, QSize
 from PyQt5.QtGui import QColor, QCursor
 from datetime import date, timedelta
 from collections import OrderedDict
-from ui.theme import C
+from ui.theme import C, apply_chart_theme
 from ui.sidebar import fmt_money
 import json, uuid as _uuid, os, subprocess, sys
 from services.nw_constants import split_need_want, NW_FROM_LABEL
+from ui.widgets.empty_state import EmptyState
 
 COMPLETE_PAGE_SIZE = 150  # default, overridden by preferences table
 SCROLL_TRIGGER_PX = 400   # default, overridden by preferences table
@@ -156,11 +157,11 @@ def _switch_tabs(btns, idx):
 
 def _tx_card(tx, running_bal=None):
     card = QFrame()
-    card.setStyleSheet("""
-        QFrame { background:#fff; border:1px solid #E5E7EB; border-radius:12px; }
-        QFrame:hover { border-color:#C7D2FE; background:#FAFBFF; }
-        QLabel { background:transparent; border:none; outline:none; }
-    """)
+    card.setStyleSheet(
+        f"QFrame {{ background:{C['surface']}; border:1px solid {C['border2']};"
+        f" border-radius:12px; }}"
+        f"QFrame:hover {{ border-color:{C['accent']}; background:{C['surface2']}; }}"
+        f"QLabel {{ background:transparent; border:none; outline:none; }}")
     lay = QHBoxLayout(card)
     lay.setContentsMargins(16, 14, 16, 14)
     lay.setSpacing(14)
@@ -182,7 +183,7 @@ def _tx_card(tx, running_bal=None):
     elif desc: main_text = desc
     else: main_text = "<i>No description</i>"
     main_lbl = QLabel(main_text)
-    main_lbl.setStyleSheet("color:#111827;font-size:13px;")
+    main_lbl.setStyleSheet(f"color:{C['text']};font-size:13px;")
     main_lbl.setWordWrap(True)
     text_col.addWidget(main_lbl)
 
@@ -258,12 +259,12 @@ def _tx_card(tx, running_bal=None):
 
 def _day_header(day_str):
     lbl = QLabel(f"  {day_str}")
-    lbl.setStyleSheet("color:#374151;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px 0;background:transparent;border:none;")
+    lbl.setStyleSheet(f"color:{C['text2']};font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:8px 0 4px 0;background:transparent;border:none;")
     return lbl
 
 def _month_header(month_str):
     lbl = QLabel(month_str)
-    lbl.setStyleSheet("color:#111827;font-size:18px;font-weight:800;padding:12px 0 8px 0;background:transparent;border:none;")
+    lbl.setStyleSheet(f"color:{C['text']};font-size:18px;font-weight:800;padding:12px 0 8px 0;background:transparent;border:none;")
     return lbl
 
 
@@ -274,14 +275,14 @@ def _month_header(month_str):
 def _stat_card(label, value, icon, accent):
     card = QFrame()
     card.setStyleSheet(f"""
-        QFrame {{ background:#fff; border:1px solid #E5E7EB; border-radius:14px; }}
+        QFrame {{ background:{C['surface']}; border:1px solid {C['border2']}; border-radius:14px; }}
         QLabel {{ background:transparent; border:none; }}
     """)
     lay = QVBoxLayout(card); lay.setContentsMargins(18,16,18,16); lay.setSpacing(8)
     il = QLabel(icon); il.setFixedSize(40,40); il.setAlignment(Qt.AlignCenter)
     il.setStyleSheet(f"background:{accent}12;border-radius:20px;font-size:18px;")
     lay.addWidget(il)
-    vl = QLabel(str(value)); vl.setStyleSheet(f"color:#111827;font-size:22px;font-weight:800;")
+    vl = QLabel(str(value)); vl.setStyleSheet(f"color:{C['text']};font-size:22px;font-weight:800;")
     lay.addWidget(vl)
     ll = QLabel(label); ll.setStyleSheet(f"color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;")
     lay.addWidget(ll)
@@ -302,7 +303,7 @@ def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     net_color = '#10B981' if net >= 0 else '#EF4444'
     net_sign = '' if net >= 0 else '- '
     card.setStyleSheet(f"""
-        QFrame {{ background:#ffffff;
+        QFrame {{ background:{C['surface']};
                   border:1px solid #E5E7EB; border-radius:12px; border-top:3px solid {type_color}; }}
         QLabel {{ background:transparent; border:none; }}
     """)
@@ -312,7 +313,7 @@ def _acct_card(name, acct_type, credit, debit, net, start_bal, end_bal):
     top = QHBoxLayout()
     il = QLabel(icon); il.setStyleSheet("font-size:18px;")
     top.addWidget(il)
-    nl = QLabel(f"<b>{name}</b>"); nl.setStyleSheet("color:#111827;font-size:13px;")
+    nl = QLabel(f"<b>{name}</b>"); nl.setStyleSheet("color:{C['text']};font-size:13px;")
     top.addWidget(nl); top.addStretch()
     badge = QLabel(acct_type.replace("_", " ").title())
     badge.setStyleSheet(f"color:{type_color};font-size:9px;font-weight:700;background:{type_color}15;border-radius:6px;padding:2px 8px;")
@@ -355,11 +356,11 @@ CHART_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Segoe UI',system-ui,sans-serif; background:#F9FAFB; padding:20px; }
+body { font-family:'Segoe UI',system-ui,sans-serif; background:__PAGE_BG__; padding:20px; }
 .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
-.card { background:#fff; border-radius:16px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.06); border:1px solid #E5E7EB; }
+.card { background:__CARD_BG__; border-radius:16px; padding:24px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
-.title { font-size:14px; font-weight:700; color:#374151; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.title { font-size:14px; font-weight:700; color:__TITLE__; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 canvas { max-height:260px; }
 </style>
@@ -425,7 +426,7 @@ new Chart(document.getElementById('c3'), {
     options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { position: 'top', labels: { usePointStyle: true } } },
-        scales: { y: { grid: { color: '#F3F4F6' } }, x: { grid: { display: false } } }
+        scales: { y: { grid: { color: '__GRID__' } }, x: { grid: { display: false } } }
     }
 });
 
@@ -478,7 +479,7 @@ class ChartView(QWidget):
 
     def render(self, cat_l, cat_d, acct_l, acct_d, trend_l, trend_cr, trend_db, need, want, nw_none=0):
         if not self.view: return
-        html = CHART_TEMPLATE
+        html = apply_chart_theme(CHART_TEMPLATE)
         html = html.replace("__CAT_L__", json.dumps(cat_l))
         html = html.replace("__CAT_D__", json.dumps(cat_d))
         html = html.replace("__ACCT_L__", json.dumps(acct_l))
@@ -509,7 +510,7 @@ class DatabaseTab(QWidget):
 
     def _build(self):
         root = QVBoxLayout(self); root.setContentsMargins(28,16,28,16); root.setSpacing(14)
-        h = QLabel("View Database"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;")
+        h = QLabel("View Database"); h.setStyleSheet(f"font-size:24px;font-weight:800;color:{C['text']};")
         root.addWidget(h)
 
         main_btns_row = QHBoxLayout(); main_btns_row.setSpacing(8)
@@ -678,6 +679,17 @@ class DatabaseTab(QWidget):
         self._comp_search_active = False
         self._load_complete()
 
+    def _goto_tab(self, key):
+        """Ask the main window to switch tabs (used by empty-state actions)."""
+        node = self.parent()
+        while node is not None and not hasattr(node, "_nav"):
+            node = node.parent()
+        if node is not None:
+            try:
+                node._nav(key)
+            except Exception:
+                pass
+
     def _load_complete(self):
         # Reset pagination state
         while self.comp_lay.count() > 1:
@@ -710,9 +722,12 @@ class DatabaseTab(QWidget):
         self._comp_has_more = len(txns) == page_size
         self._comp_offset += len(txns)
         if not txns and self._comp_offset == 0:
-            lbl = QLabel("No transactions yet.")
-            lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;")
-            lbl.setAlignment(Qt.AlignCenter)
+            lbl = EmptyState(
+                icon="\U0001f4dd",
+                title="No transactions yet",
+                hint="Record your first income or expense to see it here.",
+                action_text="+ Add a transaction",
+                on_action=lambda: self._goto_tab("transaction_entry"))
             self.comp_lay.insertWidget(self.comp_lay.count() - 1, lbl)
             self._comp_loading = False
             return
@@ -761,7 +776,7 @@ class DatabaseTab(QWidget):
         # ── Appealing month selector ──
         sel_frame = QFrame()
         sel_frame.setStyleSheet(f"""
-            QFrame {{ background:#fff; border:1px solid #E5E7EB; border-radius:14px; padding:14px 20px; }}
+            QFrame {{ background:{C['surface']}; border:1px solid {C['border2']}; border-radius:14px; padding:14px 20px; }}
             QLabel {{ background:transparent; border:none; color:{C['text2']}; font-weight:600; }}
             QComboBox {{ min-width:120px; }}
             QSpinBox {{ min-width:80px; }}
@@ -851,7 +866,7 @@ class DatabaseTab(QWidget):
 
         # Account Summary label
         self.ms_acct_label = QLabel("Account Summary")
-        self.ms_acct_label.setStyleSheet(f"font-size:16px;font-weight:700;color:#111827;")
+        self.ms_acct_label.setStyleSheet(f"font-size:16px;font-weight:700;color:{C['text']};")
         lay.addWidget(self.ms_acct_label)
 
         # Scrollable account summary area
@@ -1101,7 +1116,7 @@ class DatabaseTab(QWidget):
 
         # ── Single-line filter bar ──
         bar = QFrame()
-        bar.setStyleSheet("QFrame{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:8px 12px;}")
+        bar.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}")
         row = QHBoxLayout(bar)
         row.setContentsMargins(4, 4, 4, 4)
         row.setSpacing(6)

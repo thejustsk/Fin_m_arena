@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QStackedWidget, QMessageBox,
     QDialog, QFormLayout, QScrollArea, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtCore import Qt, QDate, QEventLoop
 from PyQt5.QtGui import QCursor
 
 from ui.theme import C
@@ -24,6 +24,7 @@ from ui.sidebar import fmt_money
 from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_header, _switch_tabs, FILTER_FIELDS, FlowLayout
 from services.nw_constants import (split_need_want, NW_FROM_LABEL,
                                    NW_NONE, NW_NEED, NW_WANT)
+from ui.widgets.empty_state import EmptyState
 
 
 def _nw_tint(hex_color, strong):
@@ -644,6 +645,16 @@ class _AuditSubTab(QWidget):
         """Apply all active filter chips to reload records."""
         self.load_records()
 
+    def _materialise(self, item_type, payload):
+        """Turn a queued render item into a widget.
+
+        Day headers are already widgets; rows are raw dicts and only become
+        widgets when they are about to be shown.
+        """
+        if item_type == "row":
+            return self._build_row(payload)
+        return payload
+
     def _on_audit_scroll(self, value):
         sb = self._audit_scroll.verticalScrollBar()
         if sb.maximum() <= 0:
@@ -676,7 +687,33 @@ class _AuditSubTab(QWidget):
             except (TypeError, RuntimeError):
                 pass
 
+    def _show_skeletons(self, count=4):
+        """Drop placeholder cards into the list area and paint them now.
+
+        Kept deliberately small: this runs on the UI thread before the real
+        query, so every millisecond here is added latency, not hidden by it.
+        """
+        try:
+            from ui.widgets.skeleton import SkeletonList
+            from PyQt5.QtWidgets import QApplication
+            lay = self._cards_lay
+            while lay.count():
+                it = lay.takeAt(0)
+                w = it.widget()
+                if w:
+                    w.setParent(None)
+                    w.deleteLater()
+            lay.addWidget(SkeletonList(count))
+            # Paint only; do not pump the whole event queue.
+            QApplication.processEvents(QEventLoop.ExcludeUserInputEvents |
+                                       QEventLoop.ExcludeSocketNotifiers)
+        except Exception:
+            pass
+
     def load_records(self):
+        # Show placeholders immediately so the list never looks frozen while
+        # a wide date range is queried and re-rendered.
+        self._show_skeletons()
         d_from = self.f_from.date().toString("yyyy-MM-dd")
         d_to = self.f_to.date().toString("yyyy-MM-dd")
         rows = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=5000)
@@ -719,6 +756,68 @@ class _AuditSubTab(QWidget):
         self.f_stats.setText(f"{n} txns | Cr:{fmt_money(cr)} | Db:{fmt_money(db)} | Net:{fmt_money(cr - db)}")
         self._render_table()
 
+    def _build_row(self, r):
+        """Create one Audit row. Called lazily so a wide filter does not
+        build hundreds of widgets before the first paint."""
+        tx_id = r["id"]
+        # Keep original transaction_kind so _tx_card shows proper badge
+        card = _tx_card(r)
+
+        row_widget = QWidget()
+        row_widget.setStyleSheet("background:transparent;border:none;")
+        row_lay = QHBoxLayout(row_widget)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(8)
+
+        # Checkbox with "Select" text — stretches to the card's height
+        chk = QPushButton("  Select  ")
+        chk.setMinimumWidth(82)
+        chk.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
+        chk.setFocusPolicy(Qt.NoFocus)
+        chk.setCursor(QCursor(Qt.PointingHandCursor))
+        chk.setStyleSheet(
+            f"QPushButton{{background:{C['surface']};color:{C['text3']};"
+            f"border:2px solid {C['border']};border-radius:8px;font-size:12px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+        self._check_states[tx_id] = False
+        def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
+            self._check_states[_tid] = not self._check_states[_tid]
+            is_on = self._check_states[_tid]
+            _btn.setText("  \u2713 Done  " if is_on else "  Select  ")
+            _btn.setStyleSheet(
+                f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
+                f"color:{'white' if is_on else C['text3']};"
+                f"border:2px solid {C['accent'] if is_on else C['border']};"
+                f"border-radius:8px;font-size:12px;font-weight:700;}}"
+                f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+            self._update_bulk_count()
+        chk.clicked.connect(_toggle_chk)
+        row_lay.addWidget(chk)
+
+        # ── Need / Want indicator ──
+        # Full-height block so the tag is readable at a glance instead
+        # of being buried in the edit dialog. Click to cycle the value.
+        nw_box = self._nw_indicator(tx_id, r.get("neednwant"))
+        row_lay.addWidget(nw_box)
+
+        # Card
+        row_lay.addWidget(card, 1)
+
+        # Edit button with "Edit" text — matches the card's height
+        edit_btn = QPushButton("\u270f\ufe0f Edit")
+        edit_btn.setMinimumWidth(72)
+        edit_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
+        edit_btn.setFocusPolicy(Qt.NoFocus)
+        edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        edit_btn.setStyleSheet(
+            f"QPushButton{{background:{C['surface']};color:{C['accent']};"
+            f"border:1.5px solid {C['border']};border-radius:8px;font-size:12px;font-weight:600;}}"
+            f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
+        edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
+        row_lay.addWidget(edit_btn)
+
+        return row_widget
+
     def _render_table(self):
         """Render transactions with date grouping and lazy scroll."""
         from collections import OrderedDict
@@ -739,9 +838,12 @@ class _AuditSubTab(QWidget):
         self._all_render_items = []  # list of (type, data) tuples
 
         if not self._rows:
-            empty = QLabel("No transactions found for the selected filters.")
-            empty.setStyleSheet(f"color:{C['text3']};padding:24px;font-size:13px;")
-            empty.setAlignment(Qt.AlignCenter)
+            empty = EmptyState(
+                icon="\U0001f50d",
+                title="No transactions match these filters",
+                hint="Try widening the date range, or clear a filter to see more.",
+                action_text="Clear all filters",
+                on_action=self._clear_audit_filters)
             self._cards_lay.addWidget(empty)
             self._update_bulk_count()
             return
@@ -762,70 +864,14 @@ class _AuditSubTab(QWidget):
 
             for r in day_txns:
                 tx_id = r["id"]
-                # Keep original transaction_kind so _tx_card shows proper badge
-                card = _tx_card(r)
-
-                row_widget = QWidget()
-                row_widget.setStyleSheet("background:transparent;border:none;")
-                row_lay = QHBoxLayout(row_widget)
-                row_lay.setContentsMargins(0, 0, 0, 0)
-                row_lay.setSpacing(8)
-
-                # Checkbox with "Select" text — stretches to the card's height
-                chk = QPushButton("  Select  ")
-                chk.setMinimumWidth(82)
-                chk.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
-                chk.setFocusPolicy(Qt.NoFocus)
-                chk.setCursor(QCursor(Qt.PointingHandCursor))
-                chk.setStyleSheet(
-                    f"QPushButton{{background:{C['surface']};color:{C['text3']};"
-                    f"border:2px solid {C['border']};border-radius:8px;font-size:12px;font-weight:700;}}"
-                    f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
-                self._check_states[tx_id] = False
-                def _toggle_chk(_checked=False, _tid=tx_id, _btn=chk):
-                    self._check_states[_tid] = not self._check_states[_tid]
-                    is_on = self._check_states[_tid]
-                    _btn.setText("  \u2713 Done  " if is_on else "  Select  ")
-                    _btn.setStyleSheet(
-                        f"QPushButton{{background:{C['accent'] if is_on else C['surface']};"
-                        f"color:{'white' if is_on else C['text3']};"
-                        f"border:2px solid {C['accent'] if is_on else C['border']};"
-                        f"border-radius:8px;font-size:12px;font-weight:700;}}"
-                        f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
-                    self._update_bulk_count()
-                chk.clicked.connect(_toggle_chk)
-                row_lay.addWidget(chk)
-
-                # ── Need / Want indicator ──
-                # Full-height block so the tag is readable at a glance instead
-                # of being buried in the edit dialog. Click to cycle the value.
-                nw_box = self._nw_indicator(tx_id, r.get("neednwant"))
-                row_lay.addWidget(nw_box)
-
-                # Card
-                row_lay.addWidget(card, 1)
-
-                # Edit button with "Edit" text — matches the card's height
-                edit_btn = QPushButton("\u270f\ufe0f Edit")
-                edit_btn.setMinimumWidth(72)
-                edit_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
-                edit_btn.setFocusPolicy(Qt.NoFocus)
-                edit_btn.setCursor(QCursor(Qt.PointingHandCursor))
-                edit_btn.setStyleSheet(
-                    f"QPushButton{{background:{C['surface']};color:{C['accent']};"
-                    f"border:1.5px solid {C['border']};border-radius:8px;font-size:12px;font-weight:600;}}"
-                    f"QPushButton:hover{{background:{C['accent']};color:white;border-color:{C['accent']};}}")
-                edit_btn.clicked.connect(lambda _, tid=tx_id: self._open_edit(tid))
-                row_lay.addWidget(edit_btn)
-
-                self._all_render_items.append(("card", row_widget))
+                self._all_render_items.append(("row", r))
 
         # Lazy render: first batch
         page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
         first_batch = self._all_render_items[:page_size]
         self._pending_render_items = self._all_render_items[page_size:]
-        for item_type, widget in first_batch:
-            self._cards_lay.addWidget(widget)
+        for item_type, payload in first_batch:
+            self._cards_lay.addWidget(self._materialise(item_type, payload))
 
         # Connect scroll for lazy loading
         if hasattr(self, '_audit_scroll') and self._pending_render_items:
@@ -858,8 +904,8 @@ class _AuditSubTab(QWidget):
         page_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
         batch = self._pending_render_items[:page_size]
         self._pending_render_items = self._pending_render_items[page_size:]
-        for item_type, widget in batch:
-            self._cards_lay.addWidget(widget)
+        for item_type, payload in batch:
+            self._cards_lay.addWidget(self._materialise(item_type, payload))
         if not self._pending_render_items:
             try:
                 self._audit_scroll.verticalScrollBar().valueChanged.disconnect(self._on_audit_scroll)
@@ -910,7 +956,7 @@ class _AuditSubTab(QWidget):
         box.setToolTip(f"Need/Want: {label.title()}\nClick to set {nxt_label.title()}")
         # White fill so the row stays clean; colour lives in the text + border.
         box.setStyleSheet(
-            f"QLabel{{background:#FFFFFF;color:{color};"
+            f"QLabel{{background:{C['surface']};color:{color};"
             f"border:1.5px solid {color};border-radius:8px;"
             f"font-size:10px;font-weight:800;letter-spacing:0.5px;}}"
             f"QLabel:hover{{background:{_nw_tint(color, True)};}}")

@@ -344,6 +344,7 @@ def run_migrations(db):
         c.execute("INSERT OR IGNORE INTO preferences VALUES('scroll_trigger_px', '400')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('user_email', '')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('user_name', '')")
+        c.execute("INSERT OR IGNORE INTO preferences VALUES('theme', 'light')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_page_size', '150')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('wealth_scroll_trigger', '400')")
         c.execute("INSERT OR IGNORE INTO preferences VALUES('notes_page_size', '50')")

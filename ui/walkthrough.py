@@ -578,7 +578,7 @@ def _build_db_complete():
 
 def _build_db_monthly():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
-    sel = QFrame(); sel.setStyleSheet(f"QFrame{{background:#fff;border:1px solid #E5E7EB;border-radius:14px;padding:14px 20px;}}QLabel{{background:transparent;border:none;}}")
+    sel = QFrame(); sel.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:14px;padding:14px 20px;}}QLabel{{background:transparent;border:none;}}")
     sl = QHBoxLayout(sel); sl.setSpacing(14)
     sl.addWidget(_make_label("📅 Month:", 12, C['text2'], True))
     sl.addWidget(_make_combo(["January","February","March","April","May","June","July","August","September","October","November","December"], 6))
@@ -608,7 +608,7 @@ def _build_db_monthly():
 
 def _build_db_filtered():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
-    bar = QFrame(); bar.setStyleSheet(f"QFrame{{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:8px 12px;}}")
+    bar = QFrame(); bar.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;padding:8px 12px;}}")
     br = QHBoxLayout(bar); br.setContentsMargins(4,4,4,4); br.setSpacing(6)
     br.addWidget(_make_label("From", 11, C['text3'])); br.addWidget(_make_date())
     br.addWidget(_make_label("To", 11, C['text3'])); br.addWidget(_make_date())

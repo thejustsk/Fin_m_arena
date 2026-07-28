@@ -161,7 +161,7 @@ class DCCarouselView(QGraphicsView):
     def __init__(self, cards_data=None, parent=None):
         super().__init__(parent)
         self.setRenderHint(QPainter.Antialiasing)
-        self.setStyleSheet("background-color:#111827;border:none;border-radius:12px;")
+        self.setStyleSheet(f"background-color:{C['text']};border:none;border-radius:12px;")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFocusPolicy(Qt.StrongFocus); self.setMouseTracking(True)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -304,7 +304,7 @@ class DebitCardAddDialog(QDialog):
         lay = QHBoxLayout(self); lay.setContentsMargins(24,24,24,24); lay.setSpacing(20)
         fc = QVBoxLayout(); fc.setSpacing(8)
         hdr = QLabel("\u270f\ufe0f  Edit Debit Card" if self._is_edit else "\U0001f4b3  Add Debit Card")
-        hdr.setStyleSheet("font-size:18px;font-weight:800;color:#111827;"); fc.addWidget(hdr)
+        hdr.setStyleSheet(f"font-size:18px;font-weight:800;color:{C['text']};"); fc.addWidget(hdr)
         form = QFormLayout(); form.setSpacing(8); form.setLabelAlignment(Qt.AlignRight)
 
         self.card_name = QLineEdit(); self.card_name.setPlaceholderText("e.g. SBI Debit Card"); self.card_name.textChanged.connect(self._upd); force_upper(self.card_name); form.addRow("Card Name *", self.card_name)
@@ -465,7 +465,7 @@ class DebitCardsTab(QWidget):
     def _build(self):
         root = QVBoxLayout(self); root.setContentsMargins(28,16,28,16); root.setSpacing(10)
         hr = QHBoxLayout(); hr.setSpacing(12)
-        h = QLabel("\U0001f3e7  Debit Cards"); h.setStyleSheet("font-size:24px;font-weight:800;color:#111827;"); hr.addWidget(h); hr.addStretch()
+        h = QLabel("\U0001f3e7  Debit Cards"); h.setStyleSheet(f"font-size:24px;font-weight:800;color:{C['text']};"); hr.addWidget(h); hr.addStretch()
         ab = QPushButton("\uff0b  Add Card"); ab.setObjectName("primary"); ab.setMinimumHeight(38)
         ab.setCursor(QCursor(Qt.PointingHandCursor)); ab.clicked.connect(self._add_card); hr.addWidget(ab); root.addLayout(hr)
 

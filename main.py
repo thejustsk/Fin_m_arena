@@ -57,8 +57,10 @@ def main():
         "email": EmailService(db),
     }
 
-    from ui.theme import QSS
-    app.setStyleSheet(QSS)
+    # Apply the saved theme *before* building widgets — inline styles bake
+    # colours at construction time.
+    from ui.theme import apply_theme, load_theme_pref
+    apply_theme(load_theme_pref(db), app)
 
     # ── Check if auto-backup should run on launch (daily/weekly) ──
     def _check_auto_backup():

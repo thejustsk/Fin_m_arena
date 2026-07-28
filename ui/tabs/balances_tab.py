@@ -683,7 +683,7 @@ class BalancesTab(QWidget):
 
     @staticmethod
     def _bold_label(text):
-        return QLabel(f"<b style='font-size:13px;color:#111827;'>{text}</b>")
+        return QLabel(f"<b style='font-size:13px;color:{C['text']};'>{text}</b>")
 
     @staticmethod
     def _balance_label(amount):

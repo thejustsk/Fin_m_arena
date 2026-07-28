@@ -5351,6 +5351,14 @@ class WealthTab(QWidget):
             return
         _switch_tabs(self._nav_btns, i)
         self.stack.setCurrentIndex(i)
+        # Catch up if this page was skipped by a previous refresh().
+        stale = getattr(self, "_stale_pages", None)
+        if stale and i in stale:
+            stale.discard(i)
+            try:
+                self._pages[i].refresh()
+            except Exception:
+                pass
         # Mark MF page as user-visited (enables loading dialog)
         if hasattr(self._pages[i], '_user_visited'):
             self._pages[i]._user_visited = True
@@ -5362,5 +5370,15 @@ class WealthTab(QWidget):
             self.dashboard_page.refresh()
 
     def refresh(self):
-        for p in self._pages:
-            p.refresh()
+        """Refresh the visible sub-page; mark the rest to catch up on demand.
+
+        Rebuilding all five pages cost ~370ms per call even though only one
+        is on screen. _goto() already refreshes a page when you open it, so
+        the deferred ones stay correct.
+        """
+        idx = self.stack.currentIndex()
+        self._stale_pages = set(range(len(self._pages))) - {idx}
+        try:
+            self._pages[idx].refresh()
+        except Exception:
+            pass

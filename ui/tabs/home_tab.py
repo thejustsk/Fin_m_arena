@@ -5,7 +5,8 @@ from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QUrl
 from PyQt5.QtGui import QCursor
 from datetime import datetime, date, timedelta
 from collections import OrderedDict
-from ui.theme import C
+from ui.theme import C, apply_chart_theme
+from ui.widgets.count_up import animate_value
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _tx_card, _day_header, ChartView
 from services.nw_constants import split_need_want
@@ -21,9 +22,9 @@ HOME_CHART_TEMPLATE = """<!DOCTYPE html>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Segoe UI',system-ui,sans-serif; background:transparent; padding:12px; }
 .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.card { background:#fff; border-radius:12px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,0.06); border:1px solid #E5E7EB; }
+.card { background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
-.title { font-size:12px; font-weight:700; color:#374151; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.title { font-size:12px; font-weight:700; color:__TITLE__; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 canvas { max-height:200px; }
 </style>
@@ -85,7 +86,7 @@ new Chart(document.getElementById('c2'), {
     options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
-        scales: { y: { grid: { color: '#F3F4F6' } }, x: { grid: { display: false } } }
+        scales: { y: { grid: { color: '__GRID__' } }, x: { grid: { display: false } } }
     }
 });
 
@@ -136,7 +137,7 @@ new Chart(acctCanvas, {
         responsive: true, maintainAspectRatio: false, indexAxis: 'y',
         plugins: { legend: { position: 'top', labels: { usePointStyle: true, font: { size: 11 } } } },
         scales: {
-            x: { grid: { color: '#F3F4F6' }, ticks: { font: { size: 10 } } },
+            x: { grid: { color: '__GRID__' }, ticks: { font: { size: 10 } } },
             y: { grid: { display: false }, ticks: { font: { size: 10 } } }
         }
     }
@@ -173,7 +174,11 @@ class KPICard(QFrame):
         self._update_style()
 
     def set_data(self, amount, count):
-        self._amt.setText(str(amount))
+        """Set the KPI value. Numeric amounts count up; strings are shown as-is."""
+        if isinstance(amount, (int, float)):
+            animate_value(self._amt, amount, fmt_money)
+        else:
+            self._amt.setText(str(amount))
         suffix = "txn" if count == 1 else "txns"
         self._cnt.setText(f"{count} {suffix}")
         self._update_style()
@@ -369,7 +374,7 @@ class HomeTab(QWidget):
             d_from, d_to = self._date_range(p)
             ptxns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
             p_debit = sum(t["amount"] for t in ptxns if t["tx_type"] == "DEBIT")
-            card.set_data(fmt_money(p_debit), len(ptxns))
+            card.set_data(p_debit, len(ptxns))
 
         # Get selected period's transactions
         d_from, d_to = self._date_range(self._period)
@@ -426,7 +431,7 @@ class HomeTab(QWidget):
                 acct_db[an] = acct_db.get(an, 0) + t["amount"]
         all_accts = sorted(set(list(acct_cr.keys()) + list(acct_db.keys())))
 
-        html = HOME_CHART_TEMPLATE
+        html = apply_chart_theme(HOME_CHART_TEMPLATE)
         html = html.replace("__CAT_L__", json.dumps(list(cats.keys())))
         html = html.replace("__CAT_D__", json.dumps([round(v, 2) for v in cats.values()]))
         # Format trend labels based on period
