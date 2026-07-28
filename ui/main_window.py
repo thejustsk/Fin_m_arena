@@ -50,9 +50,9 @@ class MainWindow(QMainWindow):
         self._tabs = {}
         self._tab_map = {
             "home": 0, "transaction_entry": 1, "database": 2,
-            "audit": 3, "insights": 4, "wealth": 5, "notes": 6, "cards": 7,
-            "debit_cards": 8, "balances": 9, "settings": 10, "gmail": 11,
-            "split": 12
+            "audit": 3, "wealth": 4, "notes": 5, "cards": 6,
+            "debit_cards": 7, "balances": 8, "settings": 9, "gmail": 10,
+            "split": 11
         }
 
         # Import and create each tab
@@ -60,7 +60,6 @@ class MainWindow(QMainWindow):
         from ui.tabs.transaction_entry_tab import TransactionEntryTab
         from ui.tabs.database_tab import DatabaseTab
         from ui.tabs.audit_tab import AuditTab
-        from ui.tabs.insights_tab import InsightsTab
         from ui.tabs.wealth_tab import WealthTab
         from ui.tabs.notes_tab import NotesTab
         from ui.tabs.cards_tab import CardsTab
@@ -75,7 +74,6 @@ class MainWindow(QMainWindow):
             ("transaction_entry", TransactionEntryTab),
             ("database", DatabaseTab),
             ("audit", AuditTab),
-            ("insights", InsightsTab),
             ("wealth", WealthTab),
             ("notes", NotesTab),
             ("cards", CardsTab),
