@@ -627,46 +627,31 @@ class HomeTab(QWidget):
 
         rate_color = C['green'] if rate >= 0 else C['red']
 
-        # Title + rate
+        # Compact horizontal layout: percentage stays on the left, while the
+        # title, progress bar and money figures occupy the right side.
+        row = QHBoxLayout(); row.setSpacing(14)
+        rate_lbl = QLabel(f"{rate:.0f}%")
+        rate_lbl.setFixedWidth(74)
+        rate_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        rate_lbl.setStyleSheet(f"color:{rate_color};font-size:28px;font-weight:900;")
+        row.addWidget(rate_lbl)
+        details = QVBoxLayout(); details.setSpacing(5)
         title = QLabel("Savings Rate")
         title.setStyleSheet(f"font-size:12px;font-weight:700;color:{C['text']};")
-        self.savings_inner.addWidget(title)
-
-        rate_lbl = QLabel(f"{rate:.0f}%")
-        rate_lbl.setStyleSheet(f"color:{rate_color};font-size:28px;font-weight:900;")
-        self.savings_inner.addWidget(rate_lbl)
-
-        # Bar — uses stretch factors for automatic sizing
-        bar_bg = QFrame()
-        bar_bg.setFixedHeight(8)
+        details.addWidget(title)
+        bar_bg = QFrame(); bar_bg.setFixedHeight(7)
         bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:4px;")
-        bar_lay = QHBoxLayout(bar_bg)
-        bar_lay.setContentsMargins(0, 0, 0, 0)
-        bar_lay.setSpacing(0)
-        bar_fill = QFrame()
-        bar_fill.setStyleSheet(f"background:{rate_color};border-radius:4px;")
-        stretch_fill = max(1, int(abs(rate)))
-        stretch_rest = max(1, 100 - int(abs(rate)))
-        bar_lay.addWidget(bar_fill, stretch_fill)
-        bar_lay.addStretch(stretch_rest)
-        self.savings_inner.addWidget(bar_bg)
-
-        # Numbers row — created as widgets, not layout (so _clear_layout removes them)
-        nums = QHBoxLayout()
-        for text, color in [
-            (f"↑ Income  {fmt_money(income)}", C['green']),
-            (f"= Savings  {fmt_money(savings)}", rate_color),
-            (f"↓ Expense  {fmt_money(expense)}", C['red']),
-        ]:
-            lbl = QLabel(text)
-            lbl.setStyleSheet(f"color:{color};font-size:11px;font-weight:600;")
-            nums.addWidget(lbl)
-            nums.addStretch()
-        # Wrap in a QWidget so _clear_layout can delete it
-        nums_widget = QWidget()
-        nums_widget.setStyleSheet("background:transparent;border:none;")
-        nums_widget.setLayout(nums)
-        self.savings_inner.addWidget(nums_widget)
+        bar_lay = QHBoxLayout(bar_bg); bar_lay.setContentsMargins(0,0,0,0); bar_lay.setSpacing(0)
+        bar_fill = QFrame(); bar_fill.setStyleSheet(f"background:{rate_color};border-radius:4px;")
+        stretch_fill=max(1,int(abs(rate))); stretch_rest=max(1,100-int(abs(rate)))
+        bar_lay.addWidget(bar_fill,stretch_fill); bar_lay.addStretch(stretch_rest)
+        details.addWidget(bar_bg)
+        nums=QHBoxLayout(); nums.setSpacing(10)
+        for text,color in [(f"↑ Income {fmt_money(income)}",C['green']),(f"= Savings {fmt_money(savings)}",rate_color),(f"↓ Expense {fmt_money(expense)}",C['red'])]:
+            lbl=QLabel(text); lbl.setStyleSheet(f"color:{color};font-size:10px;font-weight:600;"); nums.addWidget(lbl)
+        nums.addStretch(); details.addLayout(nums)
+        row.addLayout(details,1)
+        self.savings_inner.addLayout(row)
 
     @staticmethod
     def _clear_layout(layout):
