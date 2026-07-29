@@ -260,6 +260,7 @@ class NotesTab(QWidget):
         self._composer_tags = []
         self._fv = []
         self._all_filtered_ids = []
+        self._active_note_tag = None
         self._loaded = False
         self._build()
         self.refresh()
@@ -324,6 +325,23 @@ class NotesTab(QWidget):
         self.search_box.setStyleSheet(_input_css())
         self.search_box.textChanged.connect(self._load_notes)
         lay.addWidget(self.search_box)
+
+        # Notes KPI + one-click tag filters. Rebuilt from real note data so
+        # new/deleted tags and notes are always reflected without setup work.
+        self.notes_kpi = QFrame()
+        self.notes_kpi.setStyleSheet(
+            f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}"
+            "QLabel{background:transparent;border:none;}")
+        kpi_lay = QVBoxLayout(self.notes_kpi)
+        kpi_lay.setContentsMargins(14, 10, 14, 10); kpi_lay.setSpacing(8)
+        self.notes_count_lbl = QLabel("0 Notes")
+        self.notes_count_lbl.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
+        kpi_lay.addWidget(self.notes_count_lbl)
+        self.notes_tag_bar = QWidget()
+        self.notes_tag_flow = FlowLayout(self.notes_tag_bar, hSpacing=6, vSpacing=5)
+        kpi_lay.addWidget(self.notes_tag_bar)
+        lay.addWidget(self.notes_kpi)
+
         self._notes_scroll = QScrollArea(); self._notes_scroll.setWidgetResizable(True); self._notes_scroll.setFrameShape(QFrame.NoFrame)
         self._notes_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         inner = QWidget(); inner.setStyleSheet("background:transparent;")
@@ -347,13 +365,47 @@ class NotesTab(QWidget):
         except Exception: pass
         return 200
 
+    def _rebuild_notes_kpi(self, all_notes, shown_count):
+        while self.notes_tag_flow.count():
+            item = self.notes_tag_flow.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        suffix = "note" if len(all_notes) == 1 else "notes"
+        filtered = f" · Showing {shown_count}" if self._active_note_tag else ""
+        self.notes_count_lbl.setText(f"{len(all_notes)} {suffix}{filtered}")
+        tags = sorted({tag.strip() for note in all_notes for tag in (note.get('tags') or '').split(',') if tag.strip()}, key=str.lower)
+        all_btn = QPushButton("All Notes")
+        all_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        all_btn.setStyleSheet(_btn_primary() if self._active_note_tag is None else _btn_ghost())
+        all_btn.clicked.connect(lambda: self._set_note_tag(None))
+        self.notes_tag_flow.addWidget(all_btn)
+        for tag in tags:
+            active = tag == self._active_note_tag
+            color = _tag_color(tag)
+            btn = QPushButton(f"#{tag}")
+            btn.setCursor(QCursor(Qt.PointingHandCursor))
+            btn.setStyleSheet(
+                f"QPushButton{{background:{color if active else _hex_to_rgba(color, 0.12)};"
+                f"color:{'white' if active else color};border:1px solid {color};border-radius:12px;"
+                "padding:3px 10px;font-size:11px;font-weight:700;}}")
+            btn.clicked.connect(lambda _, t=tag: self._set_note_tag(t))
+            self.notes_tag_flow.addWidget(btn)
+
+    def _set_note_tag(self, tag):
+        self._active_note_tag = tag
+        self._load_notes()
+
     def _load_notes(self):
         while self.notes_lay.count():
             item = self.notes_lay.takeAt(0)
             w = item.widget()
             if w:
                 w.setParent(None)
+        all_notes = self.nr.list_active()
         notes = self.nr.list_active(self.search_box.text().strip() or None)
+        if self._active_note_tag:
+            wanted = self._active_note_tag.lower()
+            notes = [note for note in notes if wanted in {t.strip().lower() for t in (note.get('tags') or '').split(',') if t.strip()}]
+        self._rebuild_notes_kpi(all_notes, len(notes))
         if not notes:
             empty = EmptyState(
                 icon="\U0001f4cb",
