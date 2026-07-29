@@ -20,8 +20,8 @@ HOME_CHART_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-html, body { min-height:100%; background:__PAGE_BG__; }
-body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow-x:hidden; }
+html, body { height:100%; overflow:hidden; background:__PAGE_BG__; }
+body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow:hidden; }
 .grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; width:100%; }
 .card { min-width:0; background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
@@ -36,6 +36,10 @@ canvas { width:100% !important; }
 .income-dot,.expense-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
 .income-dot { background:#10B981; } .expense-dot { background:#EF4444; }
 .account-rows { max-height:420px; overflow-y:auto; overflow-x:hidden; padding-right:6px; }
+.account-rows::-webkit-scrollbar { width:8px; }
+.account-rows::-webkit-scrollbar-track { background:__SCROLL_TRACK__; border-radius:4px; }
+.account-rows::-webkit-scrollbar-thumb { background:__SCROLL_THUMB__; border-radius:4px; }
+.account-rows::-webkit-scrollbar-thumb:hover { background:__TICK__; }
 .account-row { display:grid; grid-template-columns:minmax(105px,28%) 1fr; gap:10px; align-items:center; min-height:52px; border-bottom:1px solid __GRID__; }
 .account-name { color:__TICK__; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .account-bars { display:flex; flex-direction:column; gap:5px; }
@@ -282,14 +286,13 @@ class HomeTab(QWidget):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
-        top_tx_title = QLabel("💸  Top 6 Spends")
+        top_tx_title = QLabel("💸  Top Spends")
         top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(top_tx_title)
-        top_scroll = QScrollArea(); top_scroll.setWidgetResizable(True); top_scroll.setFrameShape(QFrame.NoFrame)
-        top_scroll.setMaximumHeight(250); top_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         top_inner = QWidget(); top_inner.setStyleSheet("background:transparent;")
         self.top_lay = QVBoxLayout(top_inner); self.top_lay.setSpacing(3); self.top_lay.setContentsMargins(0,0,0,0)
-        top_scroll.setWidget(top_inner); right_col.addWidget(top_scroll)
+        # No independent scrollbar: this block uses its natural available area.
+        right_col.addWidget(top_inner)
 
         rem_title = QLabel("🔔  Reminders")
         rem_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
@@ -543,7 +546,13 @@ class HomeTab(QWidget):
                         state = f"over by {fmt_money(abs(budget['remaining']))}" if budget['remaining'] < 0 else f"{budget['pct']:.0f}% used"
                         reminders.append((0 if budget['pct']>=100 else 4, f"📊 {label} budget {state}", C['red'] if budget['pct']>=100 else C['amber']))
         except Exception: pass
-        self._reminders = sorted(reminders,key=lambda x:x[0])
+        # Index by the reminder message so multiple feature sources cannot
+        # repeat the same reminder. Keep the highest-priority instance.
+        indexed = {}
+        for priority, text, color in reminders:
+            if text not in indexed or priority < indexed[text][0]:
+                indexed[text] = (priority, text, color)
+        self._reminders = sorted(indexed.values(), key=lambda x:x[0])
         self._reminder_index = 0
         if not hasattr(self,'_reminder_timer'):
             self._reminder_timer=QTimer(self); self._reminder_timer.timeout.connect(self._show_reminder_slice)

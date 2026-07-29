@@ -106,6 +106,8 @@ def chart_vars():
         "__SHADOW__": C["shadow"],
         "__GRID__": C["border2"],
         "__TICK__": C["text3"],
+        "__SCROLL_TRACK__": C["surface2"],
+        "__SCROLL_THUMB__": C["border"],
     }
 
 
