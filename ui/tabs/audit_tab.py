@@ -1008,8 +1008,20 @@ class _AuditSubTab(QWidget):
                 current = NW_NONE
             new_val = self._NW_NEXT.get(current, NW_WANT)
 
-            self.db.execute("UPDATE transactions SET neednwant=? WHERE id=?",
-                            (new_val, tx_id))
+            transfer_group = row.get("transfer_group_id")
+            if transfer_group:
+                # A transfer is one financial event represented by matching
+                # debit/credit rows. Its classification must never diverge.
+                self.db.execute(
+                    "UPDATE transactions SET neednwant=? WHERE transfer_group_id=?",
+                    (new_val, transfer_group))
+                linked_ids = [r["id"] for r in self.db.execute(
+                    "SELECT id FROM transactions WHERE transfer_group_id=?",
+                    (transfer_group,)).fetchall()]
+            else:
+                self.db.execute("UPDATE transactions SET neednwant=? WHERE id=?",
+                                (new_val, tx_id))
+                linked_ids = [tx_id]
             self.db.commit()
         except Exception as e:
             Toast.show_message(self, f"Could not update: {e}", kind="error")
@@ -1022,11 +1034,17 @@ class _AuditSubTab(QWidget):
         for cache in (getattr(self, "_rows", None), getattr(self, "_all_rows", None)):
             if isinstance(cache, list):
                 for c in cache:
-                    if isinstance(c, dict) and c.get("id") == tx_id:
+                    if isinstance(c, dict) and c.get("id") in linked_ids:
                         c["neednwant"] = new_val
 
         label, _ = self._nw_style_for(new_val)
-        Toast.show_message(self, f"Marked as {label}", kind="success")
+        if len(linked_ids) > 1:
+            # Rebuild safely so the other visible side of the transfer updates
+            # immediately too, rather than waiting for another navigation.
+            self.load_records()
+            Toast.show_message(self, f"Marked transfer pair as {label}", kind="success")
+        else:
+            Toast.show_message(self, f"Marked as {label}", kind="success")
 
         # Sibling tabs (Home charts, Database totals) now hold stale figures.
         # Flag them rather than rebuilding everything on every click.
