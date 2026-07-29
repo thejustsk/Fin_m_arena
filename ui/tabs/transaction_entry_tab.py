@@ -313,6 +313,7 @@ class TransactionEntryTab(QWidget):
         self.tx_repo = repos["transactions"]
         self.lu = repos["lookups"]
         self.split_repo = repos.get("split")
+        self.activity = services.get("session_activity")
         self._cat_pf = {}
         self._is_debit = True
         self._nw = 0
@@ -669,6 +670,7 @@ class TransactionEntryTab(QWidget):
             category=cid,
             neednwant=self._nw if tx_type == "DEBIT" else NW_NOT_APPLICABLE,
             pf_category=pf)
+        if self.activity: self.activity.log("Transactions", "added", "regular transaction", "Transaction Entry", tx_type.title())
 
         # Persistent label (red for debit, green for credit) — no animation
         color = C['red'] if tx_type == "DEBIT" else C['green']
@@ -721,6 +723,7 @@ class TransactionEntryTab(QWidget):
                             amount=amount, description=desc, transaction_kind="TRANSFER",
                             transfer_group_id=gid, category="transfer", neednwant=NW_NOT_APPLICABLE,
                             pf_category="internal_transfer")
+        if self.activity: self.activity.log("Transactions", "recorded", "transfer", "Transaction Entry", f"{from_name} → {to_name}")
 
         # Persistent status
         self._set_status(self.tf_status, f"✓ {fmt_money(amount)} transferred", C['green'])

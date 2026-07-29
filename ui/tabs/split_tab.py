@@ -1032,6 +1032,8 @@ class SplitTab(QWidget):
             split_type, shares, linked_txn_id=txn_id,
             category=category, pf_category=pf_category,
             neednwant=self.exp_needwant.currentData())
+        activity=self.services.get("session_activity")
+        if activity: activity.log("Split", "recorded", "split expense", "Split", group_name)
         self.exp_amount.setValue(0)
         self.exp_desc.clear()
         self._refresh_overview()
@@ -1076,6 +1078,8 @@ class SplitTab(QWidget):
         self.sr.create_settlement(
             gid, from_id, to_id, amount,
             settle_date, self.stl_method.currentText(), linked_txn_id=txn_id)
+        activity=self.services.get("session_activity")
+        if activity: activity.log("Split", "recorded", "split settlement", "Split", group_name)
         self.stl_amount.setValue(0)
         self._refresh_overview()
         self._refresh_status_card()
