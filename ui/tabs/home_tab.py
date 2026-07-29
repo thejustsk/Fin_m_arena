@@ -20,8 +20,12 @@ HOME_CHART_TEMPLATE = """<!DOCTYPE html>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-html, body { height:100%; overflow:hidden; background:__PAGE_BG__; }
-body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow:hidden; }
+html, body { min-height:100%; background:__PAGE_BG__; }
+body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow-y:auto; overflow-x:hidden; }
+body::-webkit-scrollbar { width:9px; }
+body::-webkit-scrollbar-track { background:__SCROLL_TRACK__; }
+body::-webkit-scrollbar-thumb { background:__SCROLL_THUMB__; border-radius:5px; }
+body::-webkit-scrollbar-thumb:hover { background:__TICK__; }
 .grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; width:100%; }
 .card { min-width:0; background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
@@ -35,11 +39,7 @@ canvas { width:100% !important; }
 .account-legend { font-size:11px; color:__TICK__; display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .income-dot,.expense-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
 .income-dot { background:#10B981; } .expense-dot { background:#EF4444; }
-.account-rows { height:225px; max-height:225px; overflow-y:auto; overflow-x:hidden; padding-right:6px; border-radius:0 0 10px 10px; }
-.account-rows::-webkit-scrollbar { width:8px; }
-.account-rows::-webkit-scrollbar-track { background:__SCROLL_TRACK__; border-radius:4px; }
-.account-rows::-webkit-scrollbar-thumb { background:__SCROLL_THUMB__; border-radius:4px; }
-.account-rows::-webkit-scrollbar-thumb:hover { background:__TICK__; }
+.account-rows { overflow:visible; padding-right:6px; border-radius:0 0 10px 10px; }
 .account-row { display:grid; grid-template-columns:minmax(105px,28%) 1fr; gap:10px; align-items:center; min-height:52px; border-bottom:1px solid __GRID__; }
 .account-name { color:__TICK__; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; padding-right:8px; }
 .account-bars { display:flex; flex-direction:column; gap:5px; }
