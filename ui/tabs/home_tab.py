@@ -612,7 +612,6 @@ class HomeTab(QWidget):
         chosen=[reminders[(start+i)%len(reminders)] for i in range(min(visible,len(reminders)))]
         for _,text,color in chosen:
             row=QLabel(text); row.setWordWrap(True); row.setStyleSheet(f"color:{color};background:{C['surface2']};border-left:3px solid {color};border-radius:7px;padding:6px;font-size:11px;font-weight:700;"); self.rem_lay.addWidget(row)
-        self.rem_lay.addStretch()
         self._reminder_index=(start+visible)%len(reminders)
 
     def _render_savings(self, txns):

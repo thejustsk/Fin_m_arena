@@ -32,6 +32,27 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(_icon_px))
         self._build()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_native_title_bar()
+
+    def _apply_native_title_bar(self):
+        """Use the Windows immersive dark title bar when available."""
+        try:
+            import sys, ctypes
+            if sys.platform != "win32":
+                return
+            from ui.theme import active_theme
+            value = ctypes.c_int(1 if active_theme() == "dark" else 0)
+            hwnd = int(self.winId())
+            # Windows 10 uses attribute 20 on modern builds; 19 is the older
+            # compatible value. Failure is harmless on unsupported versions.
+            for attr in (20, 19):
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value))
+        except Exception:
+            pass
+
     def _build(self):
         central = QWidget()
         central.setObjectName("central")
@@ -198,6 +219,7 @@ class MainWindow(QMainWindow):
             self.setUpdatesEnabled(True)
 
         self._nav(current_key)
+        self._apply_native_title_bar()
         try:
             from ui.widgets.toast import Toast
             Toast.show_message(self, f"{name.title()} theme applied", kind="success")
