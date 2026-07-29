@@ -19,7 +19,13 @@ class BudgetService:
   for b in candidates:
    mode=b.get('schedule_type') or 'RECURRING'
    if mode=='RECURRING' and (b['scope_type'],b['scope_value']) in overrides: continue
-   source_txns = [t for t in txns if (period_type!='SPECIAL' or ((b.get('start_date') or '') <= t.get('tx_date','') <= (b.get('end_date') or '')))]
+   # The Special-page year selector only controls which budget cards appear.
+   # A Special Budget itself always calculates against its complete own range,
+   # including dates that fall in another calendar year.
+   if period_type=='SPECIAL':
+       source_txns = self.tx_repo.list_filters(date_from=b.get('start_date'), date_to=b.get('end_date'), limit=50000)
+   else:
+       source_txns = txns
    if b['scope_type']=='CATEGORY': matched=[t for t in source_txns if t.get('category')==b['scope_value']]
    elif b['scope_type']=='PF_CATEGORY': matched=[t for t in source_txns if t.get('pf_category')==b['scope_value']]
    elif b['scope_type']=='NEED_WANT': matched=[t for t in source_txns if t.get('neednwant')==(NW_NEED if b['scope_value']=='NEED' else NW_WANT)]

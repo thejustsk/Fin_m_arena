@@ -1,5 +1,5 @@
 """Monthly recurring budgets — set once, evaluated every calendar month."""
-from datetime import date
+from datetime import date, timedelta
 from PyQt5.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
                              QFrame,QScrollArea,QDialog,QFormLayout,QComboBox,
                              QDoubleSpinBox,QDialogButtonBox,QSpinBox,QMessageBox,QDateEdit)
@@ -84,12 +84,15 @@ class BudgetTab(QWidget):
         today=date.today(); warning_budgets=[]
         warning_budgets += self.engine.check_budgets(today.year,today.month,'MONTHLY')
         warning_budgets += self.engine.check_budgets(today.year,today.month,'YEARLY')
-        warning_budgets += self.engine.check_budgets(today.year,today.month,'SPECIAL')
+        special_current = self.engine.check_budgets(today.year,today.month,'SPECIAL')
+        month_start=today.replace(day=1).isoformat()
+        month_end=(today.replace(day=28)+timedelta(days=4)).replace(day=1)-timedelta(days=1)
+        warning_budgets += [b for b in special_current if (b.get('start_date') or '') <= month_end.isoformat() and (b.get('end_date') or '') >= month_start]
         flagged=[b for b in warning_budgets if b['pct']>=b['alert_threshold_pct']]
         if not flagged:
             ok=QLabel('✓ No budget warnings for the current month/year.'); ok.setWordWrap(True); ok.setStyleSheet(f"font-size:11px;color:{C['green']};font-weight:600;"); self.warn_lay.addWidget(ok)
         for b in flagged:
-            col=C['red'] if b['pct']>=100 else C['amber']; text=QLabel(f"{self._name(b)}\n{b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
+            col=C['red'] if b['pct']>=100 else C['amber']; period_name={'MONTHLY':'Monthly','YEARLY':'Yearly','SPECIAL':'Special'}.get(b.get('period_type'),'Monthly'); detail=(f"{b.get('start_date')} → {b.get('end_date')}" if b.get('period_type')=='SPECIAL' else period_name); text=QLabel(f"{period_name} · {self._name(b)}\n{detail} · {b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
             text.setWordWrap(True); text.setStyleSheet(f"background:{C['red_bg'] if b['pct']>=100 else C['amber_bg']};color:{col};border:1px solid {col};border-radius:8px;padding:8px;font-size:11px;font-weight:700;"); self.warn_lay.addWidget(text)
         warning=sum(1 for b in budgets if b['pct']>=b['alert_threshold_pct'] and b['pct']<100)
         exceeded=sum(1 for b in budgets if b['pct']>=100)
@@ -100,8 +103,13 @@ class BudgetTab(QWidget):
         period_label=(str(year) if self.period_type in ('SPECIAL','YEARLY') else date(year,month,1).strftime('%B %Y'))
         self.summary.setText(f"{period_label} · {len(budgets)} active budget{'s' if len(budgets)!=1 else ''} · {fmt_money(total_spent)} used of {fmt_money(total_limit)}")
         if not budgets:
-            word='yearly' if self.period_type=='YEARLY' else 'monthly'
-            self.lay.addWidget(EmptyState("📊",f"No {word} budgets yet",f"Create a category, total-expense, or Want-spending limit. It will recur automatically every {'year' if self.period_type=='YEARLY' else 'month'}.",f"＋ Add {word.title()} Budget",self._open_editor)); self.lay.addStretch(); return
+            if self.period_type=='SPECIAL':
+                title='No Special Budgets for this year'; hint='Create a one-time budget for any custom date range that overlaps this year.'; action='＋ Add Special Budget'
+            elif self.period_type=='YEARLY':
+                title='No Yearly Budgets yet'; hint='Create a recurring or selected-year budget for this calendar year.'; action='＋ Add Yearly Budget'
+            else:
+                title='No Monthly Budgets yet'; hint='Create a recurring or selected-month budget for this calendar month.'; action='＋ Add Monthly Budget'
+            self.lay.addWidget(EmptyState('📊',title,hint,action,self._open_editor)); self.lay.addStretch(); return
         for b in budgets: self.lay.addWidget(self._card(b))
         self.lay.addStretch()
 
