@@ -477,8 +477,8 @@ class MainWindow(QMainWindow):
         box = QFrame(); box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
         box_lay = QVBoxLayout(box); box_lay.setContentsMargins(14,10,14,10); box_lay.setSpacing(6)
         if changes:
-            for label, count in changes:
-                line = QLabel(f"•  {label}: {count} change{'s' if count != 1 else ''}")
+            for activity in changes:
+                line = QLabel(f"•  {activity}")
                 line.setStyleSheet(f"font-size:12px;font-weight:600;color:{C['text2']};")
                 box_lay.addWidget(line)
         else:
