@@ -260,7 +260,7 @@ class NotesTab(QWidget):
         self._composer_tags = []
         self._fv = []
         self._all_filtered_ids = []
-        self._active_note_tag = None
+        self._active_note_tags = set()
         self._loaded = False
         self._build()
         self.refresh()
@@ -324,7 +324,6 @@ class NotesTab(QWidget):
         self.search_box.setMinimumHeight(38)
         self.search_box.setStyleSheet(_input_css())
         self.search_box.textChanged.connect(self._load_notes)
-        lay.addWidget(self.search_box)
 
         # Notes KPI + one-click tag filters. Rebuilt from real note data so
         # new/deleted tags and notes are always reflected without setup work.
@@ -341,6 +340,7 @@ class NotesTab(QWidget):
         self.notes_tag_flow = FlowLayout(self.notes_tag_bar, hSpacing=6, vSpacing=5)
         kpi_lay.addWidget(self.notes_tag_bar)
         lay.addWidget(self.notes_kpi)
+        lay.addWidget(self.search_box)
 
         self._notes_scroll = QScrollArea(); self._notes_scroll.setWidgetResizable(True); self._notes_scroll.setFrameShape(QFrame.NoFrame)
         self._notes_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
@@ -370,16 +370,22 @@ class NotesTab(QWidget):
             item = self.notes_tag_flow.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         suffix = "note" if len(all_notes) == 1 else "notes"
-        filtered = f" · Showing {shown_count}" if self._active_note_tag else ""
+        filtered = f" · Showing {shown_count}" if self._active_note_tags else ""
         self.notes_count_lbl.setText(f"{len(all_notes)} {suffix}{filtered}")
         tags = sorted({tag.strip() for note in all_notes for tag in (note.get('tags') or '').split(',') if tag.strip()}, key=str.lower)
+        # All Notes is intentionally styled as a normal filter label, not a
+        # primary action. It simply clears the selected tag set.
         all_btn = QPushButton("All Notes")
         all_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        all_btn.setStyleSheet(_btn_primary() if self._active_note_tag is None else _btn_ghost())
-        all_btn.clicked.connect(lambda: self._set_note_tag(None))
+        all_active = not self._active_note_tags
+        all_btn.setStyleSheet(
+            f"QPushButton{{background:{C['accent'] if all_active else C['surface2']};"
+            f"color:{C['on_accent'] if all_active else C['text2']};border:1px solid {C['accent'] if all_active else C['border']};"
+            "border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;}}")
+        all_btn.clicked.connect(self._clear_note_tags)
         self.notes_tag_flow.addWidget(all_btn)
         for tag in tags:
-            active = tag == self._active_note_tag
+            active = tag in self._active_note_tags
             color = _tag_color(tag)
             btn = QPushButton(f"#{tag}")
             btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -391,7 +397,14 @@ class NotesTab(QWidget):
             self.notes_tag_flow.addWidget(btn)
 
     def _set_note_tag(self, tag):
-        self._active_note_tag = tag
+        if tag in self._active_note_tags:
+            self._active_note_tags.remove(tag)
+        else:
+            self._active_note_tags.add(tag)
+        self._load_notes()
+
+    def _clear_note_tags(self):
+        self._active_note_tags.clear()
         self._load_notes()
 
     def _load_notes(self):
@@ -402,9 +415,12 @@ class NotesTab(QWidget):
                 w.setParent(None)
         all_notes = self.nr.list_active()
         notes = self.nr.list_active(self.search_box.text().strip() or None)
-        if self._active_note_tag:
-            wanted = self._active_note_tag.lower()
-            notes = [note for note in notes if wanted in {t.strip().lower() for t in (note.get('tags') or '').split(',') if t.strip()}]
+        if self._active_note_tags:
+            # AND rule: a note must contain every selected tag.
+            wanted = {tag.lower() for tag in self._active_note_tags}
+            notes = [note for note in notes if wanted.issubset(
+                {t.strip().lower() for t in (note.get('tags') or '').split(',') if t.strip()}
+            )]
         self._rebuild_notes_kpi(all_notes, len(notes))
         if not notes:
             empty = EmptyState(
