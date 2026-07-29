@@ -47,7 +47,11 @@ class BudgetTab(QWidget):
         self.kpi_row=QHBoxLayout(); self.kpi_row.setSpacing(10); root.addLayout(self.kpi_row)
         self.summary=QLabel(); self.summary.setStyleSheet(f"color:{C['text3']};font-size:12px;font-weight:600;"); root.addWidget(self.summary)
         scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame); scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        inner=QWidget(); inner.setStyleSheet("background:transparent;"); self.lay=QVBoxLayout(inner); self.lay.setSpacing(10); self.lay.setAlignment(Qt.AlignTop); scroll.setWidget(inner); root.addWidget(scroll,1)
+        inner=QWidget(); inner.setStyleSheet("background:transparent;"); self.lay=QVBoxLayout(inner); self.lay.setSpacing(10); self.lay.setAlignment(Qt.AlignTop); scroll.setWidget(inner)
+        content=QHBoxLayout(); content.addWidget(scroll,3)
+        panel=QFrame(); panel.setMinimumWidth(260); panel.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}QLabel{{background:transparent;border:none;}}")
+        pl=QVBoxLayout(panel); pl.setContentsMargins(14,12,14,12); title=QLabel('🔔 Budget Warnings'); title.setStyleSheet(f"font-size:14px;font-weight:800;color:{C['text']};"); pl.addWidget(title)
+        self.warn_lay=QVBoxLayout(); self.warn_lay.setSpacing(8); pl.addLayout(self.warn_lay); pl.addStretch(); content.addWidget(panel,1); root.addLayout(content,1)
 
     def on_activated(self): self.refresh()
     def _set_period(self, period):
@@ -61,7 +65,9 @@ class BudgetTab(QWidget):
         self.title.setText('📊  Special Budgets' if is_special else ('📊  Yearly Budgets' if is_year else '📊  Monthly Budgets'))
         self.sub.setText('One-time budgets for a selected date range — never recurring.' if is_special else ('Set a limit once — it automatically applies every calendar year.' if is_year else 'Set a limit once — it automatically applies every calendar month.'))
         self.add.setText('＋ Add Special Budget' if is_special else ('＋ Add Yearly Budget' if is_year else '＋ Add Monthly Budget'))
-        self.month_pick.setVisible(self.period_type=='MONTHLY'); self.special_start.setVisible(is_special); self.special_end.setVisible(is_special)
+        # Special page filters by year only; exact dates belong inside the
+        # Special Budget editor.
+        self.month_pick.setVisible(self.period_type=='MONTHLY'); self.special_start.hide(); self.special_end.hide()
         while self.lay.count():
             it=self.lay.takeAt(0)
             if it.widget(): it.widget().deleteLater()
@@ -72,13 +78,26 @@ class BudgetTab(QWidget):
         start=self.special_start.date().toString('yyyy-MM-dd'); end=self.special_end.date().toString('yyyy-MM-dd')
         budgets=self.engine.check_budgets(year,month,self.period_type,start,end)
         total_limit=sum(b['limit_amount'] for b in budgets); total_spent=sum(b['spent'] for b in budgets)
+        while self.warn_lay.count():
+            it=self.warn_lay.takeAt(0)
+            if it.widget(): it.widget().deleteLater()
+        today=date.today(); warning_budgets=[]
+        warning_budgets += self.engine.check_budgets(today.year,today.month,'MONTHLY')
+        warning_budgets += self.engine.check_budgets(today.year,today.month,'YEARLY')
+        warning_budgets += self.engine.check_budgets(today.year,today.month,'SPECIAL')
+        flagged=[b for b in warning_budgets if b['pct']>=b['alert_threshold_pct']]
+        if not flagged:
+            ok=QLabel('✓ No budget warnings for the current month/year.'); ok.setWordWrap(True); ok.setStyleSheet(f"font-size:11px;color:{C['green']};font-weight:600;"); self.warn_lay.addWidget(ok)
+        for b in flagged:
+            col=C['red'] if b['pct']>=100 else C['amber']; text=QLabel(f"{self._name(b)}\n{b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
+            text.setWordWrap(True); text.setStyleSheet(f"background:{C['red_bg'] if b['pct']>=100 else C['amber_bg']};color:{col};border:1px solid {col};border-radius:8px;padding:8px;font-size:11px;font-weight:700;"); self.warn_lay.addWidget(text)
         warning=sum(1 for b in budgets if b['pct']>=b['alert_threshold_pct'] and b['pct']<100)
         exceeded=sum(1 for b in budgets if b['pct']>=100)
         for label,value,color in [('Active',str(len(budgets)),C['accent']),('Warning',str(warning),C['amber']),('Exceeded',str(exceeded),C['red']),('Remaining',fmt_money(total_limit-total_spent),C['green'] if total_limit>=total_spent else C['red'])]:
             w=QFrame(); w.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
             l=QVBoxLayout(w); l.setContentsMargins(12,8,12,8); l.addWidget(QLabel(value)); l.itemAt(0).widget().setStyleSheet(f"font-size:16px;font-weight:800;color:{color};")
             lab=QLabel(label); lab.setStyleSheet(f"font-size:10px;font-weight:700;color:{C['text3']};"); l.addWidget(lab); self.kpi_row.addWidget(w)
-        period_label=(f"{start} → {end}" if self.period_type=='SPECIAL' else (str(year) if self.period_type=='YEARLY' else date(year,month,1).strftime('%B %Y')))
+        period_label=(str(year) if self.period_type in ('SPECIAL','YEARLY') else date(year,month,1).strftime('%B %Y'))
         self.summary.setText(f"{period_label} · {len(budgets)} active budget{'s' if len(budgets)!=1 else ''} · {fmt_money(total_spent)} used of {fmt_money(total_limit)}")
         if not budgets:
             word='yearly' if self.period_type=='YEARLY' else 'monthly'
@@ -152,6 +171,8 @@ class BudgetTab(QWidget):
         if budget:
             idx=scope.findData(budget['scope_type']); scope.setCurrentIndex(max(0,idx)); fill_targets(); ti=target.findData(budget['scope_value']); target.setCurrentIndex(max(0,ti)); amount.setValue(budget['limit_amount']); alert.setValue(budget['alert_threshold_pct'])
             si=schedule.findData(budget.get('schedule_type') or 'RECURRING'); schedule.setCurrentIndex(max(0,si))
+            if budget.get('start_date'): special_start.setDate(QDate.fromString(budget['start_date'],'yyyy-MM-dd'))
+            if budget.get('end_date'): special_end.setDate(QDate.fromString(budget['end_date'],'yyyy-MM-dd'))
         if self.period_type=='SPECIAL':
             schedule.setCurrentIndex(1); schedule.setEnabled(False)
             form.addRow('Schedule',QLabel('One time only — never recurring'))
