@@ -32,8 +32,8 @@ canvas { width:100% !important; }
 #c3 { max-height:70px; }
 /* Account chart owns its height: each account receives a readable bar row,
    while only this inner panel scrolls for long account lists. */
-.account-scroll { height:420px; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
-.account-scroll canvas { min-width:0 !important; max-height:none !important; }
+.account-scroll { overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+.account-scroll canvas { display:block; min-width:0 !important; max-height:none !important; }
 @media (max-width:760px) { .grid { grid-template-columns:minmax(0,1fr); } .card.full { grid-column:auto; } }
 </style>
 </head><body>
@@ -130,15 +130,20 @@ new Chart(document.getElementById('c3'), {
 // 4. Income vs Expense by Account — horizontal bar, auto-scales for 20+ accounts
 var acctLabels = __ACCT_L__;
 var acctCanvas = document.getElementById('c4');
-acctCanvas.style.height = Math.max(390, acctLabels.length * 42) + 'px';
+var acctScroll = document.querySelector('.account-scroll');
+// Each account gets enough vertical room for two readable horizontal bars.
+// Only the account panel scrolls after its content exceeds the useful height.
+var accountChartHeight = Math.max(220, acctLabels.length * 54);
+acctCanvas.style.height = accountChartHeight + 'px';
+acctScroll.style.height = Math.min(accountChartHeight, 420) + 'px';
 
 new Chart(acctCanvas, {
     type: 'bar',
     data: {
         labels: acctLabels,
         datasets: [
-            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 5, barThickness: 16 },
-            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 5, barThickness: 16 }
+            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 5, barThickness: 20 },
+            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 5, barThickness: 20 }
         ]
     },
     options: {
@@ -610,8 +615,7 @@ class HomeTab(QWidget):
 
     def _force_resize(self):
         if self.chart_view.view:
+            # The widget has already received its final sidebar-adjusted width.
+            # Trigger Chart.js directly; artificial width nudges cause flicker.
             self.chart_view.view.update()
-            s = self.chart_view.view.size()
-            self.chart_view.view.resize(max(1, s.width() - 1), s.height())
-            QTimer.singleShot(50, lambda: self.chart_view.view.resize(s.width(), s.height()))
             self.chart_view.resize_charts()
