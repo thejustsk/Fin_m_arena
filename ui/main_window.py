@@ -474,10 +474,11 @@ class MainWindow(QMainWindow):
         tracker = self.services.get("session_changes")
         activity = self.services.get("session_activity")
         changes = activity.summary() if activity and activity.has_events() else []
-        # Generic SQL activity remains useful for modules not yet explicitly
-        # instrumented. It is shown only when no domain events were logged.
-        if not changes and tracker:
-            changes = tracker.summary()
+        # Keep generic fallback activity for modules not yet explicitly
+        # instrumented, while suppressing duplicates covered by domain events.
+        if tracker:
+            excluded = activity.covered_fallback_nouns() if activity else set()
+            changes += tracker.summary(exclude_nouns=excluded)
         dlg = QDialog(self)
         dlg.setWindowTitle("Exit Finance Manager")
         dlg.setMinimumWidth(460)

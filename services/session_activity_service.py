@@ -12,11 +12,21 @@ class SessionActivityService:
     def has_events(self):
         return bool(self._events)
 
+    def covered_fallback_nouns(self):
+        """Generic SQL nouns replaced by explicit domain wording."""
+        mapping = {
+            'regular transaction': 'regular transaction', 'transfer': 'transfer transaction',
+            'note': 'note', 'budget': 'budget', 'split expense': 'split expense',
+            'split settlement': 'split settlement', 'credit card': 'credit card',
+            'debit card': 'debit card', 'account': 'account',
+        }
+        return {mapping.get(obj) for _, _, obj, _, _ in self._events if mapping.get(obj)}
+
     def summary(self):
         lines=[]
         for (module, action, obj, source, detail), count in self._events.most_common():
             noun=obj if count==1 else (obj+'es' if obj.endswith('s') else obj+'s')
-            suffix=f" from {source}" if source and source != module else ''
+            suffix=f" from {source}" if source else ''
             extra=f" ({detail})" if detail else ''
             lines.append(f"{count} {noun} {action}{suffix}{extra}")
         return lines
