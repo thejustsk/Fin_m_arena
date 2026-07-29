@@ -156,6 +156,10 @@ class BudgetTab(QWidget):
         form.addRow('Budget type',scope); form.addRow('Target',target); form.addRow('Yearly limit' if self.period_type=='YEARLY' else 'Monthly limit',amount); form.addRow('Alert at',alert)
         buttons=QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Save); buttons.rejected.connect(dlg.reject); buttons.accepted.connect(dlg.accept); form.addRow('',buttons)
         if dlg.exec_()!=QDialog.Accepted:return
+        year = self.year_pick.value()
+        month = self.month_pick.currentData()
+        start = self.special_start.date().toString('yyyy-MM-dd')
+        end = self.special_end.date().toString('yyyy-MM-dd')
         schedule_type='SPECIAL' if self.period_type=='SPECIAL' else schedule.currentData()
         # Only recurring budgets are globally unique. Selected-period and
         # Special budgets intentionally allow the same target in other dates.
