@@ -469,7 +469,7 @@ class MainWindow(QMainWindow):
 
     def _exit_summary_confirmed(self):
         """Show a session change summary before the app writes its final backup."""
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QScrollArea
         from ui.theme import C
         tracker = self.services.get("session_changes")
         activity = self.services.get("session_activity")
@@ -489,7 +489,7 @@ class MainWindow(QMainWindow):
                 changes += tracker.summary(exclude_nouns=excluded)
         dlg = QDialog(self)
         dlg.setWindowTitle("Exit Finance Manager")
-        dlg.setMinimumWidth(460)
+        dlg.setFixedSize(540, 480)
         dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
         lay = QVBoxLayout(dlg); lay.setContentsMargins(22,18,22,18); lay.setSpacing(12)
         title = QLabel("📋  Session Changes")
@@ -498,18 +498,30 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("Changes made in this session will be included in the final local backup.")
         subtitle.setWordWrap(True); subtitle.setStyleSheet(f"font-size:12px;color:{C['text3']};")
         lay.addWidget(subtitle)
-        box = QFrame(); box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
+        change_scroll = QScrollArea()
+        change_scroll.setWidgetResizable(True)
+        change_scroll.setFrameShape(QFrame.NoFrame)
+        change_scroll.setFixedHeight(260)
+        change_scroll.setStyleSheet(
+            f"QScrollArea{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}"
+            f"QScrollBar:vertical{{background:{C['surface2']};width:8px;border-radius:4px;}}"
+            f"QScrollBar::handle:vertical{{background:{C['border']};min-height:24px;border-radius:4px;}}")
+        box = QWidget()
+        box.setStyleSheet("background:transparent;")
         box_lay = QVBoxLayout(box); box_lay.setContentsMargins(14,10,14,10); box_lay.setSpacing(6)
         if changes:
             for activity in changes:
                 line = QLabel(f"•  {activity}")
+                line.setWordWrap(True)
                 line.setStyleSheet(f"font-size:12px;font-weight:600;color:{C['text2']};")
                 box_lay.addWidget(line)
         else:
             line = QLabel("No data changes were recorded in this session.")
             line.setStyleSheet(f"font-size:12px;color:{C['text3']};")
             box_lay.addWidget(line)
-        lay.addWidget(box)
+        box_lay.addStretch()
+        change_scroll.setWidget(box)
+        lay.addWidget(change_scroll)
         buttons = QHBoxLayout(); buttons.addStretch()
         cancel = QPushButton("Cancel"); cancel.clicked.connect(dlg.reject); buttons.addWidget(cancel)
         exit_btn = QPushButton("Backup and Exit"); exit_btn.setObjectName("primary"); exit_btn.clicked.connect(dlg.accept); buttons.addWidget(exit_btn)
