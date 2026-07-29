@@ -21,13 +21,15 @@ HOME_CHART_TEMPLATE = """<!DOCTYPE html>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { min-height:100%; background:__PAGE_BG__; }
-body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; }
-.grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.card { background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
+body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow-x:hidden; }
+.grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; width:100%; }
+.card { min-width:0; background:__CARD_BG__; border-radius:12px; padding:18px; box-shadow:0 1px 3px __SHADOW__; border:1px solid __CARD_BORDER__; }
 .card.full { grid-column:1 / -1; }
 .title { font-size:12px; font-weight:700; color:__TITLE__; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-canvas { max-height:200px; }
+canvas { max-height:200px; width:100% !important; }
+.account-scroll { max-height:330px; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+@media (max-width:760px) { .grid { grid-template-columns:minmax(0,1fr); } .card.full { grid-column:auto; } }
 </style>
 </head><body>
 <div class="grid">
@@ -45,7 +47,7 @@ canvas { max-height:200px; }
   </div>
   <div class="card full">
     <div class="title"><span class="dot" style="background:#8B5CF6"></span>Income vs Expense by Account</div>
-    <canvas id="c4"></canvas>
+    <div class="account-scroll"><canvas id="c4"></canvas></div>
   </div>
 </div>
 <script>
@@ -214,6 +216,7 @@ class HomeTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
         super().__init__(parent)
         self.db = db
+        self.repos = repos
         self.bal = services["balance"]
         self.tx = repos["transactions"]
         self.acct = repos["accounts"]
@@ -265,7 +268,7 @@ class HomeTab(QWidget):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
-        top_tx_title = QLabel("Top Transactions")
+        top_tx_title = QLabel("🔔  Reminders")
         top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(top_tx_title)
 
@@ -384,7 +387,7 @@ class HomeTab(QWidget):
         txns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
 
         self._render_charts(txns)
-        self._render_top(txns)
+        self._render_reminders()
         self._render_savings(txns)
 
         if self.chart_view.view:
@@ -468,22 +471,44 @@ class HomeTab(QWidget):
         tmp.close()
         self.chart_view.view.load(QUrl.fromLocalFile(tmp.name))
 
-    def _render_top(self, txns):
+    def _render_reminders(self):
         while self.top_lay.count():
             itm = self.top_lay.takeAt(0)
-            if itm.widget():
-                itm.widget().deleteLater()
-
-        debits = sorted([t for t in txns if t["tx_type"] == "DEBIT"],
-                        key=lambda t: t["amount"], reverse=True)[:7]
-        if debits:
-            for tx in debits:
-                self.top_lay.addWidget(_tx_card(tx))
-        else:
-            lbl = QLabel("No transactions.")
-            lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;")
-            lbl.setAlignment(Qt.AlignCenter)
-            self.top_lay.addWidget(lbl)
+            if itm.widget(): itm.widget().deleteLater()
+        reminders=[]; today=date.today(); now_ym=(today.year,today.month)
+        # Credit/debit card expiry reminders.
+        for repo_key,label in (("cards","Credit card"),("debit_cards","Debit card")):
+            repo=self.repos.get(repo_key)
+            if repo:
+                for card in repo.list_active():
+                    months=(card.get('expiry_year',9999)-today.year)*12+card.get('expiry_month',12)-today.month
+                    if 0<=months<=2: reminders.append((0 if months==0 else 2, f"💳 {card.get('card_name','Card')} expires {'this month' if months==0 else f'in {months} month(s)'}", C['red'] if months==0 else C['amber']))
+        # Wealth due/overdue positions.
+        for key,name in (("loans","Money lent"),("borrowed","Money borrowed"),("deposits","Deposit to return")):
+            repo=self.repos.get(key)
+            if repo and hasattr(repo,'list_active'):
+                for item in repo.list_active():
+                    due=item.get('due_date') or item.get('expected_return_date')
+                    if due:
+                        try:
+                            days=(date.fromisoformat(due)-today).days
+                            if days<=7: reminders.append((days, f"⏰ {name} due {'today' if days==0 else ('overdue' if days<0 else f'in {days}d')}", C['red'] if days<0 else C['amber']))
+                        except Exception: pass
+        # Current-month Split balance reminder.
+        split=self.repos.get('split')
+        if split:
+            try:
+                sid=split.get_self_contact(); owed=owe=0
+                for group in split.list_groups():
+                    bal=split.get_group_balances(group['group_id']).get(sid,0)
+                    owed+=max(bal,0); owe+=max(-bal,0)
+                if owed>0.01: reminders.append((3,f"🤝 Split: {fmt_money(owed)} owed to you",C['green']))
+                if owe>0.01: reminders.append((3,f"🤝 Split: you owe {fmt_money(owe)}",C['amber']))
+            except Exception: pass
+        if not reminders:
+            lbl=QLabel('No current reminders.'); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.top_lay.addWidget(lbl)
+        for _,text,color in sorted(reminders,key=lambda x:x[0])[:30]:
+            row=QLabel(text); row.setWordWrap(True); row.setStyleSheet(f"color:{color};background:{C['surface']};border:1px solid {C['border2']};border-left:3px solid {color};border-radius:7px;padding:7px;font-size:11px;font-weight:700;"); self.top_lay.addWidget(row)
         self.top_lay.addStretch()
 
     def _render_savings(self, txns):
@@ -555,9 +580,17 @@ class HomeTab(QWidget):
             if child_lay:
                 HomeTab._clear_layout(child_lay)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Sidebar expansion changes Home's available width progressively.
+        # Let the layout settle, then force the WebEngine/Chart.js viewport to
+        # reflow instead of retaining an old width and creating scrollbars.
+        QTimer.singleShot(80, self._force_resize)
+
     def _force_resize(self):
         if self.chart_view.view:
             self.chart_view.view.update()
             s = self.chart_view.view.size()
-            self.chart_view.view.resize(s.width(), s.height() - 1)
+            self.chart_view.view.resize(max(1, s.width() - 1), s.height())
             QTimer.singleShot(50, lambda: self.chart_view.view.resize(s.width(), s.height()))
+            self.chart_view.resize_charts()
