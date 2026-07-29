@@ -31,6 +31,10 @@ _app_windows = {}
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Applies native Windows Light/Dark title-bar styling to all dialogs.
+    from ui.window_chrome import NativeTitleBarThemeFilter
+    _app_windows["window_chrome_filter"] = NativeTitleBarThemeFilter(app)
+    app.installEventFilter(_app_windows["window_chrome_filter"])
 
     # Set app icon globally (applies to ALL windows: login, wizard, main)
     from PyQt5.QtGui import QIcon

@@ -37,21 +37,9 @@ class MainWindow(QMainWindow):
         self._apply_native_title_bar()
 
     def _apply_native_title_bar(self):
-        """Use the Windows immersive dark title bar when available."""
-        try:
-            import sys, ctypes
-            if sys.platform != "win32":
-                return
-            from ui.theme import active_theme
-            value = ctypes.c_int(1 if active_theme() == "dark" else 0)
-            hwnd = int(self.winId())
-            # Windows 10 uses attribute 20 on modern builds; 19 is the older
-            # compatible value. Failure is harmless on unsupported versions.
-            for attr in (20, 19):
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value))
-        except Exception:
-            pass
+        """Reapply native title-bar colours after an in-app theme switch."""
+        from ui.window_chrome import apply_native_title_bar
+        apply_native_title_bar(self)
 
     def _build(self):
         central = QWidget()
