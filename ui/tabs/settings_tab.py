@@ -1232,7 +1232,7 @@ class SettingsTab(QWidget):
             ]),
             ("\U0001f50d  Audit", "#D97706", [
                 ("Filters & Records", "11 filter fields with multi-value chips. Regular and Wealth transaction sub-tabs. Each card has Select (for bulk) and Edit buttons. Lazy scroll with configurable page size."),
-                ("Edit & Bulk Update", "Single edit: all fields, cascade to wealth records, transfer cascade. Bulk: change Category, Need/Want, Money Purpose. Both require 2FA/password verification. Progress popup during updates."),
+                ("Edit & Bulk Update", "Money Purpose can be edited for every transaction. Category and Need/Want are editable only for eligible regular spending rows; transfers, Wealth and Split ledger rows keep their source classification. Bulk Edit reports any restricted rows it skipped. Both require 2FA/password verification."),
                 ("Insights", "Analytics with quick period buttons. 4 KPI cards + 4 Chart.js charts. Auto-aggregates by month if range > 90 days."),
             ]),
             ("\U0001f4cb  Notes", "#EC4899", [
