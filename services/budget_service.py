@@ -1,5 +1,5 @@
 """Budget calculations for recurring, selected-period and special schedules."""
-from services.nw_constants import NW_WANT
+from services.nw_constants import NW_NEED, NW_WANT
 
 class BudgetService:
  def __init__(self,budgets_repo,tx_repo): self.budget_repo,self.tx_repo=budgets_repo,tx_repo
@@ -21,7 +21,7 @@ class BudgetService:
    if mode=='RECURRING' and (b['scope_type'],b['scope_value']) in overrides: continue
    if b['scope_type']=='CATEGORY': matched=[t for t in txns if t.get('category')==b['scope_value']]
    elif b['scope_type']=='PF_CATEGORY': matched=[t for t in txns if t.get('pf_category')==b['scope_value']]
-   elif b['scope_type']=='NEED_WANT': matched=[t for t in txns if t.get('neednwant')==NW_WANT]
+   elif b['scope_type']=='NEED_WANT': matched=[t for t in txns if t.get('neednwant')==(NW_NEED if b['scope_value']=='NEED' else NW_WANT)]
    elif b['scope_type']=='TRANSACTION_GROUP': matched=[t for t in txns if t.get('transaction_kind','REGULAR')==b['scope_value']]
    else: matched=[t for t in txns if t.get('tx_type')=='DEBIT' and t.get('transaction_kind','REGULAR')=='REGULAR']
    spent=sum(t.get('amount') or 0 for t in matched); limit=b['limit_amount'] or 0

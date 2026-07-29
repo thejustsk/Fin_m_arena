@@ -14,8 +14,13 @@ class BudgetsRepo:
         sql="SELECT * FROM budgets WHERE is_active=0"; p=[]
         if period_type: sql+=" AND COALESCE(period_type,'MONTHLY')=?"; p.append(period_type)
         return _rows(self.db.execute(sql+" ORDER BY created_at DESC",p).fetchall())
-    def exists(self, scope_type, scope_value, period_type, exclude_id=None):
-        sql="SELECT 1 FROM budgets WHERE is_active=1 AND scope_type=? AND scope_value=? AND period_type=?"; p=[scope_type,scope_value,period_type]
+    def exists(self, scope_type, scope_value, period_type, schedule_type='RECURRING', period_year=None, period_month=None, start_date=None, end_date=None, exclude_id=None):
+        sql="SELECT 1 FROM budgets WHERE is_active=1 AND scope_type=? AND scope_value=? AND period_type=? AND COALESCE(schedule_type,'RECURRING')=?"; p=[scope_type,scope_value,period_type,schedule_type]
+        if schedule_type=='SELECTED':
+            sql+=" AND period_year=?"; p.append(period_year)
+            if period_type=='MONTHLY': sql+=" AND period_month=?"; p.append(period_month)
+        elif schedule_type=='SPECIAL':
+            sql+=" AND start_date=? AND end_date=?"; p += [start_date,end_date]
         if exclude_id: sql+=" AND budget_id!=?"; p.append(exclude_id)
         return self.db.execute(sql,p).fetchone() is not None
     def create(self, scope_type, scope_value, limit_amount, alert_threshold_pct=80, period_type="MONTHLY", schedule_type="RECURRING", period_year=None, period_month=None, start_date=None, end_date=None):

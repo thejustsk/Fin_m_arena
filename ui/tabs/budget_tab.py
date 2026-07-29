@@ -135,22 +135,27 @@ class BudgetTab(QWidget):
         scope=QComboBox(); scope.addItem('Category','CATEGORY'); scope.addItem('Money Purpose','PF_CATEGORY'); scope.addItem('Total Personal Spending','TOTAL_EXPENSE'); scope.addItem('Want Spending','NEED_WANT'); scope.addItem('Transaction Group','TRANSACTION_GROUP')
         schedule=QComboBox(); schedule.addItem('Recurring (all future periods)','RECURRING'); schedule.addItem('Selected period only','SELECTED')
         target=QComboBox(); amount=QDoubleSpinBox(); amount.setRange(.01,99999999); amount.setPrefix('₹ '); amount.setDecimals(2); alert=QDoubleSpinBox(); alert.setRange(1,100); alert.setValue(80); alert.setSuffix(' %')
+        special_start=QDateEdit(self.special_start.date()); special_start.setCalendarPopup(True)
+        special_end=QDateEdit(self.special_end.date()); special_end.setCalendarPopup(True)
         def fill_targets():
-            target.clear(); st=scope.currentData(); target.setEnabled(st=='CATEGORY')
+            target.clear(); st=scope.currentData(); target.setEnabled(True)
             if st=='CATEGORY':
                 for c in self.lookups.list_categories(): target.addItem(c['display_name'],c['category_id'])
             elif st=='PF_CATEGORY':
                 for p in self.lookups.list_pf_categories(): target.addItem(p['display_name'],p['pf_id'])
             elif st=='TRANSACTION_GROUP':
                 for label,value in [('Regular Spending','REGULAR'),('Transfers','TRANSFER'),('Loans Given','LOAN_GIVEN'),('Loan Repayments','LOAN_REPAYMENT'),('Loans Taken','LOAN_TAKEN'),('EMI Payments','EMI_PAYMENT'),('Fixed Deposits','FD_DEPOSIT'),('Mutual Fund Purchases','MF_PURCHASE'),('Mutual Fund Redemptions','MF_REDEMPTION'),('Split Expenses','SPLIT'),('Split Settlements','SPLIT_SETTLEMENT')]: target.addItem(label,value)
-            else: target.addItem('All regular personal expenses' if st=='TOTAL_EXPENSE' else 'Regular expenses marked Want','ALL' if st=='TOTAL_EXPENSE' else 'WANT')
+            elif st=='NEED_WANT':
+                target.addItem('Need Spending','NEED'); target.addItem('Want Spending','WANT')
+            else: target.addItem('All regular personal expenses','ALL')
         scope.currentIndexChanged.connect(fill_targets); fill_targets()
         if budget:
             idx=scope.findData(budget['scope_type']); scope.setCurrentIndex(max(0,idx)); fill_targets(); ti=target.findData(budget['scope_value']); target.setCurrentIndex(max(0,ti)); amount.setValue(budget['limit_amount']); alert.setValue(budget['alert_threshold_pct'])
             si=schedule.findData(budget.get('schedule_type') or 'RECURRING'); schedule.setCurrentIndex(max(0,si))
         if self.period_type=='SPECIAL':
             schedule.setCurrentIndex(1); schedule.setEnabled(False)
-            form.addRow('Schedule',QLabel(f"One time: {self.special_start.date().toString('dd MMM yyyy')} → {self.special_end.date().toString('dd MMM yyyy')}"))
+            form.addRow('Schedule',QLabel('One time only — never recurring'))
+            form.addRow('Start Date',special_start); form.addRow('End Date',special_end)
         else:
             form.addRow('Apply to',schedule)
         form.addRow('Budget type',scope); form.addRow('Target',target); form.addRow('Yearly limit' if self.period_type=='YEARLY' else 'Monthly limit',amount); form.addRow('Alert at',alert)
@@ -158,15 +163,16 @@ class BudgetTab(QWidget):
         if dlg.exec_()!=QDialog.Accepted:return
         year = self.year_pick.value()
         month = self.month_pick.currentData()
-        start = self.special_start.date().toString('yyyy-MM-dd')
-        end = self.special_end.date().toString('yyyy-MM-dd')
-        schedule_type='SPECIAL' if self.period_type=='SPECIAL' else schedule.currentData()
-        # Only recurring budgets are globally unique. Selected-period and
-        # Special budgets intentionally allow the same target in other dates.
-        if schedule_type=='RECURRING' and self.repo.exists(scope.currentData(),target.currentData(),self.period_type,budget['budget_id'] if budget else None):
-            QMessageBox.warning(self,'Duplicate Budget','An active recurring budget for this target and period already exists.')
+        start = special_start.date().toString('yyyy-MM-dd')
+        end = special_end.date().toString('yyyy-MM-dd')
+        if self.period_type=='SPECIAL' and special_end.date() < special_start.date():
+            QMessageBox.warning(self,'Invalid Special Period','End Date must be on or after Start Date.')
             return
+        schedule_type='SPECIAL' if self.period_type=='SPECIAL' else schedule.currentData()
         kwargs={'period_type':self.period_type,'schedule_type':schedule_type,'period_year':year if schedule_type=='SELECTED' else None,'period_month':month if (schedule_type=='SELECTED' and self.period_type=='MONTHLY') else None,'start_date':start if self.period_type=='SPECIAL' else None,'end_date':end if self.period_type=='SPECIAL' else None}
+        if self.repo.exists(scope.currentData(),target.currentData(),self.period_type,schedule_type,kwargs['period_year'],kwargs['period_month'],kwargs['start_date'],kwargs['end_date'],budget['budget_id'] if budget else None):
+            QMessageBox.warning(self,'Duplicate Budget','An active budget with this same target and schedule already exists.')
+            return
         if budget and (budget.get('schedule_type') or 'RECURRING')=='RECURRING' and schedule_type=='SELECTED':
             # "Selected period only" creates an override and preserves the
             # recurring budget for all later periods.
