@@ -65,10 +65,11 @@ _COLOR_PALETTE = [
 ]
 
 ACCT_TYPE_CONFIG = {
-    "CURRENT":  {"icon": "\U0001f3e6", "label": "Bank Accounts",   "color": "#4F46E5"},
-    "CASH":     {"icon": "\U0001f4b5", "label": "Cash",            "color": "#F59E0B"},
-    "WALLET":   {"icon": "\U0001f45b", "label": "Wallets",         "color": "#8B5CF6"},
-    "SAVINGS":  {"icon": "\U0001f3e6", "label": "Savings / FD",    "color": "#059669"},
+    "CURRENT":  {"icon": "\U0001f3e6", "label": "Bank Accounts", "color": "#2563EB", "badge_bg": "#DBEAFE", "badge_fg": "#1D4ED8"},
+    "CASH":     {"icon": "\U0001f4b5", "label": "Cash", "color": "#D97706", "badge_bg": "#FEF3C7", "badge_fg": "#92400E"},
+    "WALLET":   {"icon": "\U0001f45b", "label": "Wallets", "color": "#7C3AED", "badge_bg": "#EDE9FE", "badge_fg": "#5B21B6"},
+    "SAVINGS":  {"icon": "\U0001f3e6", "label": "Savings / FD", "color": "#059669", "badge_bg": "#D1FAE5", "badge_fg": "#065F46"},
+    "CREDIT_CARD": {"icon": "\U0001f4b3", "label": "Credit Cards", "color": "#DB2777", "badge_bg": "#FCE7F3", "badge_fg": "#9D174D"},
 }
 
 
@@ -262,9 +263,6 @@ class SettingsTab(QWidget):
         for atype in ["CURRENT", "CASH", "WALLET", "SAVINGS", "CREDIT_CARD"]:
             if atype not in groups: continue
             cfg = ACCT_TYPE_CONFIG.get(atype, {"icon": "\U0001f4b0", "label": atype, "color": "#6B7280"})
-            if atype == "CREDIT_CARD":
-                cfg = {"icon": "\U0001f4b3", "label": "Credit Cards", "color": "#7C3AED"}
-
             # Group header
             hdr = QLabel(f"{cfg['icon']}  {cfg['label']} ({len(groups[atype])})")
             hdr.setStyleSheet(f"color:{cfg['color']};font-size:13px;font-weight:700;padding:4px 0;")
@@ -299,13 +297,12 @@ class SettingsTab(QWidget):
         lbl.setStyleSheet(f"color:{C['text3']};font-size:11px;font-weight:600;")
         lay.addWidget(lbl, 0)
 
-        # Type badge
+        # Type badge — distinct high-contrast colour pairs per account type.
+        cfg = ACCT_TYPE_CONFIG.get(a["account_type"], {"badge_bg": C['surface2'], "badge_fg": C['text']})
         badge = QLabel(a["account_type"].replace("_", " "))
-        # Theme-safe contrast: use the active surface/text pair and retain
-        # the account colour only as a border cue.
         badge.setStyleSheet(
-            f"color:{C['text']};font-size:9px;font-weight:800;background:{C['surface2']};"
-            f"border:1px solid {accent};border-radius:5px;padding:2px 6px;")
+            f"color:{cfg['badge_fg']};font-size:9px;font-weight:800;background:{cfg['badge_bg']};"
+            f"border:none;border-radius:5px;padding:2px 6px;")
         lay.addWidget(badge, 0)
 
         # Opening Balance

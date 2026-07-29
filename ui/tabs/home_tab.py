@@ -290,7 +290,6 @@ class HomeTab(QWidget):
         top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(top_tx_title)
         top_scroll=QScrollArea(); top_scroll.setWidgetResizable(True); top_scroll.setFrameShape(QFrame.NoFrame)
-        top_scroll.setMaximumHeight(260)
         top_scroll.setStyleSheet(
             f"QScrollArea{{background:transparent;border:none;}}"
             f"QScrollBar:vertical{{background:{C['surface2']};width:8px;border-radius:4px;}}"
@@ -299,14 +298,16 @@ class HomeTab(QWidget):
         top_inner = QWidget(); top_inner.setStyleSheet("background:transparent;")
         self.top_lay = QVBoxLayout(top_inner); self.top_lay.setSpacing(3); self.top_lay.setContentsMargins(0,0,0,0)
         top_scroll.setWidget(top_inner)
-        right_col.addWidget(top_scroll)
+        right_col.addWidget(top_scroll, 1)
 
         rem_title = QLabel("🔔  Reminders")
         rem_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(rem_title)
-        rem_box = QFrame(); rem_box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
+        rem_box = QFrame(); rem_box.setFixedHeight(126)
+        rem_box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
         self.rem_lay = QVBoxLayout(rem_box); self.rem_lay.setContentsMargins(8,8,8,8); self.rem_lay.setSpacing(5)
-        right_col.addWidget(rem_box, 1)
+        # Fixed three-card reminder panel directly above Savings Rate.
+        right_col.addWidget(rem_box)
 
         # Savings Rate card
         self.savings_card = QFrame()
