@@ -20,7 +20,17 @@ class SessionActivityService:
             'split settlement': 'split settlement', 'credit card': 'credit card',
             'debit card': 'debit card', 'account': 'account',
         }
-        return {mapping.get(obj) for _, _, obj, _, _ in self._events if mapping.get(obj)}
+        covered = {mapping.get(obj) for _, _, obj, _, _ in self._events if mapping.get(obj)}
+        # Creating a card can also create its backing account automatically.
+        # That account row is an implementation detail, not a second user action.
+        objects = {obj for _, _, obj, _, _ in self._events}
+        if 'credit card' in objects or 'debit card' in objects:
+            covered.add('account')
+        # Split records can create a linked N/A ledger transaction; the
+        # explicit Split expense/settlement entry is the user-facing action.
+        if 'split expense' in objects or 'split settlement' in objects:
+            covered.add('split ledger transaction')
+        return covered
 
     def summary(self):
         lines=[]
