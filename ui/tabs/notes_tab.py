@@ -256,6 +256,7 @@ class NotesTab(QWidget):
         self.lu = repos["lookups"]
         self.tx = repos["transactions"]
         self.acct = repos.get("accounts")
+        self.activity = services.get("session_activity")
         self.edit_note_id = None
         self.linked_ids = set()
         self._loading_tx = False
@@ -495,6 +496,7 @@ class NotesTab(QWidget):
         note = self.nr.get(note_id)
         title = (note or {}).get("title") or "Note"
         self.nr.soft_delete(note_id)
+        if self.activity: self.activity.log("Notes", "deleted", "note", "Notes", title)
 
         # soft_delete() mints a fresh trash uuid; find it so Undo can restore.
         trash_uid = None
@@ -512,6 +514,7 @@ class NotesTab(QWidget):
         def _undo():
             if trash_uid:
                 self.nr.restore(trash_uid)
+                if self.activity: self.activity.log("Notes", "restored", "note", "Trash", short)
                 self._load_notes(); self._load_trash()
                 Toast.show_message(self, "Note restored", kind="success")
 
@@ -1001,12 +1004,14 @@ class NotesTab(QWidget):
             if n.get("title", "").lower() == title.lower() and n["id"] != (self.edit_note_id or ""):
                 QMessageBox.warning(self, "Duplicate", f"A note titled \"{title}\" already exists."); return
         linked = sorted(self.linked_ids)
-        if self.edit_note_id:
+        was_edit = bool(self.edit_note_id)
+        if was_edit:
             self.nr.update(self.edit_note_id, title=title, tags=tags,
                            content=content, linked_transaction_ids=linked)
         else:
             self.nr.create(title=title, tags=tags,
                            content=content, linked_transaction_ids=linked)
+        if self.activity: self.activity.log("Notes", "updated" if was_edit else "created", "note", "Notes", title)
         self._goto(0)
 
     # ─────────────── PAGE 3: Trash ───────────────
@@ -1066,14 +1071,18 @@ class NotesTab(QWidget):
         self.trash_lay.addStretch()
 
     def _recover(self, uid):
-        self.nr.restore(uid); self._load_trash(); self._load_notes()
+        self.nr.restore(uid)
+        if self.activity: self.activity.log("Notes", "restored", "note", "Trash")
+        self._load_trash(); self._load_notes()
 
     def _perm_delete(self, uid):
         reply = QMessageBox.question(self, "Delete Forever",
             "This cannot be undone. Delete permanently?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            self.nr.perm_delete(uid); self._load_trash()
+            self.nr.perm_delete(uid)
+            if self.activity: self.activity.log("Notes", "permanently deleted", "note", "Trash")
+            self._load_trash()
 
     # ─────────────── PRINT (styled PDF with transaction cards) ───────────────
     def _print_single_note(self, note_id):

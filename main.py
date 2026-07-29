@@ -22,6 +22,7 @@ from services.security_service import SecurityService
 from services.audit_service import AuditService
 from services.email_service import EmailService
 from services.session_change_service import SessionChangeTracker
+from services.session_activity_service import SessionActivityService
 
 
 # Module-level references — prevents garbage collection
@@ -71,6 +72,7 @@ def main():
         "audit": AuditService(repos["audit"], repos["transactions"], db),
         "email": EmailService(db),
         "session_changes": SessionChangeTracker(db),
+        "session_activity": SessionActivityService(),
     }
 
     # Apply the saved theme *before* building widgets — inline styles bake

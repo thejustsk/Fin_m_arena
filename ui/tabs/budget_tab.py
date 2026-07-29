@@ -17,6 +17,7 @@ class BudgetTab(QWidget):
     def __init__(self, db, repos, services, parent=None):
         super().__init__(parent)
         self.db, self.repos, self.services = db, repos, services
+        self.activity = services.get("session_activity")
         self.repo = repos["budgets"]
         self.lookups = repos["lookups"]
         self.engine = BudgetService(self.repo, repos["transactions"])
@@ -200,11 +201,13 @@ class BudgetTab(QWidget):
 
     def _deactivate_budget(self,budget):
         self.repo.deactivate(budget['budget_id']); self.refresh()
+        if self.activity: self.activity.log("Budgets", "deactivated", "budget", f"{budget.get('period_type','MONTHLY').title()} Budgets", self._name(budget))
         Toast.show_message(self, f"{self._name(budget)} budget deactivated", kind='success')
 
     def _delete_budget(self,budget):
         if QMessageBox.question(self,'Delete Budget',f"Permanently delete {self._name(budget)} budget?",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:
             self.repo.delete(budget['budget_id']); self.refresh()
+            if self.activity: self.activity.log("Budgets", "deleted", "budget", f"{budget.get('period_type','MONTHLY').title()} Budgets", self._name(budget))
             Toast.show_message(self, f"{self._name(budget)} budget deleted", kind='success')
 
     def _show_inactive(self):
@@ -223,6 +226,7 @@ class BudgetTab(QWidget):
         self.repo.reactivate(budget['budget_id'])
         if dialog: dialog.accept()
         self.refresh()
+        if self.activity: self.activity.log("Budgets", "reactivated", "budget", f"{budget.get('period_type','MONTHLY').title()} Budgets", self._name(budget))
         Toast.show_message(self, f"{self._name(budget)} budget reactivated", kind='success')
 
     def _open_editor(self,budget=None):
@@ -281,4 +285,5 @@ class BudgetTab(QWidget):
         else:
             self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
         self.refresh()
+        if self.activity: self.activity.log("Budgets", "updated" if budget else "created", "budget", f"{self.period_type.title()} Budgets", self._name(budget) if budget else target.currentText())
         Toast.show_message(self, f"{self._name(budget) if budget else target.currentText()} budget {'updated' if budget else 'created'}", kind='success')

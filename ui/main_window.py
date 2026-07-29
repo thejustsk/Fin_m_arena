@@ -472,7 +472,12 @@ class MainWindow(QMainWindow):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
         from ui.theme import C
         tracker = self.services.get("session_changes")
-        changes = tracker.summary() if tracker else []
+        activity = self.services.get("session_activity")
+        changes = activity.summary() if activity and activity.has_events() else []
+        # Generic SQL activity remains useful for modules not yet explicitly
+        # instrumented. It is shown only when no domain events were logged.
+        if not changes and tracker:
+            changes = tracker.summary()
         dlg = QDialog(self)
         dlg.setWindowTitle("Exit Finance Manager")
         dlg.setMinimumWidth(460)
