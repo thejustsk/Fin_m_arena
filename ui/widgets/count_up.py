@@ -13,13 +13,13 @@ _INTERVAL_MS = 33          # ~30fps: smooth enough, cheap enough
 
 class _Engine:
     _timer = None
-    _jobs = []             # [label, start, end, elapsed, formatter]
+    _jobs = []             # [label, start, end, elapsed, formatter, duration]
 
     @classmethod
-    def add(cls, label, start, end, formatter):
+    def add(cls, label, start, end, formatter, duration):
         # Replace any in-flight animation for the same label.
         cls._jobs = [j for j in cls._jobs if j[0] is not label]
-        cls._jobs.append([label, float(start), float(end), 0, formatter])
+        cls._jobs.append([label, float(start), float(end), 0, formatter, duration])
         if cls._timer is None:
             cls._timer = QTimer()
             cls._timer.setInterval(_INTERVAL_MS)
@@ -31,9 +31,9 @@ class _Engine:
     def _tick(cls):
         alive = []
         for job in cls._jobs:
-            label, start, end, elapsed, fmt = job
+            label, start, end, elapsed, fmt, duration = job
             elapsed += _INTERVAL_MS
-            t = min(1.0, elapsed / _DURATION_MS)
+            t = min(1.0, elapsed / duration)
             eased = 1 - (1 - t) ** 3          # easeOutCubic
             value = start + (end - start) * eased
             try:
@@ -50,7 +50,7 @@ class _Engine:
             cls._timer.stop()
 
 
-def animate_value(label, new_value, formatter, old_value=None):
+def animate_value(label, new_value, formatter, old_value=None, duration_ms=None):
     """Animate *label* from its current value up to *new_value*.
 
     ``formatter`` turns a float into the display string, so the final frame
@@ -77,7 +77,7 @@ def animate_value(label, new_value, formatter, old_value=None):
         label.setText(formatter(target))
         return
 
-    _Engine.add(label, start, target, formatter)
+    _Engine.add(label, start, target, formatter, max(_INTERVAL_MS, duration_ms or _DURATION_MS))
 
 
 def set_value(label, value, formatter):

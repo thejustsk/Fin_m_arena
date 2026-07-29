@@ -20,6 +20,7 @@ from ui.tabs.database_tab import _tx_card, _day_header, FILTER_FIELDS
 from services.nw_constants import NW_FROM_LABEL
 from ui.widgets.empty_state import EmptyState
 from ui.widgets.toast import Toast
+from ui.widgets.count_up import animate_value
 
 
 # ═══════════════════════════════════════════════
@@ -331,14 +332,19 @@ class NotesTab(QWidget):
         self.notes_kpi.setStyleSheet(
             f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:12px;}}"
             "QLabel{background:transparent;border:none;}")
-        kpi_lay = QVBoxLayout(self.notes_kpi)
-        kpi_lay.setContentsMargins(14, 10, 14, 10); kpi_lay.setSpacing(8)
+        kpi_lay = QHBoxLayout(self.notes_kpi)
+        kpi_lay.setContentsMargins(14, 10, 14, 10); kpi_lay.setSpacing(16)
+        count_col = QVBoxLayout(); count_col.setSpacing(1)
+        count_cap = QLabel("TOTAL NOTES")
+        count_cap.setStyleSheet(f"font-size:10px;font-weight:800;color:{C['text3']};letter-spacing:1px;")
         self.notes_count_lbl = QLabel("0 Notes")
-        self.notes_count_lbl.setStyleSheet(f"font-size:16px;font-weight:800;color:{C['text']};")
-        kpi_lay.addWidget(self.notes_count_lbl)
+        self.notes_count_lbl.setStyleSheet(f"font-size:20px;font-weight:900;color:{C['text']};")
+        count_col.addWidget(count_cap); count_col.addWidget(self.notes_count_lbl)
+        kpi_lay.addLayout(count_col)
+        divider=QFrame(); divider.setFixedWidth(1); divider.setStyleSheet(f"background:{C['border2']};"); kpi_lay.addWidget(divider)
         self.notes_tag_bar = QWidget()
         self.notes_tag_flow = FlowLayout(self.notes_tag_bar, hSpacing=6, vSpacing=5)
-        kpi_lay.addWidget(self.notes_tag_bar)
+        kpi_lay.addWidget(self.notes_tag_bar,1)
         lay.addWidget(self.notes_kpi)
         lay.addWidget(self.search_box)
 
@@ -371,7 +377,9 @@ class NotesTab(QWidget):
             if item.widget(): item.widget().deleteLater()
         suffix = "note" if len(all_notes) == 1 else "notes"
         filtered = f" · Showing {shown_count}" if self._active_note_tags else ""
-        self.notes_count_lbl.setText(f"{len(all_notes)} {suffix}{filtered}")
+        animate_value(self.notes_count_lbl, len(all_notes),
+                      lambda value: f"{int(round(value))} {suffix}{filtered}",
+                      old_value=0, duration_ms=3000)
         tags = sorted({tag.strip() for note in all_notes for tag in (note.get('tags') or '').split(',') if tag.strip()}, key=str.lower)
         # All Notes is intentionally styled as a normal filter label, not a
         # primary action. It simply clears the selected tag set.
