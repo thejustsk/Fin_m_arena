@@ -102,7 +102,7 @@ def _make_tag_chip(text, accent_color=None, removable=False, on_remove=None):
     chip.setStyleSheet(
         f"QPushButton{{background:{color};color:white;border:none;"
         f"border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;}}"
-        f"QPushButton:hover{{background:{color}CC;}}")
+        f"QPushButton:hover{{background:{_hex_to_rgba(color, 0.80)};}}")
     chip.setCursor(QCursor(Qt.PointingHandCursor) if removable else Qt.ArrowCursor)
     chip.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     if removable and on_remove:
@@ -381,7 +381,7 @@ class NotesTab(QWidget):
         all_btn.setStyleSheet(
             f"QPushButton{{background:{C['accent'] if all_active else C['surface2']};"
             f"color:{C['on_accent'] if all_active else C['text2']};border:1px solid {C['accent'] if all_active else C['border']};"
-            "border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;}}")
+            f"border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;}}")
         all_btn.clicked.connect(self._clear_note_tags)
         self.notes_tag_flow.addWidget(all_btn)
         for tag in tags:
@@ -392,7 +392,7 @@ class NotesTab(QWidget):
             btn.setStyleSheet(
                 f"QPushButton{{background:{color if active else _hex_to_rgba(color, 0.12)};"
                 f"color:{'white' if active else color};border:1px solid {color};border-radius:12px;"
-                "padding:3px 10px;font-size:11px;font-weight:700;}}")
+                f"padding:3px 10px;font-size:11px;font-weight:700;}}")
             btn.clicked.connect(lambda _, t=tag: self._set_note_tag(t))
             self.notes_tag_flow.addWidget(btn)
 
