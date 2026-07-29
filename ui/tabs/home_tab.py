@@ -289,10 +289,17 @@ class HomeTab(QWidget):
         top_tx_title = QLabel("💸  Top Spends")
         top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(top_tx_title)
+        top_scroll=QScrollArea(); top_scroll.setWidgetResizable(True); top_scroll.setFrameShape(QFrame.NoFrame)
+        top_scroll.setMaximumHeight(260)
+        top_scroll.setStyleSheet(
+            f"QScrollArea{{background:transparent;border:none;}}"
+            f"QScrollBar:vertical{{background:{C['surface2']};width:8px;border-radius:4px;}}"
+            f"QScrollBar::handle:vertical{{background:{C['border']};min-height:24px;border-radius:4px;}}"
+            f"QScrollBar::handle:vertical:hover{{background:{C['text3']};}}")
         top_inner = QWidget(); top_inner.setStyleSheet("background:transparent;")
         self.top_lay = QVBoxLayout(top_inner); self.top_lay.setSpacing(3); self.top_lay.setContentsMargins(0,0,0,0)
-        # No independent scrollbar: this block uses its natural available area.
-        right_col.addWidget(top_inner)
+        top_scroll.setWidget(top_inner)
+        right_col.addWidget(top_scroll)
 
         rem_title = QLabel("🔔  Reminders")
         rem_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")

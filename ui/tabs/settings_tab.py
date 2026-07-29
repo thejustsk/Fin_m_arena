@@ -300,8 +300,12 @@ class SettingsTab(QWidget):
         lay.addWidget(lbl, 0)
 
         # Type badge
-        badge = QLabel(a["account_type"])
-        badge.setStyleSheet(f"color:{accent};font-size:9px;font-weight:700;background:{accent}15;border-radius:4px;padding:2px 6px;")
+        badge = QLabel(a["account_type"].replace("_", " "))
+        # Theme-safe contrast: use the active surface/text pair and retain
+        # the account colour only as a border cue.
+        badge.setStyleSheet(
+            f"color:{C['text']};font-size:9px;font-weight:800;background:{C['surface2']};"
+            f"border:1px solid {accent};border-radius:5px;padding:2px 6px;")
         lay.addWidget(badge, 0)
 
         # Opening Balance
