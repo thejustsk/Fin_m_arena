@@ -228,7 +228,10 @@ class TransactionEditDialog(QDialog):
         # Full Split / Wealth ledger rows represent cash movement, not the
         # personal category/Need-Want share. Edit their source feature tab.
         kind = tx.get("transaction_kind") or "REGULAR"
-        self._restricted_classification = kind != "REGULAR"
+        # Not Applicable is a deliberate semantic lock. Its outer ledger row
+        # must not be reclassified in Audit; edit the source feature instead.
+        self._restricted_classification = (kind != "REGULAR" or
+                                           tx.get("neednwant") == NW_NOT_APPLICABLE)
         if self._restricted_classification:
             for w in [self.f_category, self.f_pf, self.f_neednwant]:
                 w.setEnabled(False)
@@ -1462,6 +1465,8 @@ class _AuditSubTab(QWidget):
             QMessageBox.information(self, "Nothing to Apply",
                                     "Pick at least one field to change.")
             return
+        updated_count = 0
+        skipped_count = 0
         for i, tid in enumerate(ids):
             tx = self.tx.get(tid)
             if not tx:
@@ -1470,15 +1475,16 @@ class _AuditSubTab(QWidget):
             tx_updates = dict(updates)
             # Category/Purpose are owned by the source flow for transfers,
             # wealth and Split ledger rows. Need/Want applies only to regular debit spending.
-            if kind != "REGULAR":
-                tx_updates.pop("category", None)
-                tx_updates.pop("pf_category", None)
-                tx_updates.pop("neednwant", None)
+            if kind != "REGULAR" or tx.get("neednwant") == NW_NOT_APPLICABLE:
+                tx_updates.clear()
             elif tx.get("tx_type") != "DEBIT":
+                # Income can retain its category/purpose but never Need/Want.
                 tx_updates.pop("neednwant", None)
             if not tx_updates:
+                skipped_count += 1
                 continue
             self.tx.update(tid, **tx_updates)
+            updated_count += 1
             self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), tid))
             self.db.commit()
             self._mark_wealth_updated(tid)
@@ -1509,7 +1515,12 @@ class _AuditSubTab(QWidget):
         self.bulk_neednwant.setCurrentIndex(0)
         self.bulk_pf.setCurrentIndex(0)
         from ui.widgets.toast import Toast
-        Toast.show_message(self, f"{len(ids)} transactions updated", kind="success")
+        if updated_count and skipped_count:
+            Toast.show_message(self, f"{updated_count} updated · {skipped_count} restricted rows skipped", kind="warning")
+        elif updated_count:
+            Toast.show_message(self, f"{updated_count} transactions updated", kind="success")
+        else:
+            Toast.show_message(self, f"No transactions updated · {skipped_count} restricted rows skipped", kind="warning")
         parent_tab = self.parent()
         while parent_tab and not hasattr(parent_tab, '_notify_data_changed'):
             parent_tab = parent_tab.parent()
