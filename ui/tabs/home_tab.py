@@ -32,8 +32,16 @@ canvas { width:100% !important; }
 #c3 { max-height:70px; }
 /* Account chart owns its height: each account receives a readable bar row,
    while only this inner panel scrolls for long account lists. */
-.account-scroll { overflow-y:auto; overflow-x:hidden; padding-right:4px; }
-.account-scroll canvas { display:block; min-width:0 !important; max-height:none !important; }
+.account-legend { font-size:11px; color:__TICK__; display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.income-dot,.expense-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
+.income-dot { background:#10B981; } .expense-dot { background:#EF4444; }
+.account-rows { max-height:420px; overflow-y:auto; overflow-x:hidden; padding-right:6px; }
+.account-row { display:grid; grid-template-columns:minmax(105px,28%) 1fr; gap:10px; align-items:center; min-height:52px; border-bottom:1px solid __GRID__; }
+.account-name { color:__TICK__; font-size:11px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.account-bars { display:flex; flex-direction:column; gap:5px; }
+.account-bar-line { display:flex; align-items:center; gap:6px; }
+.account-bar { height:14px; min-width:3px; border-radius:4px; }
+.account-value { color:__TICK__; font-size:10px; white-space:nowrap; }
 @media (max-width:760px) { .grid { grid-template-columns:minmax(0,1fr); } .card.full { grid-column:auto; } }
 </style>
 </head><body>
@@ -52,7 +60,8 @@ canvas { width:100% !important; }
   </div>
   <div class="card full">
     <div class="title"><span class="dot" style="background:#8B5CF6"></span>Income vs Expense by Account</div>
-    <div class="account-scroll"><canvas id="c4"></canvas></div>
+    <div class="account-legend"><span class="income-dot"></span> Income <span class="expense-dot"></span> Expense</div>
+    <div id="accountRows" class="account-rows"></div>
   </div>
 </div>
 <script>
@@ -127,33 +136,23 @@ new Chart(document.getElementById('c3'), {
     }
 });
 
-// 4. Income vs Expense by Account — horizontal bar, auto-scales for 20+ accounts
+// 4. Income vs Expense by Account — fixed legend/name column; only bar rows scroll.
 var acctLabels = __ACCT_L__;
-var acctCanvas = document.getElementById('c4');
-var acctScroll = document.querySelector('.account-scroll');
-// Each account gets enough vertical room for two readable horizontal bars.
-// Only the account panel scrolls after its content exceeds the useful height.
-var accountChartHeight = Math.max(220, acctLabels.length * 54);
-acctCanvas.style.height = accountChartHeight + 'px';
-acctScroll.style.height = Math.min(accountChartHeight, 420) + 'px';
-
-new Chart(acctCanvas, {
-    type: 'bar',
-    data: {
-        labels: acctLabels,
-        datasets: [
-            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 5, barThickness: 20 },
-            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 5, barThickness: 20 }
-        ]
-    },
-    options: {
-        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-        plugins: { legend: { position: 'top', labels: { usePointStyle: true, font: { size: 11 } } } },
-        scales: {
-            x: { grid: { color: '__GRID__' }, ticks: { font: { size: 10 } } },
-            y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 11 } } }
-        }
-    }
+var acctIncome = __ACCT_CR__;
+var acctExpense = __ACCT_DB__;
+var accountRows = document.getElementById('accountRows');
+var maxAccountValue = Math.max(1, ...acctIncome, ...acctExpense);
+acctLabels.forEach(function(name, i) {
+    var row = document.createElement('div'); row.className = 'account-row';
+    var label = document.createElement('div'); label.className = 'account-name'; label.title = name; label.textContent = name;
+    var bars = document.createElement('div'); bars.className = 'account-bars';
+    [['#10B981', acctIncome[i] || 0], ['#EF4444', acctExpense[i] || 0]].forEach(function(pair) {
+        var line=document.createElement('div'); line.className='account-bar-line';
+        var bar=document.createElement('div'); bar.className='account-bar'; bar.style.background=pair[0]; bar.style.width=Math.max(2,(pair[1]/maxAccountValue)*100)+'%';
+        var value=document.createElement('span'); value.className='account-value'; value.textContent='₹'+Number(pair[1]).toLocaleString('en-IN');
+        line.appendChild(bar); line.appendChild(value); bars.appendChild(line);
+    });
+    row.appendChild(label); row.appendChild(bars); accountRows.appendChild(row);
 });
 </script>
 </body></html>"""
@@ -283,21 +282,21 @@ class HomeTab(QWidget):
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
-        top_tx_title = QLabel("🔔  Reminders")
+        top_tx_title = QLabel("💸  Top 6 Spends")
         top_tx_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
         right_col.addWidget(top_tx_title)
+        top_scroll = QScrollArea(); top_scroll.setWidgetResizable(True); top_scroll.setFrameShape(QFrame.NoFrame)
+        top_scroll.setMaximumHeight(250); top_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        top_inner = QWidget(); top_inner.setStyleSheet("background:transparent;")
+        self.top_lay = QVBoxLayout(top_inner); self.top_lay.setSpacing(3); self.top_lay.setContentsMargins(0,0,0,0)
+        top_scroll.setWidget(top_inner); right_col.addWidget(top_scroll)
 
-        top_scroll = QScrollArea()
-        top_scroll.setWidgetResizable(True)
-        top_scroll.setFrameShape(QFrame.NoFrame)
-        top_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        top_inner = QWidget()
-        top_inner.setStyleSheet("background:transparent;")
-        self.top_lay = QVBoxLayout(top_inner)
-        self.top_lay.setSpacing(3)
-        self.top_lay.setContentsMargins(0, 0, 0, 0)
-        top_scroll.setWidget(top_inner)
-        right_col.addWidget(top_scroll, 1)
+        rem_title = QLabel("🔔  Reminders")
+        rem_title.setStyleSheet(f"font-size:15px;font-weight:700;color:{C['text']};")
+        right_col.addWidget(rem_title)
+        rem_box = QFrame(); rem_box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
+        self.rem_lay = QVBoxLayout(rem_box); self.rem_lay.setContentsMargins(8,8,8,8); self.rem_lay.setSpacing(5)
+        right_col.addWidget(rem_box, 1)
 
         # Savings Rate card
         self.savings_card = QFrame()
@@ -402,6 +401,7 @@ class HomeTab(QWidget):
         txns = self.tx.list_filters(date_from=d_from, date_to=d_to, limit=10000)
 
         self._render_charts(txns)
+        self._render_top(txns)
         self._render_reminders()
         self._render_savings(txns)
 
@@ -486,9 +486,20 @@ class HomeTab(QWidget):
         tmp.close()
         self.chart_view.view.load(QUrl.fromLocalFile(tmp.name))
 
-    def _render_reminders(self):
+    def _render_top(self, txns):
         while self.top_lay.count():
-            itm = self.top_lay.takeAt(0)
+            item=self.top_lay.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        debits=sorted([t for t in txns if t['tx_type']=='DEBIT'],key=lambda t:t['amount'],reverse=True)[:6]
+        if debits:
+            for tx in debits: self.top_lay.addWidget(_tx_card(tx))
+        else:
+            empty=QLabel('No spending in this period.'); empty.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.top_lay.addWidget(empty)
+        self.top_lay.addStretch()
+
+    def _render_reminders(self):
+        while self.rem_lay.count():
+            itm = self.rem_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
         reminders=[]; today=date.today(); now_ym=(today.year,today.month)
         # Credit/debit card expiry reminders.
@@ -532,11 +543,27 @@ class HomeTab(QWidget):
                         state = f"over by {fmt_money(abs(budget['remaining']))}" if budget['remaining'] < 0 else f"{budget['pct']:.0f}% used"
                         reminders.append((0 if budget['pct']>=100 else 4, f"📊 {label} budget {state}", C['red'] if budget['pct']>=100 else C['amber']))
         except Exception: pass
+        self._reminders = sorted(reminders,key=lambda x:x[0])
+        self._reminder_index = 0
+        if not hasattr(self,'_reminder_timer'):
+            self._reminder_timer=QTimer(self); self._reminder_timer.timeout.connect(self._show_reminder_slice)
+        self._reminder_timer.start(2000)
+        self._show_reminder_slice()
+
+    def _show_reminder_slice(self):
+        while self.rem_lay.count():
+            item=self.rem_lay.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        reminders=getattr(self,'_reminders',[])
         if not reminders:
-            lbl=QLabel('No current reminders.'); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.top_lay.addWidget(lbl)
-        for _,text,color in sorted(reminders,key=lambda x:x[0])[:30]:
-            row=QLabel(text); row.setWordWrap(True); row.setStyleSheet(f"color:{color};background:{C['surface']};border:1px solid {C['border2']};border-left:3px solid {color};border-radius:7px;padding:7px;font-size:11px;font-weight:700;"); self.top_lay.addWidget(row)
-        self.top_lay.addStretch()
+            lbl=QLabel('No current reminders.'); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.rem_lay.addWidget(lbl); return
+        visible=3
+        start=self._reminder_index % len(reminders)
+        chosen=[reminders[(start+i)%len(reminders)] for i in range(min(visible,len(reminders)))]
+        for _,text,color in chosen:
+            row=QLabel(text); row.setWordWrap(True); row.setStyleSheet(f"color:{color};background:{C['surface2']};border-left:3px solid {color};border-radius:7px;padding:6px;font-size:11px;font-weight:700;"); self.rem_lay.addWidget(row)
+        self.rem_lay.addStretch()
+        self._reminder_index=(start+visible)%len(reminders)
 
     def _render_savings(self, txns):
         # Fully clear — delete widgets AND layouts
