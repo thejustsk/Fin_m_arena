@@ -147,6 +147,7 @@ class BudgetTab(QWidget):
         scope.currentIndexChanged.connect(fill_targets); fill_targets()
         if budget:
             idx=scope.findData(budget['scope_type']); scope.setCurrentIndex(max(0,idx)); fill_targets(); ti=target.findData(budget['scope_value']); target.setCurrentIndex(max(0,ti)); amount.setValue(budget['limit_amount']); alert.setValue(budget['alert_threshold_pct'])
+            si=schedule.findData(budget.get('schedule_type') or 'RECURRING'); schedule.setCurrentIndex(max(0,si))
         if self.period_type=='SPECIAL':
             schedule.setCurrentIndex(1); schedule.setEnabled(False)
             form.addRow('Schedule',QLabel(f"One time: {self.special_start.date().toString('dd MMM yyyy')} → {self.special_end.date().toString('dd MMM yyyy')}"))
@@ -162,6 +163,12 @@ class BudgetTab(QWidget):
             QMessageBox.warning(self,'Duplicate Budget','An active recurring budget for this target and period already exists.')
             return
         kwargs={'period_type':self.period_type,'schedule_type':schedule_type,'period_year':year if schedule_type=='SELECTED' else None,'period_month':month if (schedule_type=='SELECTED' and self.period_type=='MONTHLY') else None,'start_date':start if self.period_type=='SPECIAL' else None,'end_date':end if self.period_type=='SPECIAL' else None}
-        if budget:self.repo.update(budget['budget_id'],scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
-        else:self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
+        if budget and (budget.get('schedule_type') or 'RECURRING')=='RECURRING' and schedule_type=='SELECTED':
+            # "Selected period only" creates an override and preserves the
+            # recurring budget for all later periods.
+            self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
+        elif budget:
+            self.repo.update(budget['budget_id'],scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
+        else:
+            self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
         self.refresh()
