@@ -97,11 +97,15 @@ class BudgetTab(QWidget):
             col=C['red'] if b['pct']>=100 else C['amber']; ptype=b.get('period_type','MONTHLY')
             period_name={'MONTHLY':'Monthly','YEARLY':'Yearly','SPECIAL':'Special'}.get(ptype,'Monthly')
             detail=(f"{b.get('start_date')} → {b.get('end_date')}" if ptype=='SPECIAL' else (today.strftime('%B %Y') if ptype=='MONTHLY' else str(today.year)))
-            text=QLabel(f"{period_name} · {self._name(b)}\n{detail} · {b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
+            balance_text=(f"Over budget by {fmt_money(abs(b['remaining']))}" if b['remaining']<0 else f"{fmt_money(b['remaining'])} remaining")
+            text=QLabel(f"{period_name} · {self._name(b)}\n{detail} · {b['pct']:.0f}% used · {balance_text}")
             text.setWordWrap(True); text.setStyleSheet(f"background:{C['red_bg'] if b['pct']>=100 else C['amber_bg']};color:{col};border:1px solid {col};border-radius:8px;padding:8px;font-size:11px;font-weight:700;"); self.warn_lay.addWidget(text)
         warning=sum(1 for b in budgets if b['pct']>=b['alert_threshold_pct'] and b['pct']<100)
         exceeded=sum(1 for b in budgets if b['pct']>=100)
-        for label,value,color in [('Active',str(len(budgets)),C['accent']),('Warning',str(warning),C['amber']),('Exceeded',str(exceeded),C['red']),('Remaining',fmt_money(total_limit-total_spent),C['green'] if total_limit>=total_spent else C['red'])]:
+        net_remaining=total_limit-total_spent
+        rem_label='Remaining' if net_remaining>=0 else 'Over Budget'
+        rem_value=fmt_money(net_remaining) if net_remaining>=0 else fmt_money(abs(net_remaining))
+        for label,value,color in [('Active',str(len(budgets)),C['accent']),('Warning',str(warning),C['amber']),('Exceeded',str(exceeded),C['red']),(rem_label,rem_value,C['green'] if net_remaining>=0 else C['red'])]:
             w=QFrame(); w.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
             l=QVBoxLayout(w); l.setContentsMargins(12,8,12,8); l.addWidget(QLabel(value)); l.itemAt(0).widget().setStyleSheet(f"font-size:16px;font-weight:800;color:{color};")
             lab=QLabel(label); lab.setStyleSheet(f"font-size:10px;font-weight:700;color:{C['text3']};"); l.addWidget(lab); self.kpi_row.addWidget(w)
@@ -142,7 +146,33 @@ class BudgetTab(QWidget):
             pace='ahead of plan' if pct > expected + 5 else ('behind plan' if pct < expected - 5 else 'on pace')
             pace_lbl=QLabel(f"Year progress {expected:.0f}% · spending {pct:.0f}% · {pace}")
             pace_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;"); lay.addWidget(pace_lbl)
-        card.mousePressEvent=lambda event, budget=b: self._show_budget_transactions(budget)
+        # Inline, expandable transaction drill-down. Initial batch is small;
+        # more dated groups/cards render only while scrolling inside the card.
+        details=QScrollArea(); details.setWidgetResizable(True); details.setFrameShape(QFrame.NoFrame); details.setMaximumHeight(320); details.hide()
+        inner=QWidget(); detail_lay=QVBoxLayout(inner); detail_lay.setSpacing(6); details.setWidget(inner)
+        card._budget_expanded=False
+        def toggle_details(event=None, budget=b, target=details, dl=detail_lay, host=card):
+            if host._budget_expanded:
+                target.hide(); host._budget_expanded=False; return
+            host._budget_expanded=True; target.show()
+            if getattr(host,'_budget_loaded',False): return
+            host._budget_loaded=True
+            txns=sorted(self.engine.transactions_for(budget,self.year_pick.value(),self.month_pick.currentData()),key=lambda t:t.get('tx_date',''),reverse=True)
+            pending=list(txns); batch_size=50; last_date=None
+            def append_batch():
+                nonlocal pending,last_date
+                batch,pending=pending[:batch_size],pending[batch_size:]
+                for tx in batch:
+                    if tx.get('tx_date')!=last_date:
+                        last_date=tx.get('tx_date')
+                        try: dl.addWidget(_day_header(date.fromisoformat(last_date).strftime('%A, %d %b')))
+                        except Exception: dl.addWidget(_day_header(last_date))
+                    dl.addWidget(_tx_card(tx))
+                if not pending: dl.addStretch()
+            append_batch()
+            details.verticalScrollBar().valueChanged.connect(lambda value: append_batch() if pending and value>=details.verticalScrollBar().maximum()-200 else None)
+        lay.addWidget(details)
+        card.mousePressEvent=toggle_details
         return card
 
     def _show_budget_transactions(self,budget):
