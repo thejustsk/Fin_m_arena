@@ -813,6 +813,14 @@ class _FunctionPage(QWidget):
         if self._wealth_tab_ref:
             self._wealth_tab_ref._notify_data_changed()
 
+    def _show_validation(self, message):
+        self._entry_error.setText(f"⚠  {message}")
+        self._entry_error.show()
+
+    def _clear_validation(self):
+        self._entry_error.clear()
+        self._entry_error.hide()
+
     def _build_skeleton(self):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 8, 0, 0)
@@ -831,6 +839,15 @@ class _FunctionPage(QWidget):
             nav.addWidget(b)
         nav.addStretch()
         lay.addLayout(nav)
+        # Shared non-modal validation area for every Wealth entry/list page.
+        # It stays close to the sub-navigation and never blocks data entry.
+        self._entry_error = QLabel("")
+        self._entry_error.setWordWrap(True)
+        self._entry_error.hide()
+        self._entry_error.setStyleSheet(
+            f"color:{C['red']};background:{C['red_bg']};border:1px solid {C['red']};"
+            "border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;")
+        lay.addWidget(self._entry_error)
         self.sub_stack = QStackedWidget()
         lay.addWidget(self.sub_stack)
         self.sub_stack.addWidget(self._build_entry())
@@ -841,6 +858,7 @@ class _FunctionPage(QWidget):
         self.sub_stack.setCurrentIndex(1)
 
     def _goto(self, idx):
+        self._clear_validation()
         _switch_tabs(self._sub_btns, idx)
         self.sub_stack.setCurrentIndex(idx)
         if idx == 0:
@@ -1208,7 +1226,7 @@ class LoansGivePage(_FunctionPage):
         bid = self.lg_loan_borrower.get_data()
         amount = self.lg_loan_amount.value()
         if not bid or amount <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a borrower and enter an amount.")
+            self._show_validation("Select a borrower and enter an amount.")
             return
         account_id = self.lg_loan_account.currentData()
         method = self.lg_loan_method.currentData()
@@ -1239,17 +1257,14 @@ class LoansGivePage(_FunctionPage):
         lid = self.lg_rep_loan.get_data()
         amount = self.lg_rep_amount.value()
         if not lid or amount <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
+            self._show_validation("Select a loan and enter an amount.")
             return
         loan = self.repos["loans"].get_loan(lid)
         if not loan:
             return
         a = self._analysis(loan)
         if amount > a["current_value"] + 0.01:
-            QMessageBox.warning(self, "Amount Exceeds Outstanding",
-                f"Entered: {fmt_money(amount)}\n"
-                f"Outstanding: {fmt_money(a['current_value'])}\n"
-                f"Please enter a valid amount.")
+            self._show_validation(f"Amount exceeds outstanding balance of {fmt_money(a['current_value'])}.")
             return
         account_id = self.lg_rep_account.currentData()
         method = self.lg_rep_method.currentData()
@@ -1895,7 +1910,7 @@ class LoansTakePage(_FunctionPage):
         fi = self.lt_loan_freq.currentIndex()
         freq = self._FREQ_VALUES[fi] if fi >= 0 else "ANNUAL"
         if not lid or principal <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a lender and enter the principal.")
+            self._show_validation("Select a lender and enter the principal.")
             return
         method = "COMPOUND" if self.lt_loan_method_type.currentIndex() == 1 else "SIMPLE"
         emi_type = "NON_EMI" if self.lt_emi_type.currentIndex() == 1 else "EMI"
@@ -1933,17 +1948,14 @@ class LoansTakePage(_FunctionPage):
         lid = self.lt_rep_loan.get_data()
         amount = self.lt_rep_amount.value()
         if not lid or amount <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a loan and enter an amount.")
+            self._show_validation("Select a loan and enter an amount.")
             return
         loan = self.repos["borrowed"].get_loan(lid)
         if not loan:
             return
         a = self._analysis(loan)
         if amount > a["current_value"] + 0.01:
-            QMessageBox.warning(self, "Amount Exceeds Outstanding",
-                f"Entered: {fmt_money(amount)}\n"
-                f"Outstanding: {fmt_money(a['current_value'])}\n"
-                f"Please enter a valid amount.")
+            self._show_validation(f"Amount exceeds outstanding balance of {fmt_money(a['current_value'])}.")
             return
         account_id = self.lt_rep_account.currentData()
         method = self.lt_rep_method.currentData()
@@ -2408,10 +2420,10 @@ class FDGivePage(_FunctionPage):
     def _create_fd(self):
         p = self.fd_principal.value()
         if p <= 0:
-            QMessageBox.warning(self, "Missing Info", "Please enter the deposit principal.")
+            self._show_validation("Please enter the deposit principal.")
             return
         if self.fd_maturity.date() <= self.fd_start.date():
-            QMessageBox.warning(self, "Invalid Dates", "Maturity date must be after start date.")
+            self._show_validation("Maturity date must be after start date.")
             return
         account_id = self.fd_account.currentData()
         account_name = self.fd_account.currentText()
@@ -2853,7 +2865,7 @@ class FDOthersPage(_FunctionPage):
         did = self.fo_dep_depositor.get_data()
         amount = self.fo_dep_amount.value()
         if not did or amount <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a depositor and enter an amount.")
+            self._show_validation("Select a depositor and enter an amount.")
             return
         account_id = self.fo_dep_account.currentData()
         method = self.fo_dep_method.currentData()
@@ -2887,17 +2899,14 @@ class FDOthersPage(_FunctionPage):
         did = self.fo_rep_deposit.get_data()
         amount = self.fo_rep_amount.value()
         if not did or amount <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a deposit and enter an amount.")
+            self._show_validation("Select a deposit and enter an amount.")
             return
         dep = self.repos["deposits"].get_deposit(did)
         if not dep:
             return
         a = self._analysis(dep)
         if amount > a["current_value"] + 0.01:
-            QMessageBox.warning(self, "Amount Exceeds Outstanding",
-                f"Entered: {fmt_money(amount)}\n"
-                f"Outstanding: {fmt_money(a['current_value'])}\n"
-                f"Please enter a valid amount.")
+            self._show_validation(f"Amount exceeds outstanding balance of {fmt_money(a['current_value'])}.")
             return
         account_id = self.fo_rep_account.currentData()
         method = self.fo_rep_method.currentData()
@@ -3659,7 +3668,7 @@ class MFPage(_FunctionPage):
         amount = self.mf_buy_amount.value()
         nav = self.mf_buy_nav.value()
         if not sid or amount <= 0 or nav <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a scheme and enter amount and NAV.")
+            self._show_validation("Select a scheme and enter amount and NAV.")
             return
         units = MFService.calculate_units(amount, nav)
         account_id = self.mf_buy_account.currentData()
@@ -3688,11 +3697,11 @@ class MFPage(_FunctionPage):
         units = self.mf_sell_units.value()
         nav = self.mf_sell_nav.value()
         if not sid or units <= 0 or nav <= 0:
-            QMessageBox.warning(self, "Missing Info", "Select a scheme and enter units and NAV.")
+            self._show_validation("Select a scheme and enter units and NAV.")
             return
         held = self.repos["mf"].holdings(sid)["units"]
         if units > held + 1e-6:
-            QMessageBox.warning(self, "Not Enough Units", f"You only hold {held:,.4f} units.")
+            self._show_validation(f"You only hold {held:,.4f} units.")
             return
         amount = round(units * nav, 2)
         account_id = self.mf_sell_account.currentData()
