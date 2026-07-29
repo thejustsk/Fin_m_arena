@@ -3,7 +3,7 @@ from datetime import date
 from PyQt5.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
                              QFrame,QScrollArea,QDialog,QFormLayout,QComboBox,
                              QDoubleSpinBox,QDialogButtonBox,QSpinBox,QMessageBox,QDateEdit)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QCursor
 from ui.theme import C
 from ui.sidebar import fmt_money
