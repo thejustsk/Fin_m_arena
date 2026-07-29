@@ -190,7 +190,8 @@ CREATE TABLE IF NOT EXISTS card_cycles (
 CREATE TABLE IF NOT EXISTS budgets (
     budget_id TEXT PRIMARY KEY, scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
     limit_amount REAL NOT NULL, alert_threshold_pct REAL DEFAULT 80,
-    is_active INTEGER DEFAULT 1, created_at TEXT NOT NULL
+    is_active INTEGER DEFAULT 1, created_at TEXT NOT NULL,
+    period_type TEXT DEFAULT 'MONTHLY'
 );
 CREATE TABLE IF NOT EXISTS recurring_rules (
     rule_id TEXT PRIMARY KEY, account_id TEXT REFERENCES accounts, pay_method TEXT,
@@ -391,6 +392,7 @@ def run_migrations(db):
         ("app_security", "google_client_secret", "TEXT"),
         ("app_security", "google_email", "TEXT"),
         ("app_security", "google_refresh_token", "TEXT"),
+        ("budgets", "period_type", "TEXT DEFAULT 'MONTHLY'"),
     ]
     for table, col, typedef in _safe_cols:
         try:

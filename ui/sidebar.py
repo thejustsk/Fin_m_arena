@@ -40,6 +40,7 @@ NAV_GROUPS = [
     ]),
     ("REVIEW & PLANNING", [
         ("audit", "🔍", "Audit"),
+        ("budgets", "📊", "Budgets"),
         ("wealth", "📈", "Wealth"),
     ]),
     ("TOOLS", [
