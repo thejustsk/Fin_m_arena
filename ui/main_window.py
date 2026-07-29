@@ -457,7 +457,47 @@ class MainWindow(QMainWindow):
 
         return dlg.exec_() == QDialog.Accepted
 
+    def _exit_summary_confirmed(self):
+        """Show a session change summary before the app writes its final backup."""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+        from ui.theme import C
+        tracker = self.services.get("session_changes")
+        changes = tracker.summary() if tracker else []
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Exit Finance Manager")
+        dlg.setMinimumWidth(460)
+        dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        lay = QVBoxLayout(dlg); lay.setContentsMargins(22,18,22,18); lay.setSpacing(12)
+        title = QLabel("📋  Session Changes")
+        title.setStyleSheet(f"font-size:17px;font-weight:800;color:{C['text']};")
+        lay.addWidget(title)
+        subtitle = QLabel("Changes made in this session will be included in the final local backup.")
+        subtitle.setWordWrap(True); subtitle.setStyleSheet(f"font-size:12px;color:{C['text3']};")
+        lay.addWidget(subtitle)
+        box = QFrame(); box.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}")
+        box_lay = QVBoxLayout(box); box_lay.setContentsMargins(14,10,14,10); box_lay.setSpacing(6)
+        if changes:
+            for label, count in changes:
+                line = QLabel(f"•  {label}: {count} change{'s' if count != 1 else ''}")
+                line.setStyleSheet(f"font-size:12px;font-weight:600;color:{C['text2']};")
+                box_lay.addWidget(line)
+        else:
+            line = QLabel("No data changes were recorded in this session.")
+            line.setStyleSheet(f"font-size:12px;color:{C['text3']};")
+            box_lay.addWidget(line)
+        lay.addWidget(box)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        cancel = QPushButton("Cancel"); cancel.clicked.connect(dlg.reject); buttons.addWidget(cancel)
+        exit_btn = QPushButton("Exit & Backup"); exit_btn.setObjectName("primary"); exit_btn.clicked.connect(dlg.accept); buttons.addWidget(exit_btn)
+        lay.addLayout(buttons)
+        return dlg.exec_() == QDialog.Accepted
+
     def closeEvent(self, event):
+        if not getattr(self, "_exit_confirmed", False):
+            if not self._exit_summary_confirmed():
+                event.ignore()
+                return
+            self._exit_confirmed = True
         try:
             self.db.backup()
         except:

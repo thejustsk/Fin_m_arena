@@ -21,6 +21,7 @@ from services.balance_service import BalanceService
 from services.security_service import SecurityService
 from services.audit_service import AuditService
 from services.email_service import EmailService
+from services.session_change_service import SessionChangeTracker
 
 
 # Module-level references — prevents garbage collection
@@ -65,13 +66,13 @@ def main():
         "security": SecurityService(repos["security"]),
         "audit": AuditService(repos["audit"], repos["transactions"], db),
         "email": EmailService(db),
+        "session_changes": SessionChangeTracker(db),
     }
 
     # Apply the saved theme *before* building widgets — inline styles bake
     # colours at construction time.
     from ui.theme import apply_theme, load_theme_pref
     apply_theme(load_theme_pref(db), app)
-
     # ── Check if auto-backup should run on launch (daily/weekly) ──
     def _check_auto_backup():
         try:
@@ -107,6 +108,8 @@ def main():
             pass  # Non-critical — don't block app startup
 
     _check_auto_backup()
+    # Track user-session data mutations only after all startup maintenance.
+    services["session_changes"].start()
 
     def show_main_window(show_walkthrough_prompt=False):
         from ui.loading_dialog import LoadingDialog
