@@ -28,7 +28,8 @@ body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow-x:hid
 .title { font-size:12px; font-weight:700; color:__TITLE__; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 canvas { max-height:200px; width:100% !important; }
-.account-scroll { max-height:330px; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+.account-scroll { height:clamp(300px, 38vh, 520px); overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+.account-scroll canvas { min-width:0 !important; }
 @media (max-width:760px) { .grid { grid-template-columns:minmax(0,1fr); } .card.full { grid-column:auto; } }
 </style>
 </head><body>
@@ -505,6 +506,18 @@ class HomeTab(QWidget):
                 if owed>0.01: reminders.append((3,f"🤝 Split: {fmt_money(owed)} owed to you",C['green']))
                 if owe>0.01: reminders.append((3,f"🤝 Split: you owe {fmt_money(owe)}",C['amber']))
             except Exception: pass
+        # Budget threshold / over-budget warnings across monthly, yearly and
+        # Special schedules that overlap the current month.
+        try:
+            from services.budget_service import BudgetService
+            engine=BudgetService(self.repos['budgets'], self.tx)
+            for ptype in ('MONTHLY','YEARLY','SPECIAL'):
+                for budget in engine.check_budgets(today.year,today.month,ptype):
+                    if budget['pct'] >= budget['alert_threshold_pct']:
+                        label = 'Special' if ptype=='SPECIAL' else ptype.title()
+                        state = f"over by {fmt_money(abs(budget['remaining']))}" if budget['remaining'] < 0 else f"{budget['pct']:.0f}% used"
+                        reminders.append((0 if budget['pct']>=100 else 4, f"📊 {label} budget {state}", C['red'] if budget['pct']>=100 else C['amber']))
+        except Exception: pass
         if not reminders:
             lbl=QLabel('No current reminders.'); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet(f"color:{C['text3']};font-size:12px;"); self.top_lay.addWidget(lbl)
         for _,text,color in sorted(reminders,key=lambda x:x[0])[:30]:
