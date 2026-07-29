@@ -23,7 +23,7 @@ from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _switch_tabs
 from ui.widgets.searchable_combo import SearchableCombo
 from ui.widgets.count_up import animate_value
-from services.nw_constants import NW_NOT_APPLICABLE
+from services.nw_constants import NW_NONE, NW_NEED, NW_WANT, NW_NOT_APPLICABLE
 
 
 def _hex_rgba(hex_color, alpha):
@@ -732,6 +732,13 @@ class SplitTab(QWidget):
         for m in self.repos["lookups"].list_methods():
             self.exp_method.addItem(m["display_name"], m["method_id"])
         line2.addWidget(self.exp_method, 1)
+        line2.addWidget(QLabel("Category:"))
+        self.exp_category = QComboBox()
+        for c in self.repos["lookups"].list_categories(): self.exp_category.addItem(c["display_name"], c["category_id"])
+        line2.addWidget(self.exp_category, 1)
+        line2.addWidget(QLabel("Need/Want:"))
+        self.exp_needwant = QComboBox(); self.exp_needwant.addItem('Not Set', NW_NONE); self.exp_needwant.addItem('Need', NW_NEED); self.exp_needwant.addItem('Want', NW_WANT)
+        line2.addWidget(self.exp_needwant, 1)
         line2.addWidget(QLabel("Desc:"))
         self.exp_desc = QLineEdit()
         self.exp_desc.setPlaceholderText("e.g. Dinner at KFC")
@@ -1016,11 +1023,15 @@ class SplitTab(QWidget):
                 description=f"Split: {self.exp_desc.text().strip() or 'Expense'}",
                 transaction_kind="SPLIT", category="finance",
                 neednwant=NW_NOT_APPLICABLE, pf_category="commitment")
+        category = self.exp_category.currentData()
+        pf_category = next((c.get('default_pf_category') for c in self.repos['lookups'].list_categories() if c['category_id']==category), None)
         self.sr.create_expense(
             gid, paid_by, amount,
             self.exp_desc.text().strip() or None,
             self.exp_date.date().toString("yyyy-MM-dd"),
-            split_type, shares, linked_txn_id=txn_id)
+            split_type, shares, linked_txn_id=txn_id,
+            category=category, pf_category=pf_category,
+            neednwant=self.exp_needwant.currentData())
         self.exp_amount.setValue(0)
         self.exp_desc.clear()
         self._refresh_overview()

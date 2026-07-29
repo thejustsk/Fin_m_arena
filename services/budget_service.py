@@ -3,6 +3,9 @@ from services.nw_constants import NW_NEED, NW_WANT
 
 class BudgetService:
  def __init__(self,budgets_repo,tx_repo): self.budget_repo,self.tx_repo=budgets_repo,tx_repo
+ def _personal_split_rows(self,start,end):
+  rows=self.tx_repo.db.execute("SELECT e.expense_id,e.expense_date,e.category,e.pf_category,e.neednwant,s.share_amount FROM split_expenses e JOIN split_shares s ON s.expense_id=e.expense_id JOIN split_contacts c ON c.contact_id=s.contact_id WHERE c.is_self=1 AND e.expense_date>=? AND e.expense_date<=?",(start,end)).fetchall()
+  return [dict(tx_date=r['expense_date'],amount=r['share_amount'],tx_type='DEBIT',transaction_kind='REGULAR',category=r['category'],pf_category=r['pf_category'],neednwant=r['neednwant'],split_share=True) for r in rows]
  def check_budgets(self,y,m=None,period_type='MONTHLY',start_date=None,end_date=None):
   if period_type=='SPECIAL': txns=self.tx_repo.list_filters(date_from=f'{y:04d}-01-01',date_to=f'{y:04d}-12-31',limit=50000)
   elif period_type=='YEARLY': txns=self.tx_repo.list_filters(date_from=f'{y:04d}-01-01',date_to=f'{y:04d}-12-31',limit=50000)
@@ -26,6 +29,14 @@ class BudgetService:
        source_txns = self.tx_repo.list_filters(date_from=b.get('start_date'), date_to=b.get('end_date'), limit=50000)
    else:
        source_txns = txns
+   # Add derived personal Split shares. The full group payment never counts;
+   # only the self contact's allocated share is personal consumption.
+   if period_type=='SPECIAL':
+       source_txns += self._personal_split_rows(b.get('start_date'), b.get('end_date'))
+   elif period_type=='YEARLY':
+       source_txns += self._personal_split_rows(f'{y:04d}-01-01', f'{y:04d}-12-31')
+   else:
+       source_txns += self._personal_split_rows(f'{y:04d}-{m:02d}-01', f'{y:04d}-{m:02d}-31')
    if b['scope_type']=='CATEGORY': matched=[t for t in source_txns if t.get('category')==b['scope_value']]
    elif b['scope_type']=='PF_CATEGORY': matched=[t for t in source_txns if t.get('pf_category')==b['scope_value']]
    elif b['scope_type']=='NEED_WANT': matched=[t for t in source_txns if t.get('neednwant')==(NW_NEED if b['scope_value']=='NEED' else NW_WANT)]

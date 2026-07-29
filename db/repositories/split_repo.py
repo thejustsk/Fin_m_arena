@@ -129,16 +129,16 @@ class SplitRepo:
         self.db.commit()
 
     # ── Expenses ──
-    def create_expense(self, group_id, paid_by, amount, description, expense_date, split_type, shares, linked_txn_id=None):
+    def create_expense(self, group_id, paid_by, amount, description, expense_date, split_type, shares, linked_txn_id=None, category=None, pf_category=None, neednwant=0):
         """Create expense with shares.
         
         shares: list of (contact_id, share_amount)
         """
         eid = _uid()
         self.db.execute(
-            "INSERT INTO split_expenses(expense_id, group_id, paid_by, amount, description, expense_date, split_type, created_at, linked_txn_id) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
-            (eid, group_id, paid_by, amount, description, expense_date, split_type, _now(), linked_txn_id))
+            "INSERT INTO split_expenses(expense_id, group_id, paid_by, amount, description, expense_date, split_type, category, pf_category, neednwant, created_at, linked_txn_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (eid, group_id, paid_by, amount, description, expense_date, split_type, category, pf_category, neednwant, _now(), linked_txn_id))
         for contact_id, share_amount in shares:
             sid = _uid()
             self.db.execute(

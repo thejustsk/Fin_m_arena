@@ -248,6 +248,9 @@ CREATE TABLE IF NOT EXISTS split_expenses (
     description     TEXT,
     expense_date    TEXT NOT NULL,
     split_type      TEXT DEFAULT 'EQUAL',
+    category        TEXT REFERENCES categories,
+    pf_category     TEXT REFERENCES pf_categories,
+    neednwant       INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL,
     linked_txn_id   TEXT REFERENCES transactions
 );
@@ -398,6 +401,9 @@ def run_migrations(db):
         ("budgets", "period_month", "INTEGER"),
         ("budgets", "start_date", "TEXT"),
         ("budgets", "end_date", "TEXT"),
+        ("split_expenses", "category", "TEXT"),
+        ("split_expenses", "pf_category", "TEXT"),
+        ("split_expenses", "neednwant", "INTEGER DEFAULT 0"),
     ]
     for table, col, typedef in _safe_cols:
         try:
