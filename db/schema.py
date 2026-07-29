@@ -393,6 +393,11 @@ def run_migrations(db):
         ("app_security", "google_email", "TEXT"),
         ("app_security", "google_refresh_token", "TEXT"),
         ("budgets", "period_type", "TEXT DEFAULT 'MONTHLY'"),
+        ("budgets", "schedule_type", "TEXT DEFAULT 'RECURRING'"),
+        ("budgets", "period_year", "INTEGER"),
+        ("budgets", "period_month", "INTEGER"),
+        ("budgets", "start_date", "TEXT"),
+        ("budgets", "end_date", "TEXT"),
     ]
     for table, col, typedef in _safe_cols:
         try:

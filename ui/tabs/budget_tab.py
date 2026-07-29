@@ -2,7 +2,7 @@
 from datetime import date
 from PyQt5.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
                              QFrame,QScrollArea,QDialog,QFormLayout,QComboBox,
-                             QDoubleSpinBox,QDialogButtonBox,QSpinBox,QMessageBox)
+                             QDoubleSpinBox,QDialogButtonBox,QSpinBox,QMessageBox,QDateEdit)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QCursor
 from ui.theme import C
@@ -30,14 +30,17 @@ class BudgetTab(QWidget):
         self.add=QPushButton("＋ Add Monthly Budget"); self.add.setObjectName("primary"); self.add.setCursor(QCursor(Qt.PointingHandCursor)); self.add.clicked.connect(self._open_editor); row.addWidget(self.add)
         root.addLayout(row)
         periods=QHBoxLayout(); periods.setSpacing(8)
-        self.month_btn=QPushButton("Monthly"); self.year_btn=QPushButton("Yearly")
-        self.month_btn.clicked.connect(lambda:self._set_period("MONTHLY")); self.year_btn.clicked.connect(lambda:self._set_period("YEARLY"))
-        periods.addWidget(self.month_btn); periods.addWidget(self.year_btn)
+        self.month_btn=QPushButton("Monthly"); self.year_btn=QPushButton("Yearly"); self.special_btn=QPushButton("Special")
+        self.month_btn.clicked.connect(lambda:self._set_period("MONTHLY")); self.year_btn.clicked.connect(lambda:self._set_period("YEARLY")); self.special_btn.clicked.connect(lambda:self._set_period("SPECIAL"))
+        periods.addWidget(self.month_btn); periods.addWidget(self.year_btn); periods.addWidget(self.special_btn)
         self.month_pick=QComboBox(); [self.month_pick.addItem(date(2026,m,1).strftime('%b'),m) for m in range(1,13)]
         self.month_pick.setCurrentIndex(date.today().month-1)
         self.year_pick=QSpinBox(); self.year_pick.setRange(2020,2035); self.year_pick.setValue(date.today().year)
         self.month_pick.currentIndexChanged.connect(self.refresh); self.year_pick.valueChanged.connect(self.refresh)
-        periods.addWidget(self.month_pick); periods.addWidget(self.year_pick)
+        self.special_start=QDateEdit(QDate.currentDate()); self.special_start.setCalendarPopup(True)
+        self.special_end=QDateEdit(QDate.currentDate().addDays(30)); self.special_end.setCalendarPopup(True)
+        self.special_start.dateChanged.connect(self.refresh); self.special_end.dateChanged.connect(self.refresh)
+        periods.addWidget(self.month_pick); periods.addWidget(self.year_pick); periods.addWidget(self.special_start); periods.addWidget(self.special_end)
         periods.addStretch()
         self.inactive_btn=QPushButton('Inactive Budgets'); self.inactive_btn.clicked.connect(self._show_inactive); periods.addWidget(self.inactive_btn)
         root.addLayout(periods)
@@ -52,13 +55,13 @@ class BudgetTab(QWidget):
     def refresh(self):
         active=f"background:{C['accent']};color:{C['on_accent']};border:none;"
         inactive=f"background:{C['surface']};color:{C['text2']};border:1px solid {C['border']};"
-        for btn,period in ((self.month_btn,'MONTHLY'),(self.year_btn,'YEARLY')):
+        for btn,period in ((self.month_btn,'MONTHLY'),(self.year_btn,'YEARLY'),(self.special_btn,'SPECIAL')):
             btn.setStyleSheet(f"QPushButton{{{active if self.period_type==period else inactive}border-radius:8px;padding:7px 16px;font-weight:700;}}")
-        is_year=self.period_type=='YEARLY'
-        self.title.setText('📊  Yearly Budgets' if is_year else '📊  Monthly Budgets')
-        self.sub.setText('Set a limit once — it automatically applies every calendar year.' if is_year else 'Set a limit once — it automatically applies every calendar month.')
-        self.add.setText('＋ Add Yearly Budget' if is_year else '＋ Add Monthly Budget')
-        self.month_pick.setVisible(self.period_type=='MONTHLY')
+        is_year=self.period_type=='YEARLY'; is_special=self.period_type=='SPECIAL'
+        self.title.setText('📊  Special Budgets' if is_special else ('📊  Yearly Budgets' if is_year else '📊  Monthly Budgets'))
+        self.sub.setText('One-time budgets for a selected date range — never recurring.' if is_special else ('Set a limit once — it automatically applies every calendar year.' if is_year else 'Set a limit once — it automatically applies every calendar month.'))
+        self.add.setText('＋ Add Special Budget' if is_special else ('＋ Add Yearly Budget' if is_year else '＋ Add Monthly Budget'))
+        self.month_pick.setVisible(self.period_type=='MONTHLY'); self.special_start.setVisible(is_special); self.special_end.setVisible(is_special)
         while self.lay.count():
             it=self.lay.takeAt(0)
             if it.widget(): it.widget().deleteLater()
@@ -66,7 +69,8 @@ class BudgetTab(QWidget):
             it=self.kpi_row.takeAt(0)
             if it.widget(): it.widget().deleteLater()
         year=self.year_pick.value(); month=self.month_pick.currentData()
-        budgets=self.engine.check_budgets(year,month,self.period_type)
+        start=self.special_start.date().toString('yyyy-MM-dd'); end=self.special_end.date().toString('yyyy-MM-dd')
+        budgets=self.engine.check_budgets(year,month,self.period_type,start,end)
         total_limit=sum(b['limit_amount'] for b in budgets); total_spent=sum(b['spent'] for b in budgets)
         warning=sum(1 for b in budgets if b['pct']>=b['alert_threshold_pct'] and b['pct']<100)
         exceeded=sum(1 for b in budgets if b['pct']>=100)
@@ -74,7 +78,7 @@ class BudgetTab(QWidget):
             w=QFrame(); w.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
             l=QVBoxLayout(w); l.setContentsMargins(12,8,12,8); l.addWidget(QLabel(value)); l.itemAt(0).widget().setStyleSheet(f"font-size:16px;font-weight:800;color:{color};")
             lab=QLabel(label); lab.setStyleSheet(f"font-size:10px;font-weight:700;color:{C['text3']};"); l.addWidget(lab); self.kpi_row.addWidget(w)
-        period_label=str(year) if self.period_type=='YEARLY' else date(year,month,1).strftime('%B %Y')
+        period_label=(f"{start} → {end}" if self.period_type=='SPECIAL' else (str(year) if self.period_type=='YEARLY' else date(year,month,1).strftime('%B %Y')))
         self.summary.setText(f"{period_label} · {len(budgets)} active budget{'s' if len(budgets)!=1 else ''} · {fmt_money(total_spent)} used of {fmt_money(total_limit)}")
         if not budgets:
             word='yearly' if self.period_type=='YEARLY' else 'monthly'
@@ -128,23 +132,36 @@ class BudgetTab(QWidget):
         period_label='Yearly' if self.period_type=='YEARLY' else 'Monthly'
         dlg=QDialog(self); dlg.setWindowTitle(f"Edit {period_label} Budget" if budget else f"Add {period_label} Budget"); dlg.setMinimumWidth(420); dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
         form=QFormLayout(dlg); form.setContentsMargins(22,18,22,18); form.setSpacing(10)
-        scope=QComboBox(); scope.addItem('Category','CATEGORY'); scope.addItem('Total Personal Spending','TOTAL_EXPENSE'); scope.addItem('Want Spending','NEED_WANT')
+        scope=QComboBox(); scope.addItem('Category','CATEGORY'); scope.addItem('Money Purpose','PF_CATEGORY'); scope.addItem('Total Personal Spending','TOTAL_EXPENSE'); scope.addItem('Want Spending','NEED_WANT'); scope.addItem('Transaction Group','TRANSACTION_GROUP')
+        schedule=QComboBox(); schedule.addItem('Recurring (all future periods)','RECURRING'); schedule.addItem('Selected period only','SELECTED')
         target=QComboBox(); amount=QDoubleSpinBox(); amount.setRange(.01,99999999); amount.setPrefix('₹ '); amount.setDecimals(2); alert=QDoubleSpinBox(); alert.setRange(1,100); alert.setValue(80); alert.setSuffix(' %')
         def fill_targets():
             target.clear(); st=scope.currentData(); target.setEnabled(st=='CATEGORY')
             if st=='CATEGORY':
                 for c in self.lookups.list_categories(): target.addItem(c['display_name'],c['category_id'])
+            elif st=='PF_CATEGORY':
+                for p in self.lookups.list_pf_categories(): target.addItem(p['display_name'],p['pf_id'])
+            elif st=='TRANSACTION_GROUP':
+                for label,value in [('Regular Spending','REGULAR'),('Transfers','TRANSFER'),('Loans Given','LOAN_GIVEN'),('Loan Repayments','LOAN_REPAYMENT'),('Loans Taken','LOAN_TAKEN'),('EMI Payments','EMI_PAYMENT'),('Fixed Deposits','FD_DEPOSIT'),('Mutual Fund Purchases','MF_PURCHASE'),('Mutual Fund Redemptions','MF_REDEMPTION'),('Split Expenses','SPLIT'),('Split Settlements','SPLIT_SETTLEMENT')]: target.addItem(label,value)
             else: target.addItem('All regular personal expenses' if st=='TOTAL_EXPENSE' else 'Regular expenses marked Want','ALL' if st=='TOTAL_EXPENSE' else 'WANT')
         scope.currentIndexChanged.connect(fill_targets); fill_targets()
         if budget:
             idx=scope.findData(budget['scope_type']); scope.setCurrentIndex(max(0,idx)); fill_targets(); ti=target.findData(budget['scope_value']); target.setCurrentIndex(max(0,ti)); amount.setValue(budget['limit_amount']); alert.setValue(budget['alert_threshold_pct'])
-        form.addRow('Repeats',QLabel('Every calendar year' if self.period_type=='YEARLY' else 'Every calendar month'))
+        if self.period_type=='SPECIAL':
+            schedule.setCurrentIndex(1); schedule.setEnabled(False)
+            form.addRow('Schedule',QLabel(f"One time: {self.special_start.date().toString('dd MMM yyyy')} → {self.special_end.date().toString('dd MMM yyyy')}"))
+        else:
+            form.addRow('Apply to',schedule)
         form.addRow('Budget type',scope); form.addRow('Target',target); form.addRow('Yearly limit' if self.period_type=='YEARLY' else 'Monthly limit',amount); form.addRow('Alert at',alert)
         buttons=QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Save); buttons.rejected.connect(dlg.reject); buttons.accepted.connect(dlg.accept); form.addRow('',buttons)
         if dlg.exec_()!=QDialog.Accepted:return
-        if self.repo.exists(scope.currentData(),target.currentData(),self.period_type,budget['budget_id'] if budget else None):
-            QMessageBox.warning(self,'Duplicate Budget','An active budget for this target and period already exists.')
+        schedule_type='SPECIAL' if self.period_type=='SPECIAL' else schedule.currentData()
+        # Only recurring budgets are globally unique. Selected-period and
+        # Special budgets intentionally allow the same target in other dates.
+        if schedule_type=='RECURRING' and self.repo.exists(scope.currentData(),target.currentData(),self.period_type,budget['budget_id'] if budget else None):
+            QMessageBox.warning(self,'Duplicate Budget','An active recurring budget for this target and period already exists.')
             return
-        if budget:self.repo.update(budget['budget_id'],scope.currentData(),target.currentData(),amount.value(),alert.value())
-        else:self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),self.period_type)
+        kwargs={'period_type':self.period_type,'schedule_type':schedule_type,'period_year':year if schedule_type=='SELECTED' else None,'period_month':month if (schedule_type=='SELECTED' and self.period_type=='MONTHLY') else None,'start_date':start if self.period_type=='SPECIAL' else None,'end_date':end if self.period_type=='SPECIAL' else None}
+        if budget:self.repo.update(budget['budget_id'],scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
+        else:self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
         self.refresh()

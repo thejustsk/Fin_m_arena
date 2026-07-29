@@ -1,30 +1,23 @@
-"""Live recurring-budget calculations against personal consumption only."""
-from datetime import date
+"""Budget calculations for recurring, selected-period and special schedules."""
 from services.nw_constants import NW_WANT
 
-
 class BudgetService:
-    def __init__(self, budgets_repo, tx_repo):
-        self.budget_repo = budgets_repo
-        self.tx_repo = tx_repo
-
-    def check_budgets(self, y, m=None, period_type="MONTHLY"):
-        """Return budgets and actual spend for a monthly or calendar-year period."""
-        if period_type == "YEARLY":
-            txns = self.tx_repo.list_filters(date_from=f"{y:04d}-01-01", date_to=f"{y:04d}-12-31", limit=50000)
-        else:
-            txns = self.tx_repo.get_monthly(y, m or date.today().month)
-        budgets = self.budget_repo.list_active(period_type)
-        expenses = [t for t in txns if t.get("tx_type") == "DEBIT"
-                    and t.get("transaction_kind", "REGULAR") == "REGULAR"]
-        results = []
-        for budget in budgets:
-            scope, value = budget["scope_type"], budget["scope_value"]
-            if scope == "CATEGORY": matched = [t for t in expenses if t.get("category") == value]
-            elif scope == "TOTAL_EXPENSE": matched = expenses
-            elif scope == "NEED_WANT": matched = [t for t in expenses if t.get("neednwant") == NW_WANT]
-            else: matched = []
-            spent = sum(t.get("amount") or 0 for t in matched); limit = budget["limit_amount"] or 0
-            pct = spent / limit * 100 if limit > 0 else 0
-            results.append({**budget, "spent": spent, "pct": pct, "remaining": limit - spent})
-        return results
+ def __init__(self,budgets_repo,tx_repo): self.budget_repo,self.tx_repo=budgets_repo,tx_repo
+ def check_budgets(self,y,m=None,period_type='MONTHLY',start_date=None,end_date=None):
+  if period_type=='SPECIAL': txns=self.tx_repo.list_filters(date_from=start_date,date_to=end_date,limit=50000)
+  elif period_type=='YEARLY': txns=self.tx_repo.list_filters(date_from=f'{y:04d}-01-01',date_to=f'{y:04d}-12-31',limit=50000)
+  else: txns=self.tx_repo.get_monthly(y,m)
+  rows=[]
+  for b in self.budget_repo.list_active(period_type):
+   mode=b.get('schedule_type') or 'RECURRING'
+   if period_type=='MONTHLY' and mode=='SELECTED' and (b.get('period_year')!=y or b.get('period_month')!=m): continue
+   if period_type=='YEARLY' and mode=='SELECTED' and b.get('period_year')!=y: continue
+   if period_type=='SPECIAL' and not (b.get('start_date')==start_date and b.get('end_date')==end_date): continue
+   if b['scope_type']=='CATEGORY': matched=[t for t in txns if t.get('category')==b['scope_value']]
+   elif b['scope_type']=='PF_CATEGORY': matched=[t for t in txns if t.get('pf_category')==b['scope_value']]
+   elif b['scope_type']=='NEED_WANT': matched=[t for t in txns if t.get('neednwant')==NW_WANT]
+   elif b['scope_type']=='TRANSACTION_GROUP': matched=[t for t in txns if t.get('transaction_kind','REGULAR')==b['scope_value']]
+   else: matched=[t for t in txns if t.get('tx_type')=='DEBIT' and t.get('transaction_kind','REGULAR')=='REGULAR']
+   spent=sum(t.get('amount') or 0 for t in matched); limit=b['limit_amount'] or 0
+   rows.append({**b,'spent':spent,'pct':spent/limit*100 if limit else 0,'remaining':limit-spent})
+  return rows
