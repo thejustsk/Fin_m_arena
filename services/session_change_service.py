@@ -35,6 +35,14 @@ class SessionChangeTracker:
         if table in _SKIP or table not in _NOUNS:
             return None
         upper = sql.upper()
+        # Startup/dashboard maintenance regularly runs status and timestamp
+        # updates (often affecting zero rows). Those are not user actions and
+        # must never make a fresh session look modified.
+        if op.startswith('UPDATE') and (
+            ' SET STATUS=' in upper or ' SET STATUS =' in upper or
+            ' SET UPDATED_AT=' in upper or ' SET UPDATED_AT =' in upper
+        ):
+            return None
         noun = _NOUNS[table]
         if op.startswith('INSERT'):
             # Regular is the default transaction kind when the column is absent.
