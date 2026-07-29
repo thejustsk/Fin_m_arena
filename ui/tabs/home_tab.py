@@ -27,9 +27,13 @@ body { font-family:'Segoe UI',system-ui,sans-serif; padding:12px; overflow-x:hid
 .card.full { grid-column:1 / -1; }
 .title { font-size:12px; font-weight:700; color:__TITLE__; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
 .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-canvas { max-height:200px; width:100% !important; }
-.account-scroll { height:clamp(300px, 38vh, 520px); overflow-y:auto; overflow-x:hidden; padding-right:4px; }
-.account-scroll canvas { min-width:0 !important; }
+canvas { width:100% !important; }
+#c1, #c2 { max-height:200px; }
+#c3 { max-height:70px; }
+/* Account chart owns its height: each account receives a readable bar row,
+   while only this inner panel scrolls for long account lists. */
+.account-scroll { height:420px; overflow-y:auto; overflow-x:hidden; padding-right:4px; }
+.account-scroll canvas { min-width:0 !important; max-height:none !important; }
 @media (max-width:760px) { .grid { grid-template-columns:minmax(0,1fr); } .card.full { grid-column:auto; } }
 </style>
 </head><body>
@@ -126,15 +130,15 @@ new Chart(document.getElementById('c3'), {
 // 4. Income vs Expense by Account — horizontal bar, auto-scales for 20+ accounts
 var acctLabels = __ACCT_L__;
 var acctCanvas = document.getElementById('c4');
-acctCanvas.style.height = Math.max(200, acctLabels.length * 24) + 'px';
+acctCanvas.style.height = Math.max(390, acctLabels.length * 42) + 'px';
 
 new Chart(acctCanvas, {
     type: 'bar',
     data: {
         labels: acctLabels,
         datasets: [
-            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 4 },
-            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 4 }
+            { label: 'Income', data: __ACCT_CR__, backgroundColor: '#10B981', borderRadius: 5, barThickness: 16 },
+            { label: 'Expense', data: __ACCT_DB__, backgroundColor: '#EF4444', borderRadius: 5, barThickness: 16 }
         ]
     },
     options: {
@@ -142,7 +146,7 @@ new Chart(acctCanvas, {
         plugins: { legend: { position: 'top', labels: { usePointStyle: true, font: { size: 11 } } } },
         scales: {
             x: { grid: { color: '__GRID__' }, ticks: { font: { size: 10 } } },
-            y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+            y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 11 } } }
         }
     }
 });
@@ -223,6 +227,11 @@ class HomeTab(QWidget):
         self.acct = repos["accounts"]
         self.lu = repos["lookups"]
         self._period = "month"
+        # Debounce sidebar/window resize events. Repainting Chart.js on every
+        # animation frame looks jittery; one redraw after geometry settles is smooth.
+        self._chart_resize_timer = QTimer(self)
+        self._chart_resize_timer.setSingleShot(True)
+        self._chart_resize_timer.timeout.connect(self._force_resize)
         self._build()
 
     def _build(self):
@@ -595,10 +604,9 @@ class HomeTab(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Sidebar expansion changes Home's available width progressively.
-        # Let the layout settle, then force the WebEngine/Chart.js viewport to
-        # reflow instead of retaining an old width and creating scrollbars.
-        QTimer.singleShot(80, self._force_resize)
+        # Sidebar expansion emits many intermediate resize events. Restart one
+        # timer so Chart.js redraws only after the expansion has settled.
+        self._chart_resize_timer.start(140)
 
     def _force_resize(self):
         if self.chart_view.view:
