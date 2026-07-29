@@ -35,7 +35,7 @@ canvas { width:100% !important; }
 .account-legend { font-size:11px; color:__TICK__; display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .income-dot,.expense-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
 .income-dot { background:#10B981; } .expense-dot { background:#EF4444; }
-.account-rows { max-height:420px; overflow-y:auto; overflow-x:hidden; padding-right:6px; }
+.account-rows { height:250px; max-height:250px; overflow-y:auto; overflow-x:hidden; padding-right:6px; }
 .account-rows::-webkit-scrollbar { width:8px; }
 .account-rows::-webkit-scrollbar-track { background:__SCROLL_TRACK__; border-radius:4px; }
 .account-rows::-webkit-scrollbar-thumb { background:__SCROLL_THUMB__; border-radius:4px; }
