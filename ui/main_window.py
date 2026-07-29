@@ -478,7 +478,15 @@ class MainWindow(QMainWindow):
         # instrumented, while suppressing duplicates covered by domain events.
         if tracker:
             excluded = activity.covered_fallback_nouns() if activity else set()
-            changes += tracker.summary(exclude_nouns=excluded)
+            if activity and activity.has_events():
+                # SQL cannot distinguish supporting rows from the user action
+                # that caused them. When explicit events exist, retain only
+                # independent Settings/setup fallback activity.
+                safe_fallback = {"category", "payment method", "money purpose",
+                                 "preference", "recurring rule", "split contact", "split group"}
+                changes += tracker.summary(exclude_nouns=excluded, include_nouns=safe_fallback)
+            else:
+                changes += tracker.summary(exclude_nouns=excluded)
         dlg = QDialog(self)
         dlg.setWindowTitle("Exit Finance Manager")
         dlg.setMinimumWidth(460)

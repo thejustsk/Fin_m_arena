@@ -71,12 +71,13 @@ class SessionChangeTracker:
         if activity:
             self._changes[activity] += 1
 
-    def summary(self, exclude_nouns=None):
-        """Return fallback activity, optionally excluding explicitly logged nouns."""
+    def summary(self, exclude_nouns=None, include_nouns=None):
+        """Return fallback activity, optionally filtered by user-facing nouns."""
         exclude_nouns = set(exclude_nouns or ())
+        include_nouns = set(include_nouns) if include_nouns is not None else None
         lines = []
         for (noun, action), count in self._changes.most_common():
-            if noun in exclude_nouns:
+            if noun in exclude_nouns or (include_nouns is not None and noun not in include_nouns):
                 continue
             plural = noun if count == 1 else (noun + 'es' if noun.endswith('s') else noun + 's')
             lines.append(f"{count} {plural if count != 1 else noun} {action}")
