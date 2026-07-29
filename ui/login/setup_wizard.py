@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                               QStackedWidget, QFrame, QMessageBox,
                               QScrollArea, QApplication, QDoubleSpinBox,
                               QDialog)
-from PyQt5.QtCore import pyqtSignal, Qt, QThread
+from PyQt5.QtCore import pyqtSignal, Qt, QThread, QEvent
 from PyQt5.QtGui import (QCursor, QPixmap)
 import io
 import re
@@ -268,7 +268,11 @@ class SetupWizard(QWidget):
             d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == 0 else 'rgba(255,255,255,0.4)'}; background: transparent; border: none;")
             dots_row.addWidget(d)
             self.dots.append(d)
+        self.step_counter = QLabel("Step 1 of 5")
+        self.step_counter.setAlignment(Qt.AlignCenter)
+        self.step_counter.setStyleSheet("font-size:11px;color:rgba(255,255,255,0.45);background:transparent;border:none;font-weight:700;")
         cl.addLayout(dots_row)
+        cl.addWidget(self.step_counter)
 
         self.step_title = QLabel("Create Your Password")
         self.step_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #F1F5F9; background: transparent; border: none;")
@@ -322,6 +326,19 @@ class SetupWizard(QWidget):
 
         cl.addLayout(nav)
         outer.addWidget(self.card)
+        self._install_keyboard_navigation()
+
+    def _install_keyboard_navigation(self):
+        """Explicit predictable Tab order across the setup flow."""
+        self.setTabOrder(self.name_edit, self.pw1)
+        self.setTabOrder(self.pw1, self.pw2)
+        self.setTabOrder(self.pw2, self.next_btn)
+        self.setTabOrder(self.totp_code, self.skip_btn)
+        self.setTabOrder(self.skip_btn, self.next_btn)
+        self.setTabOrder(self.google_link_btn_wizard, self.skip_btn)
+        self.setTabOrder(self.add_acct_btn, self.next_btn)
+        for button in (self.back_btn, self.skip_btn, self.next_btn, self.add_acct_btn, self.google_link_btn_wizard):
+            button.setFocusPolicy(Qt.StrongFocus)
 
     # ══════════════════════════════════════════════
     # PAGE 0 — Password
@@ -767,9 +784,14 @@ class SetupWizard(QWidget):
         self.acct_layout.addWidget(row)
         self.acct_rows.append(entry)
 
-        # Keyboard navigation: Enter on name -> type combo
+        # Keyboard navigation: Tab and Enter both follow the account row.
+        self.setTabOrder(name, atype)
+        self.setTabOrder(atype, bal)
+        self.setTabOrder(bal, x)
+        self.setTabOrder(x, self.add_acct_btn)
         name.returnPressed.connect(lambda: atype.setFocus())
         atype.activated.connect(lambda: bal.setFocus())
+        bal.editingFinished.connect(lambda: self.add_acct_btn.setFocus())
 
         name.setFocus()
 
@@ -788,12 +810,14 @@ class SetupWizard(QWidget):
         ]
         self.step_title.setText(titles[self.step][0])
         self.step_sub.setText(titles[self.step][1])
+        self.step_counter.setText(f"Step {self.step + 1} of 5")
 
         for i, d in enumerate(self.dots):
             d.setText("\u25cf" if i == self.step else "\u25cb")
             d.setStyleSheet(f"font-size: 14px; color: {'#818CF8' if i == self.step else 'rgba(255,255,255,0.4)'}; background: transparent; border: none;")
 
-        self.back_btn.setVisible(self.step > 0 and self.step < 5)
+        # Finish page is terminal: no Back button after setup is complete.
+        self.back_btn.setVisible(self.step > 0 and self.step < 4)
         # Show skip button on optional steps (1=2FA, 2=Google)
         self.skip_btn.setVisible(self.step in (1, 2))
 
@@ -901,6 +925,24 @@ class SetupWizard(QWidget):
         if self.step == 4:
             self.done.emit()
             return
+
+    def keyPressEvent(self, event):
+        """Enter activates the focused control or advances the current step."""
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            focused = self.focusWidget()
+            if isinstance(focused, QPushButton):
+                focused.click()
+                event.accept()
+                return
+            if isinstance(focused, QComboBox):
+                # Account type and other wizard selectors move forward with Enter.
+                focused.focusNextChild()
+                event.accept()
+                return
+            self._next()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _prev(self):
         if self.step > 0:
