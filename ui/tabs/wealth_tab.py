@@ -18,6 +18,7 @@ from services.fd_service import FDService
 from services.mf_service import MFService
 from ui.wealth_verify import WealthEditVerifyDialog
 from ui.widgets.count_up import animate_value
+from ui.widgets.toast import Toast
 from services.nw_constants import NW_NOT_APPLICABLE
 
 
@@ -1254,7 +1255,7 @@ class LoansGivePage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "recorded", "money lent loan", "Money Lent", borrower_name)
-        QMessageBox.information(self, "Loan Recorded", f"\u20b9{amount:,.2f} loan to {borrower_name} recorded.")
+        Toast.show_message(self, f"Money lent loan of ₹{amount:,.2f} recorded", kind="success")
 
     def _log_repayment(self):
         lid = self.lg_rep_loan.get_data()
@@ -1289,7 +1290,7 @@ class LoansGivePage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "recorded", "money lent repayment", "Money Lent")
-        QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
+        Toast.show_message(self, "Money lent repayment recorded", kind="success")
 
     # ── analysis helper ──
     def _loan_months(self, loan):
@@ -2453,7 +2454,7 @@ class FDGivePage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "created", "fixed deposit", "My Fixed Deposits")
-        QMessageBox.information(self, "FD Created", "Fixed deposit recorded successfully.")
+        Toast.show_message(self, "Fixed deposit created", kind="success")
 
     # ── List ──
     def load_list(self, force=False):
@@ -2899,7 +2900,7 @@ class FDOthersPage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "recorded", "deposit received", "Deposits Received", name)
-        QMessageBox.information(self, "Deposit Recorded", f"\u20b9{amount:,.2f} deposit from {name} recorded.")
+        Toast.show_message(self, f"Deposit received of ₹{amount:,.2f} recorded", kind="success")
 
     def _log_repayment(self):
         did = self.fo_rep_deposit.get_data()
@@ -2939,7 +2940,7 @@ class FDOthersPage(_FunctionPage):
                 "This deposit has been fully returned.\nStatus: REPAID \u2014 waiting for closure confirmation.")
         else:
             if self.activity: self.activity.log("Wealth", "recorded", "money lent repayment", "Money Lent")
-        QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
+        Toast.show_message(self, "Money lent repayment recorded", kind="success")
 
     def _analysis(self, dep):
         total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
@@ -3698,7 +3699,7 @@ class MFPage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "recorded", "mutual fund purchase", "Mutual Funds")
-        QMessageBox.information(self, "Purchase Logged", f"{units:,.4f} units purchased.")
+        Toast.show_message(self, f"Mutual fund purchase recorded ({units:,.4f} units)", kind="success")
 
     def _log_redemption(self):
         sid = self.mf_sell_scheme.get_data()
@@ -3732,7 +3733,7 @@ class MFPage(_FunctionPage):
         self._loaded = False
         self.load_list()
         if self.activity: self.activity.log("Wealth", "recorded", "mutual fund redemption", "Mutual Funds")
-        QMessageBox.information(self, "Redemption Logged", f"{units:,.4f} units redeemed for {fmt_money(amount)}.")
+        Toast.show_message(self, f"Mutual fund redemption recorded ({units:,.4f} units)", kind="success")
 
     def _edit_scheme(self, scheme):
         dlg = QDialog(self)

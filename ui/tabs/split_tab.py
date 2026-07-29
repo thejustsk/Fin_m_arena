@@ -23,6 +23,7 @@ from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _switch_tabs
 from ui.widgets.searchable_combo import SearchableCombo
 from ui.widgets.count_up import animate_value
+from ui.widgets.toast import Toast
 from services.nw_constants import NW_NONE, NW_NEED, NW_WANT, NW_NOT_APPLICABLE
 
 
@@ -196,6 +197,10 @@ class SplitTab(QWidget):
 
         nav.addStretch()
         outer.addLayout(nav)
+        self._inline_error = QLabel("")
+        self._inline_error.setWordWrap(True); self._inline_error.hide()
+        self._inline_error.setStyleSheet(f"color:{C['red']};background:{C['red_bg']};border:1px solid {C['red']};border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;")
+        outer.addWidget(self._inline_error)
 
         self.sub_stack = QStackedWidget()
         outer.addWidget(self.sub_stack, 1)
@@ -438,10 +443,17 @@ class SplitTab(QWidget):
         animate_value(self.lbl_settled_val, settled, lambda value: str(int(round(value))), old_value=0 if replay else None)
         animate_value(self.lbl_unset_val, unsettled, lambda value: str(int(round(value))), old_value=0 if replay else None)
 
+    def _show_inline_error(self, message):
+        self._inline_error.setText(f"⚠  {message}"); self._inline_error.show()
+
+    def _clear_inline_error(self):
+        self._inline_error.clear(); self._inline_error.hide()
+
     # ═══════════════════════════════════════════════════════════
     #  NAVIGATION
     # ═══════════════════════════════════════════════════════════
     def _goto(self, idx):
+        self._clear_inline_error()
         _switch_tabs(self._sub_btns, idx)
         self.sub_stack.setCurrentIndex(idx)
         if idx == 0:
@@ -980,12 +992,12 @@ class SplitTab(QWidget):
         gid = self.group_combo.get_data()
         group_name = self.group_combo.currentText()
         if not gid:
-            QMessageBox.warning(self, "No Group", "Select a group first.")
+            self._show_inline_error("Select a group first.")
             return
         paid_by = self.exp_paid_by.currentData()
         amount = self.exp_amount.value()
         if not paid_by or amount <= 0:
-            QMessageBox.warning(self, "Missing", "Select who paid and enter an amount.")
+            self._show_inline_error("Select who paid and enter an amount.")
             return
 
         mode = self.exp_split_type.currentIndex()
@@ -999,12 +1011,11 @@ class SplitTab(QWidget):
                     shares.append((m["contact_id"], spin.value()))
 
         if not shares:
-            QMessageBox.warning(self, "No Shares", "No participants to split with.")
+            self._show_inline_error("No participants to split with.")
             return
         total_shares = sum(s[1] for s in shares)
         if abs(total_shares - amount) > 0.5:
-            QMessageBox.warning(self, "Mismatch",
-                                f"Shares total ({total_shares:.2f}) doesn't match amount ({amount:.2f}).")
+            self._show_inline_error(f"Shares total ({total_shares:.2f}) does not match amount ({amount:.2f}).")
             return
 
         split_type = ["EQUAL", "PERCENTAGE", "EXACT"][mode]
@@ -1038,22 +1049,22 @@ class SplitTab(QWidget):
         self.exp_desc.clear()
         self._refresh_overview()
         self._refresh_status_card()
-        QMessageBox.information(self, "Done", f"Expense of {fmt_money(amount)} recorded.")
+        Toast.show_message(self, f"Split expense of {fmt_money(amount)} recorded", kind="success")
 
     def _add_settlement(self):
         gid = self.group_combo.get_data()
         group_name = self.group_combo.currentText()
         if not gid:
-            QMessageBox.warning(self, "No Group", "Select a group first.")
+            self._show_inline_error("Select a group first.")
             return
         from_id = self.stl_from.currentData()
         to_id = self.stl_to.currentData()
         amount = self.stl_amount.value()
         if not from_id or not to_id or amount <= 0:
-            QMessageBox.warning(self, "Missing", "Select from, to, and amount.")
+            self._show_inline_error("Select from, to, and amount.")
             return
         if from_id == to_id:
-            QMessageBox.warning(self, "Same", "From and To must be different.")
+            self._show_inline_error("From and To must be different.")
             return
 
         from_name = self.stl_from.currentText()
@@ -1083,7 +1094,7 @@ class SplitTab(QWidget):
         self.stl_amount.setValue(0)
         self._refresh_overview()
         self._refresh_status_card()
-        QMessageBox.information(self, "Done", f"Settlement of {fmt_money(amount)} recorded.")
+        Toast.show_message(self, f"Split settlement of {fmt_money(amount)} recorded", kind="success")
 
     # ═══════════════════════════════════════════════════════════
     #  4. EDIT / DELETE — click card to edit, cascade to transactions

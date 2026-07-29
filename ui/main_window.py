@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(box)
         buttons = QHBoxLayout(); buttons.addStretch()
         cancel = QPushButton("Cancel"); cancel.clicked.connect(dlg.reject); buttons.addWidget(cancel)
-        exit_btn = QPushButton("Exit & Backup"); exit_btn.setObjectName("primary"); exit_btn.clicked.connect(dlg.accept); buttons.addWidget(exit_btn)
+        exit_btn = QPushButton("Backup and Exit"); exit_btn.setObjectName("primary"); exit_btn.clicked.connect(dlg.accept); buttons.addWidget(exit_btn)
         lay.addLayout(buttons)
         return dlg.exec_() == QDialog.Accepted
 

@@ -225,6 +225,15 @@ class TransactionEditDialog(QDialog):
         if self._wealth_closed:
             self.f_date.setEnabled(False)
             self.f_amount.setEnabled(False)
+        # Full Split / Wealth ledger rows represent cash movement, not the
+        # personal category/Need-Want share. Edit their source feature tab.
+        kind = tx.get("transaction_kind") or "REGULAR"
+        self._restricted_classification = kind != "REGULAR"
+        if self._restricted_classification:
+            for w in [self.f_category, self.f_pf, self.f_neednwant]:
+                w.setEnabled(False)
+        elif tx.get("tx_type") != "DEBIT":
+            self.f_neednwant.setEnabled(False)
         # Lock ALL fields for split transactions — edit in Split tab
         if self._is_split:
             for w in [self.f_date, self.f_account, self.f_amount, self.f_person]:
@@ -1457,11 +1466,23 @@ class _AuditSubTab(QWidget):
             tx = self.tx.get(tid)
             if not tx:
                 continue
-            self.tx.update(tid, **updates)
+            kind = tx.get("transaction_kind") or "REGULAR"
+            tx_updates = dict(updates)
+            # Category/Purpose are owned by the source flow for transfers,
+            # wealth and Split ledger rows. Need/Want applies only to regular debit spending.
+            if kind != "REGULAR":
+                tx_updates.pop("category", None)
+                tx_updates.pop("pf_category", None)
+                tx_updates.pop("neednwant", None)
+            elif tx.get("tx_type") != "DEBIT":
+                tx_updates.pop("neednwant", None)
+            if not tx_updates:
+                continue
+            self.tx.update(tid, **tx_updates)
             self.db.execute("UPDATE transactions SET updated_at=? WHERE id=?", (TODAY(), tid))
             self.db.commit()
             self._mark_wealth_updated(tid)
-            for field, new_val in updates.items():
+            for field, new_val in tx_updates.items():
                 old_val = tx.get(field)
                 if old_val != new_val:
                     self.audit.log(tid, field, old_val, new_val, reason="Bulk recategorize via Audit tab")
