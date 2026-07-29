@@ -18,6 +18,7 @@ from services.fd_service import FDService
 from services.mf_service import MFService
 from ui.wealth_verify import WealthEditVerifyDialog
 from ui.widgets.count_up import animate_value
+from services.nw_constants import NW_NOT_APPLICABLE
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
@@ -325,7 +326,7 @@ def _log_ledger_txn(tx_repo, db, *, account_id, pay_method, tx_type, amount,
             tx_date=TODAY(), account_id=account_id, pay_method=pay_method,
             tx_type=tx_type, amount=round(float(amount), 2), person_org=person_org,
             description=description, transaction_kind=transaction_kind, category=cat,
-            neednwant=0, pf_category=None
+            neednwant=NW_NOT_APPLICABLE, pf_category=None
         )
     except Exception as e:
         print(f"[WARN] Ledger txn failed: {e}")

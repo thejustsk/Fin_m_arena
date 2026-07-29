@@ -23,7 +23,7 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from ui.tabs.database_tab import ChartView, CHART_TEMPLATE, _tx_card, _day_header, _switch_tabs, FILTER_FIELDS, FlowLayout
 from services.nw_constants import (split_need_want, NW_FROM_LABEL,
-                                   NW_NONE, NW_NEED, NW_WANT)
+                                   NW_NONE, NW_NEED, NW_WANT, NW_NOT_APPLICABLE)
 from ui.widgets.empty_state import EmptyState
 from ui.widgets.count_up import animate_value
 
@@ -203,10 +203,11 @@ class TransactionEditDialog(QDialog):
             self.f_person.setEnabled(False)
 
         self.f_neednwant = QComboBox()
-        for val, label in [(NW_NONE, "\u2014 Not Set"), (NW_NEED, "Need"), (NW_WANT, "Want")]:
+        for val, label in [(NW_NONE, "\u2014 Not Set"), (NW_NEED, "Need"),
+                           (NW_WANT, "Want"), (NW_NOT_APPLICABLE, "Not Applicable")]:
             self.f_neednwant.addItem(label, val)
         _cur = tx.get("neednwant")
-        idx = self.f_neednwant.findData(_cur if _cur in (NW_NONE, NW_NEED, NW_WANT) else NW_NONE)
+        idx = self.f_neednwant.findData(_cur if _cur in (NW_NONE, NW_NEED, NW_WANT, NW_NOT_APPLICABLE) else NW_NONE)
         if idx >= 0:
             self.f_neednwant.setCurrentIndex(idx)
 
@@ -936,6 +937,7 @@ class _AuditSubTab(QWidget):
         NW_NEED: ("NEED",    C["accent"]),
         NW_WANT: ("WANT",    C["amber"]),
         NW_NONE: ("NOT SET", C["text3"]),
+        NW_NOT_APPLICABLE: ("N/A", C["text3"]),
     }
 
     # Click cycle. Not Set is a starting state only — once tagged, the box
@@ -954,9 +956,12 @@ class _AuditSubTab(QWidget):
     def _paint_nw_box(self, box, value):
         """Apply the label, colour and tooltip for *value* to *box*."""
         label, color = self._nw_style_for(value)
-        nxt_label, _ = self._nw_style_for(self._NW_NEXT.get(value, NW_WANT))
         box.setText(label)
-        box.setToolTip(f"Need/Want: {label.title()}\nClick to set {nxt_label.title()}")
+        if value == NW_NOT_APPLICABLE:
+            box.setToolTip("Need/Want is not applicable to income, transfers, or wealth movements.")
+        else:
+            nxt_label, _ = self._nw_style_for(self._NW_NEXT.get(value, NW_WANT))
+            box.setToolTip(f"Need/Want: {label.title()}\nClick to set {nxt_label.title()}")
         # White fill so the row stays clean; colour lives in the text + border.
         box.setStyleSheet(
             f"QLabel{{background:{C['surface']};color:{color};"
@@ -1004,6 +1009,9 @@ class _AuditSubTab(QWidget):
                 Toast.show_message(self, "Transaction not found.", kind="error")
                 return
             current = row.get("neednwant")
+            if current == NW_NOT_APPLICABLE:
+                Toast.show_message(self, "Need/Want does not apply to this transaction.", kind="info")
+                return
             if current not in self._NW_STYLE:
                 current = NW_NONE
             new_val = self._NW_NEXT.get(current, NW_WANT)

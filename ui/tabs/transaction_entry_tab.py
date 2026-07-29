@@ -15,6 +15,7 @@ from ui.sidebar import fmt_money
 from ui.widgets.searchable_combo import SearchableCombo
 from ui.tabs.database_tab import _tx_card
 from ui.uppercase import force_upper
+from services.nw_constants import NW_NONE, NW_NOT_APPLICABLE
 
 PAYMENT_METHODS = [
     "PHONEPAY", "SLICE", "DIRECT TRANSFER", "CASH", "AMAZON PAY",
@@ -545,6 +546,14 @@ class TransactionEntryTab(QWidget):
     def _update_dc(self):
         self.dc_btn.setText("DEBIT" if self._is_debit else "CREDIT")
         self.dc_btn.setStyleSheet(_toggle_css(True, C['red'] if self._is_debit else C['green']))
+        # Need/Want measures a spending decision, not income.
+        for button in getattr(self, "nw_btns", []):
+            button.setEnabled(self._is_debit)
+        if not self._is_debit:
+            self._nw = NW_NOT_APPLICABLE
+        elif self._nw == NW_NOT_APPLICABLE:
+            self._nw = NW_NONE
+        self._update_nw()
     def _set_nw(self, idx):
         self._nw = idx; self._update_nw()
     def _update_nw(self):
@@ -657,7 +666,9 @@ class TransactionEntryTab(QWidget):
             account_id=aid, pay_method=mid, tx_type=tx_type, amount=amount,
             person_org=self.person_edit.text() or None,
             description=self.desc_edit.text() or None,
-            category=cid, neednwant=self._nw, pf_category=pf)
+            category=cid,
+            neednwant=self._nw if tx_type == "DEBIT" else NW_NOT_APPLICABLE,
+            pf_category=pf)
 
         # Persistent label (red for debit, green for credit) — no animation
         color = C['red'] if tx_type == "DEBIT" else C['green']
@@ -704,10 +715,12 @@ class TransactionEntryTab(QWidget):
 
         self.tx_repo.create(tx_date=d, account_id=fid, pay_method=mid, tx_type="DEBIT",
                             amount=amount, description=desc, transaction_kind="TRANSFER",
-                            transfer_group_id=gid, category="transfer", pf_category="internal_transfer")
+                            transfer_group_id=gid, category="transfer", neednwant=NW_NOT_APPLICABLE,
+                            pf_category="internal_transfer")
         self.tx_repo.create(tx_date=d, account_id=tid, pay_method=mid, tx_type="CREDIT",
                             amount=amount, description=desc, transaction_kind="TRANSFER",
-                            transfer_group_id=gid, category="transfer", pf_category="internal_transfer")
+                            transfer_group_id=gid, category="transfer", neednwant=NW_NOT_APPLICABLE,
+                            pf_category="internal_transfer")
 
         # Persistent status
         self._set_status(self.tf_status, f"✓ {fmt_money(amount)} transferred", C['green'])

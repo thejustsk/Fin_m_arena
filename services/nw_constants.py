@@ -14,12 +14,15 @@ invisible. Import from here instead of hard-coding the integers.
 NW_NONE = 0
 NW_NEED = 1
 NW_WANT = 2
+NW_NOT_APPLICABLE = 3
 
-# Order matches the entry screen's button row.
+# Need/Want is a behavioural expense classification. Income, transfers and
+# wealth/ledger movements are deliberately distinct from an untagged expense.
 NW_LABELS = {
     NW_NONE: "Not Set",
     NW_NEED: "Need",
     NW_WANT: "Want",
+    NW_NOT_APPLICABLE: "Not Applicable",
 }
 
 # Label -> value, for filter chips and combos.
@@ -27,6 +30,7 @@ NW_FROM_LABEL = {
     "Need": NW_NEED,
     "Want": NW_WANT,
     "Not Set": NW_NONE,
+    "Not Applicable": NW_NOT_APPLICABLE,
     "None": NW_NONE,      # legacy chip label
 }
 
@@ -67,6 +71,8 @@ def split_need_want(rows, amount_key="amount", nw_key="neednwant",
             continue
         amt = r.get(amount_key) or 0
         nw = r.get(nw_key)
+        if nw == NW_NOT_APPLICABLE:
+            continue
         if nw == NW_NEED:
             need += amt
         elif nw == NW_WANT:

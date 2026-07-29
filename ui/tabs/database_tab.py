@@ -85,7 +85,7 @@ FILTER_FIELDS = [
     {"key": "method", "label": "Payment Method", "type": "combo", "source": "methods"},
     {"key": "tx_type", "label": "Type", "type": "combo", "values": ["CREDIT", "DEBIT"]},
     {"key": "kind", "label": "Kind", "type": "combo", "values": ["REGULAR", "TRANSFER", "LOAN_GIVEN", "LOAN_REPAYMENT", "LOAN_TAKEN", "EMI_PAYMENT", "FD_DEPOSIT", "DEPOSIT_RECEIVED", "DEPOSIT_REPAYMENT", "MF_PURCHASE", "MF_REDEMPTION", "FD_WITHDRAWAL", "SPLIT", "SPLIT_SETTLEMENT"]},
-    {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "Not Set"]},
+    {"key": "neednwant", "label": "Need/Want", "type": "combo", "values": ["Need", "Want", "Not Set", "Not Applicable"]},
     {"key": "pf_category", "label": "Money Purpose", "type": "combo", "source": "pf_categories"},
     {"key": "person_org", "label": "Person/Org", "type": "text"},
     {"key": "description", "label": "Description", "type": "text"},

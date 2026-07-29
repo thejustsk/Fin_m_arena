@@ -23,6 +23,7 @@ from ui.sidebar import fmt_money
 from ui.tabs.database_tab import _switch_tabs
 from ui.widgets.searchable_combo import SearchableCombo
 from ui.widgets.count_up import animate_value
+from services.nw_constants import NW_NOT_APPLICABLE
 
 
 def _hex_rgba(hex_color, alpha):
@@ -1014,7 +1015,7 @@ class SplitTab(QWidget):
                 person_org=group_name,
                 description=f"Split: {self.exp_desc.text().strip() or 'Expense'}",
                 transaction_kind="SPLIT", category="finance",
-                neednwant=0, pf_category="commitment")
+                neednwant=NW_NOT_APPLICABLE, pf_category="commitment")
         self.sr.create_expense(
             gid, paid_by, amount,
             self.exp_desc.text().strip() or None,
@@ -1060,7 +1061,7 @@ class SplitTab(QWidget):
                 person_org=group_name,
                 description=f"{from_name} \u2192 {to_name}",
                 transaction_kind="SPLIT_SETTLEMENT", category="finance",
-                neednwant=0, pf_category="commitment")
+                neednwant=NW_NOT_APPLICABLE, pf_category="commitment")
         self.sr.create_settlement(
             gid, from_id, to_id, amount,
             settle_date, self.stl_method.currentText(), linked_txn_id=txn_id)

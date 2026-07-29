@@ -398,6 +398,18 @@ def run_migrations(db):
         except Exception:
             pass  # column already exists
 
+    # ── Need/Want is only meaningful for regular debit expenses. ──
+    # Preserve 0 as "Not Set" for ordinary spending, but normalize legacy
+    # credits, transfers and wealth/ledger movements to 3 = Not Applicable.
+    try:
+        c.execute(
+            "UPDATE transactions SET neednwant=3 "
+            "WHERE neednwant IN (0, 1, 2) AND "
+            "(tx_type='CREDIT' OR COALESCE(transaction_kind, 'REGULAR') != 'REGULAR')"
+        )
+    except Exception:
+        pass
+
     # ── Migrate existing wealth-linked transactions to correct transaction_kind ──
     _KIND_SQL = [
         ("UPDATE transactions SET transaction_kind='LOAN_GIVEN' "
@@ -443,6 +455,17 @@ def run_migrations(db):
             c.execute(sql)
         except Exception:
             pass
+
+    # Run once more after transaction-kind backfills above, so older wealth
+    # records whose kind was just repaired also become Not Applicable.
+    try:
+        c.execute(
+            "UPDATE transactions SET neednwant=3 "
+            "WHERE neednwant IN (0, 1, 2) AND "
+            "(tx_type='CREDIT' OR COALESCE(transaction_kind, 'REGULAR') != 'REGULAR')"
+        )
+    except Exception:
+        pass
 
     _merge_duplicate_self_contacts(c)
 
