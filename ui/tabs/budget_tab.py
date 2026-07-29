@@ -9,6 +9,8 @@ from ui.theme import C
 from ui.sidebar import fmt_money
 from services.budget_service import BudgetService
 from ui.widgets.empty_state import EmptyState
+from ui.widgets.toast import Toast
+from ui.tabs.database_tab import _tx_card, _day_header
 
 
 class BudgetTab(QWidget):
@@ -92,7 +94,10 @@ class BudgetTab(QWidget):
         if not flagged:
             ok=QLabel('✓ No budget warnings for the current month/year.'); ok.setWordWrap(True); ok.setStyleSheet(f"font-size:11px;color:{C['green']};font-weight:600;"); self.warn_lay.addWidget(ok)
         for b in flagged:
-            col=C['red'] if b['pct']>=100 else C['amber']; period_name={'MONTHLY':'Monthly','YEARLY':'Yearly','SPECIAL':'Special'}.get(b.get('period_type'),'Monthly'); detail=(f"{b.get('start_date')} → {b.get('end_date')}" if b.get('period_type')=='SPECIAL' else period_name); text=QLabel(f"{period_name} · {self._name(b)}\n{detail} · {b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
+            col=C['red'] if b['pct']>=100 else C['amber']; ptype=b.get('period_type','MONTHLY')
+            period_name={'MONTHLY':'Monthly','YEARLY':'Yearly','SPECIAL':'Special'}.get(ptype,'Monthly')
+            detail=(f"{b.get('start_date')} → {b.get('end_date')}" if ptype=='SPECIAL' else (today.strftime('%B %Y') if ptype=='MONTHLY' else str(today.year)))
+            text=QLabel(f"{period_name} · {self._name(b)}\n{detail} · {b['pct']:.0f}% used · {fmt_money(b['remaining'])} remaining")
             text.setWordWrap(True); text.setStyleSheet(f"background:{C['red_bg'] if b['pct']>=100 else C['amber_bg']};color:{col};border:1px solid {col};border-radius:8px;padding:8px;font-size:11px;font-weight:700;"); self.warn_lay.addWidget(text)
         warning=sum(1 for b in budgets if b['pct']>=b['alert_threshold_pct'] and b['pct']<100)
         exceeded=sum(1 for b in budgets if b['pct']>=100)
@@ -122,11 +127,11 @@ class BudgetTab(QWidget):
 
     def _card(self,b):
         pct=b['pct']; color=C['green'] if pct<80 else (C['amber'] if pct<100 else C['red'])
-        card=QFrame(); card.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-left:4px solid {color};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
+        card=QFrame(); card.setCursor(QCursor(Qt.PointingHandCursor)); card.setStyleSheet(f"QFrame{{background:{C['surface']};border:1px solid {C['border2']};border-left:4px solid {color};border-radius:10px;}}QLabel{{background:transparent;border:none;}}")
         lay=QVBoxLayout(card); lay.setContentsMargins(16,12,16,12); lay.setSpacing(7)
         top=QHBoxLayout(); name=QLabel(self._name(b)); name.setStyleSheet(f"font-size:15px;font-weight:800;color:{C['text']};"); top.addWidget(name); top.addStretch()
         edit=QPushButton("Edit"); edit.setCursor(QCursor(Qt.PointingHandCursor)); edit.clicked.connect(lambda: self._open_editor(b)); top.addWidget(edit)
-        off=QPushButton("Deactivate"); off.setCursor(QCursor(Qt.PointingHandCursor)); off.clicked.connect(lambda: (self.repo.deactivate(b['budget_id']),self.refresh())); top.addWidget(off)
+        off=QPushButton("Deactivate"); off.setCursor(QCursor(Qt.PointingHandCursor)); off.clicked.connect(lambda: self._deactivate_budget(b)); top.addWidget(off)
         delete=QPushButton("Delete"); delete.setCursor(QCursor(Qt.PointingHandCursor)); delete.clicked.connect(lambda: self._delete_budget(b)); top.addWidget(delete); lay.addLayout(top)
         value=QLabel(f"{fmt_money(b['spent'])} of {fmt_money(b['limit_amount'])}  ·  {pct:.0f}% used"); value.setStyleSheet(f"font-size:14px;font-weight:800;color:{color};"); lay.addWidget(value)
         bar=QFrame(); bar.setFixedHeight(8); bar.setStyleSheet(f"background:{C['border2']};border-radius:4px;"); bl=QHBoxLayout(bar); bl.setContentsMargins(0,0,0,0); bl.setSpacing(0); fill=QFrame(); fill.setStyleSheet(f"background:{color};border-radius:4px;"); bl.addWidget(fill,max(1,min(100,int(pct)))); bl.addStretch(max(1,100-min(100,int(pct)))); lay.addWidget(bar)
@@ -137,11 +142,37 @@ class BudgetTab(QWidget):
             pace='ahead of plan' if pct > expected + 5 else ('behind plan' if pct < expected - 5 else 'on pace')
             pace_lbl=QLabel(f"Year progress {expected:.0f}% · spending {pct:.0f}% · {pace}")
             pace_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;"); lay.addWidget(pace_lbl)
+        card.mousePressEvent=lambda event, budget=b: self._show_budget_transactions(budget)
         return card
+
+    def _show_budget_transactions(self,budget):
+        year=self.year_pick.value(); month=self.month_pick.currentData()
+        txns=sorted(self.engine.transactions_for(budget,year,month),key=lambda t:t.get('tx_date',''),reverse=True)
+        dlg=QDialog(self); dlg.setWindowTitle(f"{self._name(budget)} — Budget Transactions"); dlg.resize(800,600); dlg.setStyleSheet(f"QDialog{{background:{C['bg']};}}")
+        root=QVBoxLayout(dlg); root.addWidget(QLabel(f"{len(txns)} transaction{'s' if len(txns)!=1 else ''} counted toward this budget"))
+        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame); inner=QWidget(); lay=QVBoxLayout(inner); lay.setSpacing(6); scroll.setWidget(inner); root.addWidget(scroll,1)
+        batch_size=50; pending=list(txns)
+        def append_batch():
+            nonlocal pending
+            batch,pending=pending[:batch_size],pending[batch_size:]
+            for tx in batch: lay.addWidget(_tx_card(tx))
+            if not pending: lay.addStretch()
+        append_batch()
+        def on_scroll(value):
+            sb=scroll.verticalScrollBar()
+            if pending and value>=sb.maximum()-200: append_batch()
+        scroll.verticalScrollBar().valueChanged.connect(on_scroll)
+        close=QPushButton('Close'); close.clicked.connect(dlg.accept); root.addWidget(close)
+        dlg.exec_()
+
+    def _deactivate_budget(self,budget):
+        self.repo.deactivate(budget['budget_id']); self.refresh()
+        Toast.show_message(self, f"{self._name(budget)} budget deactivated", kind='success')
 
     def _delete_budget(self,budget):
         if QMessageBox.question(self,'Delete Budget',f"Permanently delete {self._name(budget)} budget?",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)==QMessageBox.Yes:
             self.repo.delete(budget['budget_id']); self.refresh()
+            Toast.show_message(self, f"{self._name(budget)} budget deleted", kind='success')
 
     def _show_inactive(self):
         rows=self.repo.list_inactive(self.period_type)
@@ -150,10 +181,16 @@ class BudgetTab(QWidget):
         if not rows: lay.addWidget(QLabel('No inactive budgets for this period.'))
         for b in rows:
             row=QHBoxLayout(); name=QLabel(f"{self._name(b)} · {fmt_money(b['limit_amount'])}"); row.addWidget(name,1)
-            react=QPushButton('Reactivate'); react.clicked.connect(lambda _,bid=b['budget_id']: (self.repo.reactivate(bid),dlg.accept(),self.refresh())); row.addWidget(react)
+            react=QPushButton('Reactivate'); react.clicked.connect(lambda _,x=b: self._reactivate_budget(x,dlg)); row.addWidget(react)
             delete=QPushButton('Delete'); delete.clicked.connect(lambda _,x=b: self._delete_budget(x)); row.addWidget(delete); lay.addLayout(row)
         close=QPushButton('Close'); close.clicked.connect(dlg.accept); lay.addWidget(close)
         dlg.exec_()
+
+    def _reactivate_budget(self,budget, dialog=None):
+        self.repo.reactivate(budget['budget_id'])
+        if dialog: dialog.accept()
+        self.refresh()
+        Toast.show_message(self, f"{self._name(budget)} budget reactivated", kind='success')
 
     def _open_editor(self,budget=None):
         period_label='Yearly' if self.period_type=='YEARLY' else 'Monthly'
@@ -211,3 +248,4 @@ class BudgetTab(QWidget):
         else:
             self.repo.create(scope.currentData(),target.currentData(),amount.value(),alert.value(),**kwargs)
         self.refresh()
+        Toast.show_message(self, f"{self._name(budget) if budget else target.currentText()} budget {'updated' if budget else 'created'}", kind='success')

@@ -34,3 +34,14 @@ class BudgetService:
    spent=sum(t.get('amount') or 0 for t in matched); limit=b['limit_amount'] or 0
    rows.append({**b,'spent':spent,'pct':spent/limit*100 if limit else 0,'remaining':limit-spent})
   return rows
+ def transactions_for(self,budget,y,m=None):
+  p=budget.get('period_type','MONTHLY'); mode=budget.get('schedule_type') or 'RECURRING'
+  if p=='SPECIAL': txns=self.tx_repo.list_filters(date_from=budget.get('start_date'),date_to=budget.get('end_date'),limit=50000)
+  elif p=='YEARLY': txns=self.tx_repo.list_filters(date_from=f'{y:04d}-01-01',date_to=f'{y:04d}-12-31',limit=50000)
+  else: txns=self.tx_repo.get_monthly(y,m)
+  s,v=budget['scope_type'],budget['scope_value']
+  if s=='CATEGORY': return [t for t in txns if t.get('category')==v]
+  if s=='PF_CATEGORY': return [t for t in txns if t.get('pf_category')==v]
+  if s=='NEED_WANT': return [t for t in txns if t.get('neednwant')==(NW_NEED if v=='NEED' else NW_WANT)]
+  if s=='TRANSACTION_GROUP': return [t for t in txns if t.get('transaction_kind','REGULAR')==v]
+  return [t for t in txns if t.get('tx_type')=='DEBIT' and t.get('transaction_kind','REGULAR')=='REGULAR']
