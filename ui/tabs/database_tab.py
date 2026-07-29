@@ -1133,8 +1133,13 @@ class DatabaseTab(QWidget):
             else: daily_db[d] = daily_db.get(d, 0) + t["amount"]
         all_dates = sorted(set(list(daily_cr.keys()) + list(daily_db.keys())))
 
-        # 4. Need vs Want
-        need_total, want_total, none_total = split_need_want(txns)
+        # 4. Need vs Want — include only the self contact's Split shares.
+        try:
+            from services.split_analytics import personal_share_rows
+            split_rows=personal_share_rows(self.db, f'{self.my.value():04d}-{self.mm.currentData():02d}-01', f'{self.my.value():04d}-{self.mm.currentData():02d}-31')
+        except Exception:
+            split_rows=[]
+        need_total, want_total, none_total = split_need_want(txns + split_rows)
 
         self.mv.render(
             list(cats.keys()), [round(v, 2) for v in cats.values()],

@@ -1608,7 +1608,12 @@ class _AuditSubTab(QWidget):
             if r["tx_type"] == "DEBIT":
                 cn = r.get("cat_name") or "Other"
                 cats[cn] = cats.get(cn, 0) + r["amount"]
-        need, want, nw_none = split_need_want(rows)
+        try:
+            from services.split_analytics import personal_share_rows
+            split_rows=personal_share_rows(self.db, d_from, d_to)
+        except Exception:
+            split_rows=[]
+        need, want, nw_none = split_need_want(rows + split_rows)
         self.chart_view.render(
             list(cats.keys()), [round(v, 2) for v in cats.values()],
             all_accts, acct_totals, trend_labels,

@@ -421,8 +421,15 @@ class HomeTab(QWidget):
             all_dates = sorted(trend_debit.keys())
             today_idx = -1
 
-        # Entry writes 0=Not Set, 1=Need, 2=Want — see services/nw_constants.
-        need_total, want_total, none_total = split_need_want(txns)
+        # Full Split ledger payments are N/A; add only the self contact's
+        # allocated share to behavioural spending analytics.
+        try:
+            from services.split_analytics import personal_share_rows
+            dates=[t['tx_date'] for t in txns if t.get('tx_date')]
+            split_rows=personal_share_rows(self.db, min(dates) if dates else None, max(dates) if dates else None)
+        except Exception:
+            split_rows=[]
+        need_total, want_total, none_total = split_need_want(txns + split_rows)
 
         acct_cr = {}
         acct_db = {}
