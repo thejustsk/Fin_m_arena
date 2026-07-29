@@ -148,7 +148,10 @@ class BudgetTab(QWidget):
             pace_lbl.setStyleSheet(f"font-size:11px;color:{C['text3']};font-weight:600;"); lay.addWidget(pace_lbl)
         # Inline, expandable transaction drill-down. Initial batch is small;
         # more dated groups/cards render only while scrolling inside the card.
-        details=QScrollArea(); details.setWidgetResizable(True); details.setFrameShape(QFrame.NoFrame); details.setMaximumHeight(420); details.hide()
+        details=QScrollArea(); details.setWidgetResizable(True); details.setFrameShape(QFrame.NoFrame)
+        # Use the available Budget-list column height when expanded so several
+        # dated transaction cards are visible, not just a single row.
+        details.setMinimumHeight(480); details.setMaximumHeight(680); details.hide()
         inner=QWidget(); detail_lay=QVBoxLayout(inner); detail_lay.setSpacing(6); details.setWidget(inner)
         card._budget_expanded=False
         def toggle_details(event=None, budget=b, target=details, dl=detail_lay, host=card):

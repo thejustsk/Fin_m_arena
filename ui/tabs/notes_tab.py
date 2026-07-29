@@ -21,6 +21,7 @@ from services.nw_constants import NW_FROM_LABEL
 from ui.widgets.empty_state import EmptyState
 from ui.widgets.toast import Toast
 from ui.widgets.count_up import animate_value
+from ui.widgets.count_up import animate_value
 
 
 # ═══════════════════════════════════════════════
@@ -379,7 +380,7 @@ class NotesTab(QWidget):
         filtered = f" · Showing {shown_count}" if self._active_note_tags else ""
         animate_value(self.notes_count_lbl, len(all_notes),
                       lambda value: f"{int(round(value))} {suffix}{filtered}",
-                      old_value=0, duration_ms=3000)
+                      old_value=0)
         tags = sorted({tag.strip() for note in all_notes for tag in (note.get('tags') or '').split(',') if tag.strip()}, key=str.lower)
         # All Notes is intentionally styled as a normal filter label, not a
         # primary action. It simply clears the selected tag set.
