@@ -233,7 +233,9 @@ class TransactionEditDialog(QDialog):
         self._restricted_classification = (kind != "REGULAR" or
                                            tx.get("neednwant") == NW_NOT_APPLICABLE)
         if self._restricted_classification:
-            for w in [self.f_category, self.f_pf, self.f_neednwant]:
+            # Money Purpose remains editable for every transaction. Category
+            # and Need/Want stay locked for restricted ledger representations.
+            for w in [self.f_category, self.f_neednwant]:
                 w.setEnabled(False)
         elif tx.get("tx_type") != "DEBIT":
             self.f_neednwant.setEnabled(False)
@@ -1473,10 +1475,11 @@ class _AuditSubTab(QWidget):
                 continue
             kind = tx.get("transaction_kind") or "REGULAR"
             tx_updates = dict(updates)
-            # Category/Purpose are owned by the source flow for transfers,
-            # wealth and Split ledger rows. Need/Want applies only to regular debit spending.
+            # Money Purpose is intentionally available for every transaction.
+            # Category/Need-Want remain protected for ledger representations.
             if kind != "REGULAR" or tx.get("neednwant") == NW_NOT_APPLICABLE:
-                tx_updates.clear()
+                tx_updates.pop("category", None)
+                tx_updates.pop("neednwant", None)
             elif tx.get("tx_type") != "DEBIT":
                 # Income can retain its category/purpose but never Need/Want.
                 tx_updates.pop("neednwant", None)
