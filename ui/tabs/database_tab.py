@@ -584,20 +584,68 @@ class DatabaseTab(QWidget):
             months[mk][dk].append(tx)
         return months
 
-    def _build_card_list(self, container, txns):
+    def _card_items(self, txns):
+        """Return date headers and transaction cards as lazy-renderable items."""
         bal_map = self._running_balances(txns)
-        grouped = self._group_by_month_day(txns)
-        for mk, days in grouped.items():
+        items = []
+        for mk, days in self._group_by_month_day(txns).items():
             try:
                 y, m = map(int, mk.split("-"))
-                container.addWidget(_month_header(date(y, m, 1).strftime("%B %Y")))
-            except: container.addWidget(_month_header(mk))
+                items.append(("month", date(y, m, 1).strftime("%B %Y")))
+            except Exception:
+                items.append(("month", mk))
             for dk, day_txns in days.items():
-                try: container.addWidget(_day_header(date.fromisoformat(dk).strftime("%A, %d %b")))
-                except: container.addWidget(_day_header(dk))
+                try:
+                    items.append(("day", date.fromisoformat(dk).strftime("%A, %d %b")))
+                except Exception:
+                    items.append(("day", dk))
                 for tx in day_txns:
-                    container.addWidget(_tx_card(tx, bal_map.get(tx["id"])))
+                    items.append(("tx", tx, bal_map.get(tx["id"])))
+        return items
+
+    def _build_card_list(self, container, txns):
+        """Eager renderer retained for small, one-off card lists."""
+        for item in self._card_items(txns):
+            if item[0] == "month":
+                container.addWidget(_month_header(item[1]))
+            elif item[0] == "day":
+                container.addWidget(_day_header(item[1]))
+            else:
+                container.addWidget(_tx_card(item[1], item[2]))
         container.addStretch()
+
+    def _start_lazy_cards(self, key, container, txns):
+        """Start a grouped, preference-sized transaction-card list."""
+        setattr(self, f"_{key}_pending", self._card_items(txns))
+        setattr(self, f"_{key}_layout", container)
+        self._append_lazy_cards(key)
+
+    def _append_lazy_cards(self, key):
+        pending = getattr(self, f"_{key}_pending", [])
+        layout = getattr(self, f"_{key}_layout", None)
+        if layout is None or not pending:
+            return
+        batch_size = _get_pref(self.db, "complete_page_size", COMPLETE_PAGE_SIZE)
+        batch, pending = pending[:batch_size], pending[batch_size:]
+        setattr(self, f"_{key}_pending", pending)
+        for item in batch:
+            if item[0] == "month":
+                layout.addWidget(_month_header(item[1]))
+            elif item[0] == "day":
+                layout.addWidget(_day_header(item[1]))
+            else:
+                layout.addWidget(_tx_card(item[1], item[2]))
+        if not pending:
+            layout.addStretch()
+
+    def _lazy_scroll(self, key, scroll):
+        pending = getattr(self, f"_{key}_pending", [])
+        if not pending:
+            return
+        sb = scroll.verticalScrollBar()
+        trigger = _get_pref(self.db, "scroll_trigger_px", SCROLL_TRIGGER_PX)
+        if sb.maximum() and sb.value() >= sb.maximum() - trigger:
+            self._append_lazy_cards(key)
 
     # ═══════════════════════════════════
     # COMPLETE VIEW
@@ -890,6 +938,9 @@ class DatabaseTab(QWidget):
         self.mt_lay = QVBoxLayout(inner); self.mt_lay.setSpacing(4); self.mt_lay.setContentsMargins(0,4,0,0)
         scroll.setWidget(inner)
         lay = QVBoxLayout(w); lay.setContentsMargins(0,4,0,0); lay.addWidget(scroll)
+        self._mt_scroll = scroll
+        scroll.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._lazy_scroll("mt", self._mt_scroll))
         return w
 
     def _m_summary(self):
@@ -936,11 +987,12 @@ class DatabaseTab(QWidget):
         txns = self.tx_repo.get_monthly(y, m)
 
         # Transactions
+        self._mt_pending = []
         while self.mt_lay.count():
             itm = self.mt_lay.takeAt(0)
             if itm.widget(): itm.widget().deleteLater()
         if txns:
-            self._build_card_list(self.mt_lay, txns)
+            self._start_lazy_cards("mt", self.mt_lay, txns)
         else:
             lbl = QLabel("No transactions this month.")
             lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;")
@@ -1285,6 +1337,9 @@ class DatabaseTab(QWidget):
         inner = QWidget()
         self.ft_lay = QVBoxLayout(inner); self.ft_lay.setSpacing(4); self.ft_lay.setContentsMargins(0,4,0,0)
         scroll.setWidget(inner); lay.addWidget(scroll, 1)
+        self._ft_scroll = scroll
+        scroll.verticalScrollBar().valueChanged.connect(
+            lambda _value: self._lazy_scroll("ft", self._ft_scroll))
         return w
 
     def _style_mode_btn(self):
@@ -1481,7 +1536,8 @@ class DatabaseTab(QWidget):
         return txns
 
     def _load_filtered(self):
-        # Clear results
+        # Clear results and any unrendered batch from the prior filter.
+        self._ft_pending = []
         while self.ft_lay.count():
             itm = self.ft_lay.takeAt(0)
             if itm.widget():
@@ -1521,7 +1577,7 @@ class DatabaseTab(QWidget):
         self._last_filtered = txns  # store for print
 
         if txns:
-            self._build_card_list(self.ft_lay, txns)
+            self._start_lazy_cards("ft", self.ft_lay, txns)
         else:
             lbl = QLabel("No matching transactions.")
             lbl.setStyleSheet(f"color:{C['text3']};font-size:14px;")
