@@ -803,6 +803,7 @@ class _FunctionPage(QWidget):
         super().__init__(parent)
         self.repos = repos
         self.services = services
+        self.activity = services.get("session_activity")
         self.db = repos["accounts"].db
         self._list_data = []
         self._loaded = False
@@ -1252,6 +1253,7 @@ class LoansGivePage(_FunctionPage):
         self._refresh_entry_dropdowns()
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "recorded", "money lent loan", "Money Lent", borrower_name)
         QMessageBox.information(self, "Loan Recorded", f"\u20b9{amount:,.2f} loan to {borrower_name} recorded.")
 
     def _log_repayment(self):
@@ -1286,6 +1288,7 @@ class LoansGivePage(_FunctionPage):
         self._refresh_entry_dropdowns()
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "recorded", "money lent repayment", "Money Lent")
         QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
     # ── analysis helper ──
@@ -2449,6 +2452,7 @@ class FDGivePage(_FunctionPage):
         self.fd_principal.setValue(0)
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "created", "fixed deposit", "My Fixed Deposits")
         QMessageBox.information(self, "FD Created", "Fixed deposit recorded successfully.")
 
     # ── List ──
@@ -2894,6 +2898,7 @@ class FDOthersPage(_FunctionPage):
         self._refresh_entry_dropdowns()
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "recorded", "deposit received", "Deposits Received", name)
         QMessageBox.information(self, "Deposit Recorded", f"\u20b9{amount:,.2f} deposit from {name} recorded.")
 
     def _log_repayment(self):
@@ -2933,7 +2938,8 @@ class FDOthersPage(_FunctionPage):
             QMessageBox.information(self, "Deposit Fully Returned",
                 "This deposit has been fully returned.\nStatus: REPAID \u2014 waiting for closure confirmation.")
         else:
-            QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
+            if self.activity: self.activity.log("Wealth", "recorded", "money lent repayment", "Money Lent")
+        QMessageBox.information(self, "Repayment Logged", "Repayment recorded successfully.")
 
     def _analysis(self, dep):
         total_paid = self.repos["deposits"].total_repaid(dep["deposit_id"])
@@ -3691,6 +3697,7 @@ class MFPage(_FunctionPage):
         self._refresh_entry_dropdowns()
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "recorded", "mutual fund purchase", "Mutual Funds")
         QMessageBox.information(self, "Purchase Logged", f"{units:,.4f} units purchased.")
 
     def _log_redemption(self):
@@ -3724,6 +3731,7 @@ class MFPage(_FunctionPage):
         self._refresh_entry_dropdowns()
         self._loaded = False
         self.load_list()
+        if self.activity: self.activity.log("Wealth", "recorded", "mutual fund redemption", "Mutual Funds")
         QMessageBox.information(self, "Redemption Logged", f"{units:,.4f} units redeemed for {fmt_money(amount)}.")
 
     def _edit_scheme(self, scheme):

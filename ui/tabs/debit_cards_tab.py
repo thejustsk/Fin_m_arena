@@ -459,6 +459,7 @@ class DebitCardsTab(QWidget):
         super().__init__(parent)
         self.db = db; self.dcr = repos["debit_cards"]; self.acct = repos["accounts"]
         self.tx_repo = repos["transactions"]; self.bal = services["balance"]
+        self.activity = services.get("session_activity")
         self._selected_card = None; self._pending_months = []; self._card_data = None
         self._build()
 
@@ -671,10 +672,14 @@ class DebitCardsTab(QWidget):
                 except: pass
 
     def _add_card(self):
-        dlg = DebitCardAddDialog(self.dcr, self.acct, parent=self); dlg.card_added.connect(self.refresh); dlg.exec_()
+        dlg = DebitCardAddDialog(self.dcr, self.acct, parent=self); dlg.card_added.connect(self.refresh)
+        if self.activity: dlg.card_added.connect(lambda: self.activity.log("Debit Cards", "added", "debit card", "Debit Cards"))
+        dlg.exec_()
 
     def _edit_card(self, card):
-        dlg = DebitCardAddDialog(self.dcr, self.acct, card=card, parent=self); dlg.card_updated.connect(self.refresh); dlg.exec_()
+        dlg = DebitCardAddDialog(self.dcr, self.acct, card=card, parent=self); dlg.card_updated.connect(self.refresh)
+        if self.activity: dlg.card_updated.connect(lambda: self.activity.log("Debit Cards", "updated", "debit card", "Debit Cards", card.get("card_name", "")))
+        dlg.exec_()
 
     def refresh(self):
         self._selected_card = None

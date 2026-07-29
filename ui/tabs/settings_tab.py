@@ -81,6 +81,7 @@ class SettingsTab(QWidget):
         self.cards = repos.get("cards")
         self.lu = repos["lookups"]
         self.sec = services["security"]
+        self.activity = services.get("session_activity")
         self._build()
 
     def _build(self):
@@ -1556,6 +1557,7 @@ class SettingsTab(QWidget):
         self.acct.update(acct_id, is_active=new_active)
         self.db.execute("UPDATE cards SET is_active=? WHERE account_id=?", (new_active, acct_id))
         self.db.commit()
+        if self.activity: self.activity.log("Accounts", "deactivated" if not new_active else "activated", "account", "Settings → Accounts")
         self.refresh()
 
     def _toggle_2fa(self):

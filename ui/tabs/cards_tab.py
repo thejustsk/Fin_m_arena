@@ -708,6 +708,7 @@ class CardsTab(QWidget):
         super().__init__(parent)
         self.db = db; self.cr = repos["cards"]; self.acct = repos["accounts"]
         self.tx_repo = repos["transactions"]; self.bal = services["balance"]
+        self.activity = services.get("session_activity")
         self._selected_card = None; self._build()
 
     def _build(self):
@@ -1177,11 +1178,13 @@ class CardsTab(QWidget):
     def _add_card(self):
         dlg = AddCardDialog(self.cr, self.acct, parent=self)
         dlg.card_added.connect(self.refresh)
+        if self.activity: dlg.card_added.connect(lambda: self.activity.log("Credit Cards", "added", "credit card", "Credit Cards"))
         dlg.exec_()
 
     def _edit_card(self, card):
         dlg = AddCardDialog(self.cr, self.acct, card=card, parent=self)
         dlg.card_updated.connect(self.refresh)
+        if self.activity: dlg.card_updated.connect(lambda: self.activity.log("Credit Cards", "updated", "credit card", "Credit Cards", card.get("card_name", "")))
         dlg.exec_()
 
 
