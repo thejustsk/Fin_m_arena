@@ -16,6 +16,20 @@ class BudgetsRepo:
             "SELECT * FROM budgets WHERE is_active=1 AND COALESCE(period_type,'MONTHLY')=? "
             "ORDER BY scope_type, created_at", (period_type,)).fetchall())
 
+    def list_inactive(self, period_type="MONTHLY"):
+        return _rows(self.db.execute(
+            "SELECT * FROM budgets WHERE is_active=0 AND COALESCE(period_type,'MONTHLY')=? "
+            "ORDER BY created_at DESC", (period_type,)).fetchall())
+
+    def exists(self, scope_type, scope_value, period_type, exclude_id=None):
+        sql = ("SELECT 1 FROM budgets WHERE is_active=1 AND scope_type=? "
+               "AND scope_value=? AND COALESCE(period_type,'MONTHLY')=?")
+        params = [scope_type, scope_value, period_type]
+        if exclude_id:
+            sql += " AND budget_id != ?"
+            params.append(exclude_id)
+        return self.db.execute(sql, params).fetchone() is not None
+
     def create(self, scope_type, scope_value, limit_amount, alert_threshold_pct=80,
                period_type="MONTHLY"):
         budget_id = str(uuid.uuid4())
@@ -38,6 +52,10 @@ class BudgetsRepo:
 
     def deactivate(self, budget_id):
         self.db.execute("UPDATE budgets SET is_active=0 WHERE budget_id=?", (budget_id,))
+        self.db.commit()
+
+    def reactivate(self, budget_id):
+        self.db.execute("UPDATE budgets SET is_active=1 WHERE budget_id=?", (budget_id,))
         self.db.commit()
 
     def delete(self, budget_id):
