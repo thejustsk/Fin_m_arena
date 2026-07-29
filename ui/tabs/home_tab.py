@@ -35,7 +35,7 @@ canvas { width:100% !important; }
 .account-legend { font-size:11px; color:__TICK__; display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .income-dot,.expense-dot { width:9px; height:9px; border-radius:3px; display:inline-block; }
 .income-dot { background:#10B981; } .expense-dot { background:#EF4444; }
-.account-rows { height:250px; max-height:250px; overflow-y:auto; overflow-x:hidden; padding-right:6px; }
+.account-rows { height:250px; max-height:250px; overflow-y:auto; overflow-x:hidden; padding-right:6px; border-radius:0 0 10px 10px; }
 .account-rows::-webkit-scrollbar { width:8px; }
 .account-rows::-webkit-scrollbar-track { background:__SCROLL_TRACK__; border-radius:4px; }
 .account-rows::-webkit-scrollbar-thumb { background:__SCROLL_THUMB__; border-radius:4px; }
@@ -501,29 +501,13 @@ class HomeTab(QWidget):
         self.top_lay.addStretch()
 
     def _render_reminders(self):
-        while self.rem_lay.count():
-            itm = self.rem_lay.takeAt(0)
-            if itm.widget(): itm.widget().deleteLater()
-        reminders=[]; today=date.today(); now_ym=(today.year,today.month)
-        # Credit/debit card expiry reminders.
-        for repo_key,label in (("cards","Credit card"),("debit_cards","Debit card")):
-            repo=self.repos.get(repo_key)
-            if repo:
-                for card in repo.list_active():
-                    months=(card.get('expiry_year',9999)-today.year)*12+card.get('expiry_month',12)-today.month
-                    if 0<=months<=2: reminders.append((0 if months==0 else 2, f"💳 {card.get('card_name','Card')} expires {'this month' if months==0 else f'in {months} month(s)'}", C['red'] if months==0 else C['amber']))
-        # Wealth due/overdue positions.
-        for key,name in (("loans","Money lent"),("borrowed","Money borrowed"),("deposits","Deposit to return")):
-            repo=self.repos.get(key)
-            if repo and hasattr(repo,'list_active'):
-                for item in repo.list_active():
-                    due=item.get('due_date') or item.get('expected_return_date')
-                    if due:
-                        try:
-                            days=(date.fromisoformat(due)-today).days
-                            if days<=7: reminders.append((days, f"⏰ {name} due {'today' if days==0 else ('overdue' if days<0 else f'in {days}d')}", C['red'] if days<0 else C['amber']))
-                        except Exception: pass
-        # Current-month Split balance reminder.
+        reminders=[]; today=date.today(); today_s=today.isoformat()
+        def add(key, priority, text, color):
+            # Indexing guarantees one aggregate reminder per financial topic.
+            existing=reminders_by_key.get(key)
+            if existing is None or priority < existing[0]: reminders_by_key[key]=(priority,text,color)
+        reminders_by_key={}
+        # ── Split totals ──
         split=self.repos.get('split')
         if split:
             try:
@@ -531,29 +515,74 @@ class HomeTab(QWidget):
                 for group in split.list_groups():
                     bal=split.get_group_balances(group['group_id']).get(sid,0)
                     owed+=max(bal,0); owe+=max(-bal,0)
-                if owed>0.01: reminders.append((3,f"🤝 Split: {fmt_money(owed)} owed to you",C['green']))
-                if owe>0.01: reminders.append((3,f"🤝 Split: you owe {fmt_money(owe)}",C['amber']))
+                if owed>0.01: add('split-owed',3,f"🤝 Split · Owed to you: {fmt_money(owed)}",C['green'])
+                if owe>0.01: add('split-owe',3,f"🤝 Split · You owe: {fmt_money(owe)}",C['amber'])
             except Exception: pass
-        # Budget threshold / over-budget warnings across monthly, yearly and
-        # Special schedules that overlap the current month.
+        # ── Credit card expiry, cycle overdue/due, statement soon ──
+        cards=self.repos.get('cards')
+        if cards:
+            try:
+                active=cards.list_active()
+                for card in active:
+                    months=(card.get('expiry_year',9999)-today.year)*12+card.get('expiry_month',12)-today.month
+                    if 0<=months<=2:
+                        label=card.get('card_name','Credit Card')
+                        add('cc-expiry-'+str(card.get('card_id')),2,f"💳 Credit Card · {label} expires {date(card['expiry_year'],card['expiry_month'],1).strftime('%b %Y')}",C['red'] if months==0 else C['amber'])
+                rows=self.db.execute("SELECT due_date,remaining,account_id FROM card_cycles WHERE remaining>0").fetchall()
+                overdue=[r for r in rows if (r['due_date'] or '') < today_s]
+                due=[r for r in rows if (r['due_date'] or '') >= today_s]
+                if overdue: add('cc-overdue',0,f"💳 Credit Cards · Overdue: {fmt_money(sum(r['remaining'] or 0 for r in overdue))} ({len({r['account_id'] for r in overdue})} cards)",C['red'])
+                if due: add('cc-due',2,f"💳 Credit Cards · Due: {fmt_money(sum(r['remaining'] or 0 for r in due))} ({len({r['account_id'] for r in due})} cards)",C['amber'])
+                soon=0
+                for card in active:
+                    import re as _re
+                    m=_re.search(r'\d+',card.get('statement_date') or '')
+                    if m:
+                        day=min(int(m.group()),28); stmt=date(today.year,today.month,day)
+                        if 0 <= (stmt-today).days <= 7: soon+=1
+                if soon: add('cc-statement',4,f"💳 Credit Cards · Statements generating soon ({soon} cards)",C['accent'])
+            except Exception: pass
+        # ── Debit card expiry ──
+        dc=self.repos.get('debit_cards')
+        if dc:
+            try:
+                for card in dc.list_active():
+                    months=(card.get('expiry_year',9999)-today.year)*12+card.get('expiry_month',12)-today.month
+                    if 0<=months<=2: add('dc-expiry-'+str(card.get('card_id')),2,f"🏧 Debit Card · {card.get('card_name','Card')} expires {date(card['expiry_year'],card['expiry_month'],1).strftime('%b %Y')}",C['amber'])
+            except Exception: pass
+        # ── Budget warnings by period ──
         try:
             from services.budget_service import BudgetService
-            engine=BudgetService(self.repos['budgets'], self.tx)
+            engine=BudgetService(self.repos['budgets'],self.tx)
             for ptype in ('MONTHLY','YEARLY','SPECIAL'):
-                for budget in engine.check_budgets(today.year,today.month,ptype):
-                    if budget['pct'] >= budget['alert_threshold_pct']:
-                        label = 'Special' if ptype=='SPECIAL' else ptype.title()
-                        state = f"over by {fmt_money(abs(budget['remaining']))}" if budget['remaining'] < 0 else f"{budget['pct']:.0f}% used"
-                        reminders.append((0 if budget['pct']>=100 else 4, f"📊 {label} budget {state}", C['red'] if budget['pct']>=100 else C['amber']))
+                flagged=[b for b in engine.check_budgets(today.year,today.month,ptype) if b['pct']>=b['alert_threshold_pct']]
+                over=sum(max(-b['remaining'],0) for b in flagged)
+                warn=sum(max(b['spent'],0) for b in flagged if b['remaining']>=0)
+                title={'MONTHLY':'Monthly','YEARLY':'Yearly','SPECIAL':'Special'}[ptype]
+                if over>0: add('budget-over-'+ptype,0,f"📊 {title} Budget · Over budget by {fmt_money(over)}",C['red'])
+                if warn>0: add('budget-warn-'+ptype,4,f"📊 {title} Budget · Warning: {fmt_money(warn)} used",C['amber'])
         except Exception: pass
-        # Index by the reminder message so multiple feature sources cannot
-        # repeat the same reminder. Keep the highest-priority instance.
-        indexed = {}
-        for priority, text, color in reminders:
-            if text not in indexed or priority < indexed[text][0]:
-                indexed[text] = (priority, text, color)
-        self._reminders = sorted(indexed.values(), key=lambda x:x[0])
-        self._reminder_index = 0
+        # ── Wealth aggregate reminders ──
+        try:
+            lent=self.repos['loans'].list_active(); overdue=[x for x in lent if x.get('status')=='OVERDUE']
+            pending=sum(max((x.get('loan_amount') or 0)-self.repos['loans'].total_repaid(x['loan_id']),0) for x in lent)
+            od_amt=sum(max((x.get('loan_amount') or 0)-self.repos['loans'].total_repaid(x['loan_id']),0) for x in overdue)
+            if overdue: add('lent-overdue',0,f"💰 Money Lent · Overdue: {fmt_money(od_amt)} ({len(overdue)} loans)",C['red'])
+            if lent: add('lent-pending',4,f"💰 Money Lent · Pending: {fmt_money(pending)} ({len(lent)} loans)",C['amber'])
+            borrowed=self.repos['borrowed'].list_active(); bod=[x for x in borrowed if x.get('status')=='OVERDUE']
+            if bod: add('borrowed-overdue',1,f"🏦 Money Borrowed · Overdue ({len(bod)} loans)",C['red'])
+            fds=self.repos['fd'].list_all(); matured=[x for x in fds if x.get('status')=='MATURED']
+            if matured: add('fd-matured',3,f"🏦 My Fixed Deposits · Matured ({len(matured)} deposits)",C['green'])
+            deps=self.repos['deposits'].list_active(); matured_deps=[x for x in deps if (x.get('expected_return_date') or '')<=today_s]
+            if matured_deps: add('dep-matured',2,f"🧾 Deposits Received · Matured: {fmt_money(sum(x.get('principal_amount') or 0 for x in matured_deps))} ({len(matured_deps)} deposits)",C['amber'])
+            inv=cur=0
+            for scheme in self.repos['mf'].list_schemes():
+                h=self.repos['mf'].holdings(scheme['scheme_id']); txs=self.repos['mf'].list_txns(scheme['scheme_id']); nav=txs[-1]['nav'] if txs else 0
+                inv+=(h.get('invested') or 0)-(h.get('redeemed') or 0); cur+=(h.get('units') or 0)*nav
+            if inv>0: add('mf-return',4,f"📈 Mutual Funds · Overall return: {((cur-inv)/inv*100):+.1f}%",C['green'] if cur>=inv else C['red'])
+        except Exception: pass
+        self._reminders=sorted(reminders_by_key.values(),key=lambda x:x[0])
+        self._reminder_index=0
         if not hasattr(self,'_reminder_timer'):
             self._reminder_timer=QTimer(self); self._reminder_timer.timeout.connect(self._show_reminder_slice)
         self._reminder_timer.start(2000)
