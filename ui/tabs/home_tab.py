@@ -468,7 +468,11 @@ class HomeTab(QWidget):
                 acct_cr[an] = acct_cr.get(an, 0) + t["amount"]
             elif t["tx_type"] == "DEBIT":
                 acct_db[an] = acct_db.get(an, 0) + t["amount"]
-        all_accts = sorted(set(list(acct_cr.keys()) + list(acct_db.keys())))
+        # Largest financial activity first: absolute income plus expense.
+        all_accts = sorted(
+            set(list(acct_cr.keys()) + list(acct_db.keys())),
+            key=lambda name: abs(acct_cr.get(name, 0)) + abs(acct_db.get(name, 0)),
+            reverse=True)
 
         html = apply_chart_theme(HOME_CHART_TEMPLATE)
         html = html.replace("__CAT_L__", json.dumps(list(cats.keys())))

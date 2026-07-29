@@ -164,8 +164,8 @@ def _build_home_charts():
 
 def _build_home_top_tx():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
-    lay.addWidget(_make_label("Top Transactions", 14, C['text'], True))
-    lay.addWidget(_make_label("Sorted by amount (highest first) for the selected period", 11, C['text3']))
+    lay.addWidget(_make_label("Top Spends", 14, C['text'], True))
+    lay.addWidget(_make_label("Highest debit spends for the selected period; scrolls when needed", 11, C['text3']))
     lay.addWidget(_make_sep())
     for tx_data in [
         _sample_tx("DEBIT", 15000, "Landlord", "Rent", "rent", "Rent", "#A855F7", "NETBANKING", "HDFC Bank", tx_id="ht1"),
@@ -178,8 +178,10 @@ def _build_home_top_tx():
 def _build_home_savings():
     w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(6)
     card = _make_card_frame(); cl = QVBoxLayout(card); cl.setContentsMargins(16, 12, 16, 12); cl.setSpacing(6)
-    cl.addWidget(_make_label("Savings Rate", 12, C['text'], True))
-    cl.addWidget(_make_label("38%", 28, C['green'], True))
+    top = QHBoxLayout()
+    top.addWidget(_make_label("38%", 28, C['green'], True))
+    top.addWidget(_make_label("Savings Rate", 12, C['text'], True)); top.addStretch()
+    cl.addLayout(top)
     bar_bg = QFrame(); bar_bg.setFixedHeight(8)
     bar_bg.setStyleSheet(f"background:{C['border2']};border-radius:4px;")
     bl = QHBoxLayout(bar_bg); bl.setContentsMargins(0,0,0,0); bl.setSpacing(0)
@@ -1205,20 +1207,21 @@ WALKTHROUGH_DB = [
                     "• Spending Trend — line chart (daily for today/week/month, monthly for year)\n"
                     "  Today's data point highlighted in red\n"
                     "• Need vs Want — horizontal stacked bar showing need vs want split\n"
-                    "• Income vs Expense by Account — horizontal grouped bar per account\n\n"
-                    "All 4 charts regenerate together when KPI period changes. "
-                    "HTML is built with data injected as JSON, written to a temp file, loaded into QWebEngineView."
+                    "• Income vs Expense by Account — sorted largest activity first; fixed labels/legend with account rows in the chart area\n\n"
+                    "The overall chart area scrolls vertically on smaller windows; all 4 charts regenerate together when KPI period changes."
                 ),
             },
             {
-                "title": "Top Transactions & Savings",
+                "title": "Top Spends, Reminders & Savings",
                 "proto_func": _build_home_top_tx,
                 "explanation": (
                     "Right column of the Home page:\n\n"
-                    "Top Transactions:\n"
-                    "• Top 7 debit transactions sorted by amount (highest first)\n"
-                    "• Uses the same _tx_card widget as the Database tab\n"
-                    "• Display-only — no click action\n\n"
+                    "Top Spends:\n"
+                    "• Highest debit spends sorted by amount for the selected period\n"
+                    "• Uses the same _tx_card widget as the Database tab and scrolls when needed\n\n"
+                    "Reminders:\n"
+                    "• Fixed three-card area above Savings Rate; indexed reminders rotate every 3 seconds\n"
+                    "• Includes cards, wealth, Split and budget reminders\n\n"
                     "Savings Rate:\n"
                     "• Calculation: (income - expense) / income × 100\n"
                     "• Excludes transfers from both income and expense\n"
