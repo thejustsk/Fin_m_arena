@@ -1167,6 +1167,24 @@ def _hex_rgba(hex_color, alpha):
 # WALKTHROUGH CONTENT DATABASE
 # ═══════════════════════════════════════════════
 
+def _build_budget_overview():
+    w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(8)
+    title = _make_label("📊  Monthly Budgets", 16, C['text'], True); lay.addWidget(title)
+    row = QHBoxLayout()
+    for text, value, color in [("Active", "3", C['accent']), ("Warning", "1", C['amber']), ("Over Budget", "₹600", C['red'])]:
+        card = _make_card_frame(); cl = QVBoxLayout(card); cl.setContentsMargins(12,8,12,8)
+        cl.addWidget(_make_label(value, 16, color, True)); cl.addWidget(_make_label(text, 10, C['text3'], True)); row.addWidget(card)
+    lay.addLayout(row)
+    budget = _make_card_frame(); bl = QVBoxLayout(budget); bl.setContentsMargins(14,10,14,10)
+    bl.addWidget(_make_label("Food & Dining", 13, C['text'], True))
+    bl.addWidget(_make_label("₹6,200 of ₹8,000 · 78% used", 11, C['amber'], True))
+    bar=QFrame(); bar.setFixedHeight(7); bar.setStyleSheet(f"background:{C['border2']};border-radius:4px;")
+    b=QHBoxLayout(bar); b.setContentsMargins(0,0,0,0); fill=QFrame(); fill.setStyleSheet(f"background:{C['amber']};border-radius:4px;"); b.addWidget(fill,78); b.addStretch(22); bl.addWidget(bar)
+    lay.addWidget(budget)
+    lay.addWidget(_make_label("Monthly, Yearly and Special budgets. Click a budget card to expand its related transactions.", 10, C['text3']))
+    return w
+
+
 WALKTHROUGH_DB = [
     {
         "title": "Home",
@@ -1711,6 +1729,26 @@ WALKTHROUGH_DB = [
         ],
     },
     {
+        "title": "Budgets",
+        "icon": "📊",
+        "tab_key": "budgets",
+        "sub_tabs": [
+            {
+                "title": "Monthly, Yearly & Special",
+                "proto_func": _build_budget_overview,
+                "explanation": (
+                    "Plan personal spending with recurring and one-time limits.\n\n"
+                    "• Monthly: recurring every month or a selected-month override\n"
+                    "• Yearly: recurring every calendar year or a selected-year override\n"
+                    "• Special: one-time Start Date to End Date budget; it is never recurring\n"
+                    "• Scopes: Category, Money Purpose, Need Spending, Want Spending, Total Personal Spending and Transaction Group\n"
+                    "• Selected-period budgets override the matching recurring budget without changing future periods\n"
+                    "• Budget cards expand to related transactions; warnings show Monthly, Yearly and current-month Special alerts"
+                ),
+            },
+        ],
+    },
+    {
         "title": "Notes",
         "icon": "📋",
         "tab_key": "notes",
@@ -1850,10 +1888,11 @@ WALKTHROUGH_DB = [
                 "proto_func": _build_settings_prefs,
                 "explanation": (
                     "App preferences:\n\n"
-                    "• Theme: Light (locked)\n"
+                    "• Theme: Light or Dark (also Ctrl+Shift+L)\n"
                     "• Currency: Rs. Indian (locked)\n"
                     "• Pagination: Page Size + Scroll Trigger for Database, Wealth, Notes\n"
                     "• Alerts: High-Value Transaction Alert threshold (default Rs.499)\n"
+                    "• Ctrl+K opens the Command Palette; Ctrl+Shift+L toggles Light/Dark theme\n"
                     "• Save writes all values to preferences table"
                 ),
             },
